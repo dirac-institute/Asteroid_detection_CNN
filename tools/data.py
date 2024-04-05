@@ -60,7 +60,7 @@ def dataset_to_numpy(dataset):
     return array
 
 
-def get_asteroid_num(img):
+def get_asteroid_num(img, pixel_gap=2):
     img=np.copy(img)
     height = img.shape[0]
     width = img.shape[1]
@@ -175,7 +175,8 @@ def one_iteration(i, exp_ref, cat_ref, butler, output_coll, shape):
         counter += 1
     return serialized_list
 
-def convert_butler_tfrecords(repo, output_coll, shape, filename_train, filename_test="", train_split=0.25,verbose=True):
+def convert_butler_tfrecords(repo, output_coll, shape, filename_train, filename_test="", train_split=0.25, verbose=True,
+                             seed=42):
     from lsst.daf.butler import Butler
     butler = Butler(repo)
     catalog_ref = list(butler.registry.queryDatasets("injected_postISRCCD_catalog",
@@ -188,6 +189,7 @@ def convert_butler_tfrecords(repo, output_coll, shape, filename_train, filename_
         raise ValueError("train_split must be between 0 and 1")
     elif train_split != 0:
         index = np.arange(0, len(ref))
+        np.random.seed(seed)
         np.random.shuffle(index)
         index = index[:int(len(ref) * train_split)]
         if filename_test == "":
@@ -223,6 +225,7 @@ def convert_butler_tfrecords(repo, output_coll, shape, filename_train, filename_
                     if verbose:
                         print("\r", counter + c+1, "/", len(ref), end="")
                 counter += difference
+    return index
 
 def convert_butler_numpy(repo, output_coll, shape=(512, 512), parallelize=True):
     from lsst.daf.butler import Butler

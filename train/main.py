@@ -65,13 +65,13 @@ def parse_arguments(args):
                         default=0.95,
                         help='How much to weight the positive class in the loss function.')
     parser.add_argument('--start_lr', type=float,
-                        default=0.0001,
+                        default=0.001,
                         help='Initial learning rate.')
     parser.add_argument('--decay_lr_rate', type=float,
                         default=0.95,
                         help='Rate at which to decay the learning rate upon reaching the plateau.')
     parser.add_argument('--decay_lr_patience', type=float,
-                        default=2 * 362,
+                        default=2,
                         help='Number of iteration to wait upon reaching the plataeau.')
     return parser.parse_args(args)
 
