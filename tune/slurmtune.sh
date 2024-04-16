@@ -16,7 +16,7 @@ elif [[ $(hostname) == *"klone"* ]]; then
 	chief_node_name="gpu-a40"
 	chief_account="escience"
 	home_dir="/mmfs1/home/kmrakovc"
-	tuner_directory"/mmfs1/gscratch/dirac/kmrakovc/Tuner"
+	tuner_directory="/mmfs1/gscratch/dirac/kmrakovc/Tuner"
 	num_workers=4
 	echo "HPC Klone detected"
 fi
@@ -43,7 +43,7 @@ export KERASTUNER_ORACLE_PORT="81460"
 python3 main.py \
 --train_dataset_path "../DATA/train1.tfrecord" \
 --test_dataset_path "../DATA/test1.tfrecord" \
---tuner_destination "../../Tuner/" \
+--tuner_destination $tuner_directory \
 --arhitecture_destination "../DATA/arhitecture_tuned.json" \
 --epochs 64 \
 --batch_size 128 \
@@ -85,7 +85,7 @@ export KERASTUNER_ORACLE_PORT="81460"
 python3 main.py \
 --train_dataset_path "../DATA/train1.tfrecord" \
 --test_dataset_path "../DATA/test1.tfrecord" \
---tuner_destination "../../Tuner/" \
+--tuner_destination $tuner_directory \
 --arhitecture_destination "../DATA/arhitecture_tuned.json" \
 --epochs 64 \
 --batch_size 128 \
