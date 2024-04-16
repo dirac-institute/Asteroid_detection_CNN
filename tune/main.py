@@ -1,7 +1,6 @@
 import os
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-os.environ["CUDA_VISIBLE_DEVICES"]="1"
 
 import logging
 
@@ -32,7 +31,7 @@ def main (args):
     reducelronplateau_kb = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=args.decay_lr_rate,
                                                                 patience=args.decay_lr_patience, verbose=1)
 
-    tuner = kt.Hyperband(hypermodel=tools.hypertuneModels.StockHyperModel(tfrecord_shape,[FE, CE]),
+    tuner = kt.Hyperband(hypermodel=tools.hypertuneModels.StockHyperModel(tfrecord_shape,[FE]),
                          objective=kt.Objective('val_f1_score', "max"),
                          max_epochs=args.epochs,
                          factor=int(args.factor),
@@ -72,10 +71,10 @@ def parse_arguments(args):
                         default="../../Tuner/",
                         help='Path where to save the tuner.')
     parser.add_argument('--arhitecture_destination', type=str,
-                        default='../DATA/arjitecture_tuned.json',
+                        default='../DATA/arhitecture_tuned.json',
                         help='Path where to save the tuner.')
     parser.add_argument('-o', '--overwrite', action=argparse.BooleanOptionalAction,
-                        default=True,
+                        default=False,
                         help='Overwrite previous data.')
     parser.add_argument('--epochs', type=int,
                         default=32,
