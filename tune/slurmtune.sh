@@ -28,7 +28,7 @@ cat << EOF > tunerchief.sh
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=5G
 #SBATCH --ntasks=1
-#SBATCH --time=120:00:00
+#SBATCH --time=48:00:00
 
 srun hostname
 
@@ -69,7 +69,7 @@ cat << EOF > tuner$i.sh
 #SBATCH --gpus==2
 #SBATCH --mem=10G
 #SBATCH --ntasks=1
-#SBATCH --time=120:00:00
+#SBATCH --time=48:00:00
 
 srun hostname
 
