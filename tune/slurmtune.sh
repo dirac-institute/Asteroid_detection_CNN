@@ -6,6 +6,7 @@ if [[ $(hostname) == *"bura"* ]]; then
 	chief_node_name="computes_thin"
 	worker_account=$USER
 	chief_account=$USER
+	home_dir="/home/kmrakovcic"
 	num_workers=4
 	echo "HPC Bura detected"
 elif [[ $(hostname) == *"klone"* ]]; then
@@ -13,6 +14,7 @@ elif [[ $(hostname) == *"klone"* ]]; then
 	worker_account="escience"
 	chief_node_name="gpu-a40"
 	chief_account="escience"
+	home_dir="/mmfs1/home/kmrakovc"
 	num_workers=4
 	echo "HPC Klone detected"
 fi
@@ -23,7 +25,7 @@ cat << EOF > tunerchief.sh
 #!/bin/bash
 #SBATCH --job-name=TunerC
 #SBATCH --account=$chief_account
-#SBATCH --output=~/Results/Asteroids/tunerchief.txt
+#SBATCH --output=$home_dir/Results/Asteroids/tunerchief.txt
 #SBATCH --partition=$chief_node_name
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=5G
@@ -64,7 +66,7 @@ cat << EOF > tuner$i.sh
 #!/bin/bash
 #SBATCH --job-name=Tuner$i
 #SBATCH --account=$worker_account
-#SBATCH --output=~/Results/Asteroids/tuner$i.txt
+#SBATCH --output=$home_dir/Results/Asteroids/tuner$i.txt
 #SBATCH --partition=$worker_node_name
 #SBATCH --gpus=2
 #SBATCH --mem=10G

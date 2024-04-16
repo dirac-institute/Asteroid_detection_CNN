@@ -72,9 +72,8 @@ class StockHyperModel(kt.HyperModel):
     def build(self, hp):
         arhitecture = create_architecture_dictionary(hp, self.hyperarh)
         model = m.unet_model(self.input_shape, arhitecture)
-        if not model._is_compiled:
-            model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), loss=self.loss,
-                          metrics=["Precision", "Recall", m.F1_Score()])
+        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), loss=self.loss,
+                      metrics=["Precision", "Recall", m.F1_Score()])
         return model
 
 
