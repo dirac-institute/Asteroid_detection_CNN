@@ -7,6 +7,7 @@ if [[ $(hostname) == *"bura"* ]]; then
 	worker_account=$USER
 	chief_account=$USER
 	home_dir="/home/kmrakovcic"
+	tuner_directory="/home/kmrakovcic/Tuner"
 	num_workers=4
 	echo "HPC Bura detected"
 elif [[ $(hostname) == *"klone"* ]]; then
@@ -15,6 +16,7 @@ elif [[ $(hostname) == *"klone"* ]]; then
 	chief_node_name="gpu-a40"
 	chief_account="escience"
 	home_dir="/mmfs1/home/kmrakovc"
+	tuner_directory"/mmfs1/gscratch/dirac/kmrakovc/Tuner"
 	num_workers=4
 	echo "HPC Klone detected"
 fi
@@ -75,6 +77,7 @@ cat << EOF > tuner$i.sh
 
 srun hostname
 
+nvidia-smi
 export KERASTUNER_TUNER_ID="tuner$i"
 export KERASTUNER_ORACLE_IP=$chief_node_adress
 export KERASTUNER_ORACLE_PORT="81460"
