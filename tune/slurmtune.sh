@@ -29,7 +29,7 @@ cat << EOF > tunerchief.sh
 #SBATCH --account=$chief_account
 #SBATCH --output=$home_dir/Results/Asteroids/tunerchief.txt
 #SBATCH --partition=$chief_node_name
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=10
 #SBATCH --mem=5G
 #SBATCH --ntasks=1
 #SBATCH --time=48:00:00
