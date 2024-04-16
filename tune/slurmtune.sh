@@ -66,7 +66,7 @@ cat << EOF > tuner$i.sh
 #SBATCH --account=$worker_account
 #SBATCH --output=~/Results/Asteroids/tuner$i.txt
 #SBATCH --partition=$worker_node_name
-#SBATCH --gpus==2
+#SBATCH --gpus=2
 #SBATCH --mem=10G
 #SBATCH --ntasks=1
 #SBATCH --time=48:00:00
