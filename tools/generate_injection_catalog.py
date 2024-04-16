@@ -41,6 +41,12 @@ def generate_catalog (repo, input_coll, n_inject, trail_length, mag, beta, verbo
         min_dec = start.getDec()
         max_ra = end.getRa()
         max_dec = end.getDec()
+        diff_ra = max_ra - min_ra
+        diff_dec = max_dec - min_dec
+        min_ra = min_ra + 0.02*diff_ra
+        max_ra = max_ra - 0.02*diff_ra
+        min_dec = min_dec + 0.02*diff_dec
+        max_dec = max_dec - 0.02*diff_dec
         if not ([min_ra, max_ra] in ra) and not ([min_dec, max_dec] in dec):
             ra.append([min_ra, max_ra])
             dec.append([min_dec, max_dec])

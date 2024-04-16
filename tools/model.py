@@ -7,6 +7,7 @@ def parse_function(img_shape=(128, 128, 1), test=False):
                         'y': tf.io.FixedLenFeature(shape=img_shape, dtype=tf.int64)}
         parsed_features = tf.io.parse_single_example(example_proto, keys_to_features)
         parsed_features['y'] = tf.cast(parsed_features['y'], tf.float32)
+        parsed_features['x'] = tf.clip_by_value(parsed_features['x'], -100, 100)
         if test:
             return parsed_features['x']
         else:
@@ -48,6 +49,40 @@ class F1_Score(tf.keras.metrics.Metric):
         self.f1.assign(0)
         self.count.assign(0)
 
+def get_architecture_from_model(model):
+    """
+    Extracts the architecture of a model and returns it as a dictionary.
+    :param model: tensorflow model
+    :return: dictionary with the architecture
+    """
+    architecture = {
+        "downFilters":[],
+        "downActivation": [],
+        "downDropout": [],
+        "downMaxPool": [],
+        "upFilters": [],
+        "upActivation": [],
+        "upDropout": []}
+    for layer in model.layers:
+        if ("block" in layer.name.lower()) and ("conv1" in layer.name.lower()):
+            if layer.name.lower()[0]=="e":
+                architecture["downFilters"].append(layer.filters)
+                architecture["downActivation"].append(layer.activation.__name__)
+            elif layer.name.lower()[0]=="d":
+                architecture["upFilters"].append(layer.filters)
+                architecture["upActivation"].append(layer.activation.__name__)
+        elif ("block" in layer.name.lower()) and ("drop" in layer.name.lower()):
+            if layer.name.lower()[0]=="e":
+                architecture["downDropout"].append(layer.rate)
+            elif layer.name.lower()[0]=="d":
+                architecture["upDropout"].append(layer.rate)
+        elif ("eblock" in layer.name.lower()) and ("pool" in layer.name.lower()):
+            current_layer = int(layer.name.lower()[6])
+            if len(architecture["downMaxPool"])<current_layer:
+                for i in range(current_layer-len(architecture["downMaxPool"])):
+                    architecture["downMaxPool"].append(False)
+            architecture["downMaxPool"].append(True)
+    return architecture
 def encoder_mini_block(inputs, n_filters=32, activation="relu", dropout_prob=0.3, max_pooling=True, name=""):
     """
     Encoder mini block for U-Net architecture. It consists of two convolutional layers with the same activation function
@@ -63,20 +98,22 @@ def encoder_mini_block(inputs, n_filters=32, activation="relu", dropout_prob=0.3
     :param name: Name of the block (Optional)
     :return: The output tensor of the block and the skip connection tensor
     """
+    inputs = tf.keras.layers.BatchNormalization(name="eblock" + name + "norm") (inputs)
     conv = tf.keras.layers.Conv2D(n_filters,
                                   3,  # filter size
                                   activation=activation,
                                   padding='same',
                                   kernel_initializer='HeNormal',
                                   name="eblock" + name + "conv1")(inputs)
+    
+    """
     conv = tf.keras.layers.Conv2D(n_filters,
                                   3,  # filter size
                                   activation=activation,
                                   padding='same',
                                   kernel_initializer='HeNormal',
                                   name="eblock" + name + "conv2")(conv)
-
-    conv = tf.keras.layers.BatchNormalization(name="eblock" + name + "norm")(conv, training=False)
+    """
     if dropout_prob > 0:
         conv = tf.keras.layers.Dropout(dropout_prob, name="eblock" + name + "drop")(conv)
     if max_pooling:
@@ -87,7 +124,8 @@ def encoder_mini_block(inputs, n_filters=32, activation="relu", dropout_prob=0.3
     return next_layer, skip_connection
 
 
-def decoder_mini_block(prev_layer_input, skip_layer_input, n_filters=32, activation="relu", name=""):
+def decoder_mini_block(prev_layer_input, skip_layer_input, n_filters=32, activation="relu", dropout_prob=0.3,
+                       max_pooling=True, name=""):
     """
     Decoder mini block for U-Net architecture that consists of a transposed convolutional layer followed by two
     convolutional layers. The skip connection is the concatenation of the transposed convolutional layer and the
@@ -100,24 +138,32 @@ def decoder_mini_block(prev_layer_input, skip_layer_input, n_filters=32, activat
     :param name: Name of the block (Optional)
     :return: The output tensor of the block
     """
-    up = tf.keras.layers.Conv2DTranspose(n_filters,
+    if max_pooling:
+        prev_layer_input = tf.keras.layers.Conv2DTranspose(n_filters,
                                          (3, 3),
                                          strides=(2, 2),
                                          padding='same',
                                          name="dblock" + name + "convT")(prev_layer_input)
-    merge = tf.keras.layers.concatenate([up, skip_layer_input], axis=-1, name="dblock" + name + "concat")
+        #prev_layer_input = tf.keras.layers.UpSampling2D((2, 2), name="dblock" + name + "pool")(prev_layer_input)
+    merge = tf.keras.layers.concatenate([prev_layer_input, skip_layer_input], axis=-1, name="dblock" + name + "concat")
+    conv = tf.keras.layers.BatchNormalization(name="dblock" + name + "norm")(merge)
     conv = tf.keras.layers.Conv2D(n_filters,
                                   3,  # filter size
                                   activation=activation,
                                   padding='same',
                                   kernel_initializer='HeNormal',
-                                  name="dblock" + name + "conv1")(merge)
+                                  name="dblock" + name + "conv1")(conv)
+    if dropout_prob > 0:
+        conv = tf.keras.layers.Dropout(dropout_prob, name="dblock" + name + "drop")(conv)
+    """
     conv = tf.keras.layers.Conv2D(n_filters,
                                   3,  # filter size
                                   activation=activation,
                                   padding='same',
                                   kernel_initializer='HeNormal',
                                   name="dblock" + name + "conv2")(conv)
+    """
+
     return conv
 
 
@@ -135,6 +181,9 @@ def unet_model(input_size, arhitecture):
     """
 
     inputs = tf.keras.layers.Input(input_size, name="input")
+    #inputs = tf.keras.layers.Normalization(axis=None, mean=10.653569, variance=170.63159, name="input_normalisation")(inputs)
+
+    #inputs = tf.keras.layers.BatchNormalization(name="input_normalisation")(inputs, training=True)
     skip_connections = []
     layer = inputs
     # Encoder
@@ -148,14 +197,30 @@ def unet_model(input_size, arhitecture):
         skip_connections.append(skip)
 
     # Decoder
-    for i in reversed(range(len(arhitecture["upFilters"]))):
+    for i in range(len(arhitecture["upFilters"])):
         layer = decoder_mini_block(layer,
-                                   skip_connections[i],
+                                   skip_connections[len(arhitecture["upFilters"])-1-i],
                                    n_filters=arhitecture["upFilters"][i],
                                    activation=arhitecture["upActivation"][i],
-                                   name=str(i))
+                                   dropout_prob=arhitecture["upDropout"][i],
+                                   max_pooling=arhitecture["downMaxPool"][len(arhitecture["upFilters"])-1-i],
+                                   name=str(len(arhitecture["upFilters"])-1-i))
 
     outputs = tf.keras.layers.Conv2D(1, (1, 1), activation='sigmoid', name="output")(layer)
 
     model = tf.keras.Model(inputs=[inputs], outputs=[outputs], name="AsteroidNET")
     return model
+
+
+if __name__ == "__main__":
+    arhit = {"downFilters":[16, 32, 64],
+             "downActivation": ["relu", "relu", "relu"],
+             "downDropout": [0.11, 0.12, 0.13],
+             "downMaxPool": [True, False, False],
+             "upFilters": [64, 32, 16],
+             "upActivation": ["relu", "relu", "relu"],
+             "upDropout": [0.1, 0.2, 0.3]}
+    model = unet_model((128, 128, 1), arhit)
+    arhit1 = get_architecture_from_model(model)
+    model.summary()
+    print (arhit1)

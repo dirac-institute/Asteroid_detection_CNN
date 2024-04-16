@@ -22,9 +22,9 @@ def main (args):
     CE = tf.keras.losses.BinaryCrossentropy()
     with mirrored_strategy.scope():
         model = tools.model.unet_model((128, 128, 1), arhitecture)
-        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr), loss=[FE, CE],
+        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr), loss=[FE],
                       metrics=["Precision", "Recall", tools.model.F1_Score()])
-    earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=2*args.decay_lr_patience, verbose=1,
+    earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5*args.decay_lr_patience, verbose=1,
                                                         restore_best_weights=True)
     terminateonnan_kb = tf.keras.callbacks.TerminateOnNaN()
     reducelronplateau_kb = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=args.decay_lr_rate,
@@ -44,16 +44,16 @@ def parse_arguments(args):
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('--train_dataset_path', type=str,
-                        default='../DATA/train.tfrecord',
+                        default='../DATA/train1.tfrecord',
                         help='Path to training dataset.')
     parser.add_argument('--test_dataset_path', type=str,
-                        default='../DATA/test.tfrecord',
+                        default='../DATA/test1.tfrecord',
                         help='Path to test dataset.')
     parser.add_argument('--arhitecture', type=str,
-                        default="../DATA/arhitecture.json",
+                        default="../DATA/arhitecture1.json",
                         help='Path to a JSON containing definition of an arhitecture.')
     parser.add_argument('--model_destination', type=str,
-                        default="Trained_model",
+                        default="../DATA/Trained_model",
                         help='Path where to save the model once trained.')
     parser.add_argument('--epochs', type=int,
                         default=150,
@@ -71,7 +71,7 @@ def parse_arguments(args):
                         default=0.95,
                         help='Rate at which to decay the learning rate upon reaching the plateau.')
     parser.add_argument('--decay_lr_patience', type=float,
-                        default=2,
+                        default=6,
                         help='Number of iteration to wait upon reaching the plataeau.')
     return parser.parse_args(args)
 
