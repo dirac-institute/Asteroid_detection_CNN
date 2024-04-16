@@ -77,7 +77,6 @@ cat << EOF > tuner$i.sh
 
 srun hostname
 
-nvidia-smi
 export KERASTUNER_TUNER_ID="tuner$i"
 export KERASTUNER_ORACLE_IP=$chief_node_adress
 export KERASTUNER_ORACLE_PORT="81460"
