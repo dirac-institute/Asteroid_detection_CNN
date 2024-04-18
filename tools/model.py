@@ -31,8 +31,8 @@ class F1_Score(tf.keras.metrics.Metric):
         self.count = self.add_weight(name='F1ScoreCount', initializer='zeros')
 
     def update_state(self, y_true, y_pred, sample_weight=None):
-        self.precision_fn.reset_states()
-        self.recall_fn.reset_states()
+        self.precision_fn.reset_state()
+        self.recall_fn.reset_state()
         p = self.precision_fn(y_true, y_pred)
         r = self.recall_fn(y_true, y_pred)
         self.f1.assign_add(2 * ((p * r) / (p + r + 1e-6)))
@@ -44,8 +44,8 @@ class F1_Score(tf.keras.metrics.Metric):
 
     def reset_state(self):
         # we also need to reset the state of the precision and recall objects
-        self.precision_fn.reset_states()
-        self.recall_fn.reset_states()
+        self.precision_fn.reset_state()
+        self.recall_fn.reset_state()
         self.f1.assign(0)
         self.count.assign(0)
 
