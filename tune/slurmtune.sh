@@ -9,6 +9,7 @@ if [[ $(hostname) == *"bura"* ]]; then
 	home_dir="/home/kmrakovcic"
 	tuner_directory="/home/kmrakovcic/Tuner"
 	num_workers=4
+	walltime="48:00:00"
 	port = "6818"
 	echo "HPC Bura detected"
 elif [[ $(hostname) == *"klone"* ]]; then
@@ -18,6 +19,7 @@ elif [[ $(hostname) == *"klone"* ]]; then
 	chief_account="escience"
 	home_dir="/mmfs1/home/kmrakovc"
 	tuner_directory="/mmfs1/gscratch/dirac/kmrakovc/Tuner"
+	walltime="48:00:00"
 	num_workers=4
 	port="6818"
 	echo "HPC Klone detected"
@@ -34,7 +36,7 @@ cat << EOF > tunerchief.sh
 #SBATCH --cpus-per-task=10
 #SBATCH --mem=5G
 #SBATCH --ntasks=1
-#SBATCH --time=48:00:00
+#SBATCH --time=24:00:00
 
 srun hostname
 
@@ -75,7 +77,7 @@ cat << EOF > tuner$i.sh
 #SBATCH --gpus=2
 #SBATCH --mem=10G
 #SBATCH --ntasks=1
-#SBATCH --time=48:00:00
+#SBATCH --time=24:00:00
 
 srun hostname
 
