@@ -19,7 +19,7 @@ elif [[ $(hostname) == *"klone"* ]]; then
 	home_dir="/mmfs1/home/kmrakovc"
 	tuner_directory="/mmfs1/gscratch/dirac/kmrakovc/Tuner"
 	num_workers=4
-	port = "6818"
+	port="6818"
 	echo "HPC Klone detected"
 fi
 
