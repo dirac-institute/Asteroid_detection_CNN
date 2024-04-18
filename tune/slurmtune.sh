@@ -9,8 +9,8 @@ if [[ $(hostname) == *"bura"* ]]; then
 	home_dir="/home/kmrakovcic"
 	tuner_directory="/home/kmrakovcic/Tuner"
 	num_workers=2
-	walltime="48:00:00"
-	port = "6818"
+	walltime="24:00:00"
+	port=8000
 	echo "HPC Bura detected"
 elif [[ $(hostname) == *"klone"* ]]; then
 	worker_node_name="gpu-a40"
@@ -19,9 +19,9 @@ elif [[ $(hostname) == *"klone"* ]]; then
 	chief_account="escience"
 	home_dir="/mmfs1/home/kmrakovc"
 	tuner_directory="/mmfs1/gscratch/dirac/kmrakovc/Tuner"
-	walltime="48:00:00"
+	walltime="24:00:00"
 	num_workers=2
-	port="8000"
+	port=8000
 	echo "HPC Klone detected"
 fi
 
@@ -84,6 +84,9 @@ srun hostname
 export KERASTUNER_TUNER_ID="tuner$i"
 export KERASTUNER_ORACLE_IP="$chief_node_adress.hyak.local"
 export KERASTUNER_ORACLE_PORT=$port
+
+echo "KERASTUNER_ORACLE_IP: $KERASTUNER_ORACLE_IP"
+echo "KERASTUNER_ORACLE_PORT: $KERASTUNER_ORACLE_PORT"
 
 python3 main.py \
 --train_dataset_path "../DATA/train1.tfrecord" \
