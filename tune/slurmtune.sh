@@ -8,7 +8,7 @@ if [[ $(hostname) == *"bura"* ]]; then
 	chief_account=$USER
 	home_dir="/home/kmrakovcic"
 	tuner_directory="/home/kmrakovcic/Tuner"
-	num_workers=4
+	num_workers=2
 	walltime="48:00:00"
 	port = "6818"
 	echo "HPC Bura detected"
@@ -20,8 +20,8 @@ elif [[ $(hostname) == *"klone"* ]]; then
 	home_dir="/mmfs1/home/kmrakovc"
 	tuner_directory="/mmfs1/gscratch/dirac/kmrakovc/Tuner"
 	walltime="48:00:00"
-	num_workers=4
-	port="6818"
+	num_workers=2
+	port="8000"
 	echo "HPC Klone detected"
 fi
 
@@ -74,7 +74,7 @@ cat << EOF > tuner$i.sh
 #SBATCH --account=$worker_account
 #SBATCH --output=$home_dir/Results/Asteroids/tuner$i.txt
 #SBATCH --partition=$worker_node_name
-#SBATCH --gpus=2
+#SBATCH --cpus-per-task=10
 #SBATCH --mem=10G
 #SBATCH --ntasks=1
 #SBATCH --time=24:00:00
@@ -82,7 +82,7 @@ cat << EOF > tuner$i.sh
 srun hostname
 
 export KERASTUNER_TUNER_ID="tuner$i"
-export KERASTUNER_ORACLE_IP=$chief_node_adress
+export KERASTUNER_ORACLE_IP="$chief_node_adress.hyak.local"
 export KERASTUNER_ORACLE_PORT=$port
 
 python3 main.py \
