@@ -71,7 +71,7 @@ class StockHyperModel(kt.HyperModel):
 
     def build(self, hp):
         arhitecture = create_architecture_dictionary(hp, self.hyperarh)
-        for i in arhitecture.keys:
+        for i in arhitecture.keys():
             print(i, arhitecture[i], end=", ")
         print()
         model = m.unet_model(self.input_shape, arhitecture)
