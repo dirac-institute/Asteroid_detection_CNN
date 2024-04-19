@@ -43,6 +43,10 @@ srun hostname
 export KERASTUNER_TUNER_ID="chief"
 export KERASTUNER_ORACLE_IP=\$(hostname)
 export KERASTUNER_ORACLE_PORT=$port
+sleep 1
+echo "KERASTUNER_ORACLE_ID: \$KERASTUNER_TUNER_ID"
+echo "KERASTUNER_ORACLE_IP: \$KERASTUNER_ORACLE_IP"
+echo "KERASTUNER_ORACLE_PORT: \$KERASTUNER_ORACLE_PORT"
 
 python3 main.py \
 --train_dataset_path "../DATA/train1.tfrecord" \
@@ -81,12 +85,14 @@ cat << EOF > tuner$i.sh
 
 srun hostname
 
-export KERASTUNER_TUNER_ID="tuner$i"
+export KERASTUNER_TUNER_ID="tuner$[$i-1]"
 export KERASTUNER_ORACLE_IP="$chief_node_adress.hyak.local"
 export KERASTUNER_ORACLE_PORT=$port
 
-echo "KERASTUNER_ORACLE_IP: $KERASTUNER_ORACLE_IP"
-echo "KERASTUNER_ORACLE_PORT: $KERASTUNER_ORACLE_PORT"
+sleep 1
+echo "KERASTUNER_ORACLE_ID: \$KERASTUNER_TUNER_ID"
+echo "KERASTUNER_ORACLE_IP: \$KERASTUNER_ORACLE_IP"
+echo "KERASTUNER_ORACLE_PORT: \$KERASTUNER_ORACLE_PORT"
 
 python3 main.py \
 --train_dataset_path "../DATA/train1.tfrecord" \
