@@ -13,8 +13,8 @@ if [[ $(hostname) == *"bura"* ]]; then
 	port=8000
 	echo "HPC Bura detected"
 elif [[ $(hostname) == *"klone"* ]]; then
-	worker_node_name="gpu-a40"
-	worker_account="escience"
+	worker_node_name="compute-bigmem"
+	worker_account="astro"
 	chief_node_name="gpu-a40"
 	chief_account="escience"
 	home_dir="/mmfs1/home/kmrakovc"
