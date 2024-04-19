@@ -30,7 +30,7 @@ def main (args):
     terminateonnan_kb = tf.keras.callbacks.TerminateOnNaN()
     reducelronplateau_kb = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=args.decay_lr_rate,
                                                                 patience=args.decay_lr_patience, verbose=1)
-
+    print("Hyperband tuner starting")
     tuner = kt.Hyperband(hypermodel=tools.hypertuneModels.StockHyperModel(tfrecord_shape,[FE]),
                          objective=kt.Objective('val_f1_score', "max"),
                          max_epochs=args.epochs,
@@ -41,6 +41,7 @@ def main (args):
                          project_name="AsteroidsNN_Tuner",
                          distribution_strategy=strategy)
 
+    print("Hyperband tuner searching")
     tuner.search(dataset_train, epochs=args.epochs, verbose=2, validation_data=dataset_val,
                  callbacks=[earlystopping_kb, terminateonnan_kb, reducelronplateau_kb])
     best_hps = tools.hypertuneModels.get_best_hyperparameters(tuner, num_trials=10)
