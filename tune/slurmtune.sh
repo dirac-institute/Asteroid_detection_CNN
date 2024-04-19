@@ -1,5 +1,10 @@
 #!/bin/bash
 
+if [ $# -lt 1 ]; then
+        echo "Please specify number of workers"
+		exit 1
+fi
+num_workers=$1
 
 if [[ $(hostname) == *"bura"* ]]; then
 	worker_node_name="computes_thin"
@@ -8,9 +13,10 @@ if [[ $(hostname) == *"bura"* ]]; then
 	chief_account=$USER
 	home_dir="/home/kmrakovcic"
 	tuner_directory="/home/kmrakovcic/Tuner"
-	num_workers=2
 	walltime="24:00:00"
 	port=8000
+	cpus_per_task=12
+	gpus=""
 	echo "HPC Bura detected"
 elif [[ $(hostname) == *"klone"* ]]; then
 	worker_node_name="compute-bigmem"
@@ -20,33 +26,31 @@ elif [[ $(hostname) == *"klone"* ]]; then
 	home_dir="/mmfs1/home/kmrakovc"
 	tuner_directory="/mmfs1/gscratch/dirac/kmrakovc/Tuner"
 	walltime="24:00:00"
-	num_workers=2
 	port=8000
+	cpus_per_task=6
+	gpus="#SBATCH --gpus=2"
 	echo "HPC Klone detected"
 fi
 
 source ~/activate.sh
 
+if [ $num_workers -gt 1 ]; then
 cat << EOF > tunerchief.sh
 #!/bin/bash
 #SBATCH --job-name=TunerC
 #SBATCH --account=$chief_account
 #SBATCH --output=$home_dir/Results/Asteroids/tunerchief.txt
 #SBATCH --partition=$chief_node_name
-#SBATCH --cpus-per-task=10
+#SBATCH --cpus-per-task=1
 #SBATCH --mem=5G
 #SBATCH --ntasks=1
-#SBATCH --time=24:00:00
+#SBATCH --time=$walltime
 
 srun hostname
 
 export KERASTUNER_TUNER_ID="chief"
 export KERASTUNER_ORACLE_IP=\$(hostname)
 export KERASTUNER_ORACLE_PORT=$port
-sleep 1
-echo "KERASTUNER_ORACLE_ID: \$KERASTUNER_TUNER_ID"
-echo "KERASTUNER_ORACLE_IP: \$KERASTUNER_ORACLE_IP"
-echo "KERASTUNER_ORACLE_PORT: \$KERASTUNER_ORACLE_PORT"
 
 python3 main.py \
 --train_dataset_path "../DATA/train1.tfrecord" \
@@ -67,7 +71,7 @@ rm tunerchief.sh
 chief_node_adress=""
 while [ "$chief_node_adress" = "" ]
 do
-sleep 10
+sleep 2
 chief_node_adress=$(squeue -j $chief_job_num --format=%N -h)
 done
 for i in $(seq 1 $num_workers)
@@ -78,18 +82,14 @@ cat << EOF > tuner$i.sh
 #SBATCH --account=$worker_account
 #SBATCH --output=$home_dir/Results/Asteroids/tuner$i.txt
 #SBATCH --partition=$worker_node_name
-#SBATCH --cpus-per-task=10
+#SBATCH --cpus-per-task=$cpus_per_task
 #SBATCH --mem=10G
 #SBATCH --ntasks=1
-#SBATCH --time=24:00:00
+#SBATCH --time=$walltime
+$gpus
 
 srun hostname
 
-export KERASTUNER_TUNER_ID="tuner$[$i-1]"
-export KERASTUNER_ORACLE_IP="$chief_node_adress.hyak.local"
-export KERASTUNER_ORACLE_PORT=$port
-
-sleep 1
 echo "KERASTUNER_ORACLE_ID: \$KERASTUNER_TUNER_ID"
 echo "KERASTUNER_ORACLE_IP: \$KERASTUNER_ORACLE_IP"
 echo "KERASTUNER_ORACLE_PORT: \$KERASTUNER_ORACLE_PORT"
@@ -108,6 +108,38 @@ python3 main.py \
 --factor 4 \
 --hyperband_iterations 1
 EOF
-chief_job_num=$(sbatch tuner$i.sh | tr -dc '0-9')
+sbatch tuner$i.sh
 rm tuner$i.sh
 done
+elif [ $num_workers -eq 1 ]; then
+cat << EOF > tuner.sh
+#!/bin/bash
+#SBATCH --job-name=Tuner
+#SBATCH --account=$worker_account
+#SBATCH --output=$home_dir/Results/Asteroids/tuner0.txt
+#SBATCH --partition=$worker_node_name
+#SBATCH --cpus-per-task=$cpus_per_task
+#SBATCH --mem=10G
+#SBATCH --ntasks=1
+#SBATCH --time=$walltime
+$gpus
+
+srun hostname
+
+python3 main.py \
+--train_dataset_path "../DATA/train1.tfrecord" \
+--test_dataset_path "../DATA/test1.tfrecord" \
+--tuner_destination $tuner_directory \
+--arhitecture_destination "../DATA/arhitecture_tuned.json" \
+--epochs 64 \
+--batch_size 128 \
+--class_balancing_alpha 0.95 \
+--start_lr 0.001 \
+--decay_lr_rate 0.95 \
+--decay_lr_patience 6 \
+--factor 4 \
+--hyperband_iterations 1
+EOF
+sbatch tuner.sh
+rm tuner.sh
+fi

@@ -1,23 +1,28 @@
 import os
 
-#os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 import logging
 
-#logging.getLogger("tensorflow").setLevel(logging.ERROR)
+logging.getLogger("tensorflow").setLevel(logging.ERROR)
 import argparse
 import sys
 import keras_tuner as kt
 import json
 import tensorflow as tf
+import time
+
 sys.path.append("../")
 import tools
 
-def main (args):
+
+def main(args):
+    print("Program started at: ", time.ctime())
+    start_time = time.time()
     dataset_train = tf.data.TFRecordDataset([args.train_dataset_path])
     tfrecord_shape = tools.model.get_shape_of_quadratic_image_tfrecord(dataset_train)
     dataset_train = dataset_train.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
-    dataset_train = dataset_train.shuffle(5*args.batch_size).batch(args.batch_size).prefetch(2)
+    dataset_train = dataset_train.shuffle(5 * args.batch_size).batch(args.batch_size).prefetch(2)
     dataset_val = tf.data.TFRecordDataset([args.test_dataset_path])
     dataset_val = dataset_val.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
     dataset_val = dataset_val.batch(args.batch_size).prefetch(2)
@@ -25,13 +30,13 @@ def main (args):
     #strategy = tf.distribute.get_strategy()
     FE = tf.keras.losses.BinaryFocalCrossentropy(apply_class_balancing=True, alpha=args.class_balancing_alpha)
     CE = tf.keras.losses.BinaryCrossentropy()
-    earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5*args.decay_lr_patience, verbose=1,
+    earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5 * args.decay_lr_patience,
+                                                        verbose=1,
                                                         restore_best_weights=True)
     terminateonnan_kb = tf.keras.callbacks.TerminateOnNaN()
     reducelronplateau_kb = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=args.decay_lr_rate,
                                                                 patience=args.decay_lr_patience, verbose=1)
-    print("Hyperband tuner starting")
-    tuner = kt.Hyperband(hypermodel=tools.hypertuneModels.StockHyperModel(tfrecord_shape,[FE]),
+    tuner = kt.Hyperband(hypermodel=tools.hypertuneModels.StockHyperModel(tfrecord_shape, [FE]),
                          objective=kt.Objective('val_f1_score', "max"),
                          max_epochs=args.epochs,
                          factor=int(args.factor),
@@ -41,17 +46,18 @@ def main (args):
                          project_name="AsteroidsNN_Tuner",
                          distribution_strategy=strategy)
 
-    print("Hyperband tuner searching")
-    tuner.search(dataset_train, epochs=args.epochs, verbose=2, validation_data=dataset_val,
+    print("Overhead time: ", time.time() - start_time, " seconds.")
+    tuner.search(dataset_train, epochs=args.epochs, verbose=1, validation_data=dataset_val,
                  callbacks=[earlystopping_kb, terminateonnan_kb, reducelronplateau_kb])
     best_hps = tools.hypertuneModels.get_best_hyperparameters(tuner, num_trials=10)
     arhitecture = {}
     for j, hyperparameters in enumerate(best_hps):
         best_model = tuner.hypermodel.build(hyperparameters)
         arhitecture[str(j)] = tools.model.get_architecture_from_model(best_model)
-        print (arhitecture[str(j)])
+        print(arhitecture[str(j)])
     with open(args.arhitecture_destination, 'w') as f:
         json.dump(arhitecture, f)
+    print("Program ended at: ", time.ctime(), " with duration: ", time.time() - start_time, " seconds.")
 
 
 def parse_arguments(args):
@@ -102,6 +108,7 @@ def parse_arguments(args):
                         default=1,
                         help='Repetitions of each full hyperband algorithm.')
     return parser.parse_args(args)
+
 
 if __name__ == '__main__':
     main(parse_arguments(sys.argv[1:]))
