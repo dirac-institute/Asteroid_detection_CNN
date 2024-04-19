@@ -32,7 +32,7 @@ def createdefaulthyperarhitecture():
 
 def create_architecture_dictionary(hp, hyperarh):
     architecture = {
-        "downFilters":[],
+        "downFilters": [],
         "downActivation": [],
         "downDropout": [],
         "downMaxPool": [],
@@ -67,10 +67,13 @@ class StockHyperModel(kt.HyperModel):
     def __init__(self, input_shape, loss, hyperarh=None):
         self.input_shape = input_shape
         self.loss = loss
-        self.hyperarh =  createdefaulthyperarhitecture() if hyperarh is None else hyperarh
+        self.hyperarh = createdefaulthyperarhitecture() if hyperarh is None else hyperarh
 
     def build(self, hp):
         arhitecture = create_architecture_dictionary(hp, self.hyperarh)
+        for i in arhitecture.keys:
+            print(i, arhitecture[i], end=", ")
+        print()
         model = m.unet_model(self.input_shape, arhitecture)
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), loss=self.loss,
                       metrics=["Precision", "Recall", m.F1_Score()])
