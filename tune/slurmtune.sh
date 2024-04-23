@@ -82,7 +82,7 @@ cat << EOF > tuner$i.sh
 #!/bin/bash
 #SBATCH --job-name=Tuner$i
 #SBATCH --account=$worker_account
-#SBATCH --output=$home_dir/Results/Asteroids/tuner$i.txt
+#SBATCH --output=$home_dir/Results/Asteroids/tuner$[i-1].txt
 #SBATCH --partition=$worker_node_name
 #SBATCH --cpus-per-task=$cpus_per_task
 #SBATCH --mem=10G
@@ -92,6 +92,9 @@ $gpus
 
 srun hostname
 source ~/activate.sh
+export KERASTUNER_TUNER_ID="tuner$[i-1]"
+export KERASTUNER_ORACLE_IP="$chief_node_adress.hyak.local"
+export KERASTUNER_ORACLE_PORT=$port
 echo "KERASTUNER_ORACLE_ID: \$KERASTUNER_TUNER_ID"
 echo "KERASTUNER_ORACLE_IP: \$KERASTUNER_ORACLE_IP"
 echo "KERASTUNER_ORACLE_PORT: \$KERASTUNER_ORACLE_PORT"
