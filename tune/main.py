@@ -47,7 +47,7 @@ def main(args):
                          distribution_strategy=strategy)
 
     print("Overhead time: ", time.time() - start_time, " seconds.")
-    tuner.search(dataset_train, epochs=args.epochs, verbose=1, validation_data=dataset_val,
+    tuner.search(dataset_train, epochs=args.epochs, verbose=2, validation_data=dataset_val,
                  callbacks=[earlystopping_kb, terminateonnan_kb, reducelronplateau_kb])
     best_hps = tools.hypertuneModels.get_best_hyperparameters(tuner, num_trials=10)
     arhitecture = {}
