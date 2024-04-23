@@ -34,8 +34,6 @@ elif [[ $(hostname) == *"klone"* ]]; then
 	echo "HPC Klone detected"
 fi
 
-source ~/activate.sh
-
 if [ $num_workers -gt 1 ]; then
 cat << EOF > tunerchief.sh
 #!/bin/bash
@@ -49,10 +47,12 @@ cat << EOF > tunerchief.sh
 #SBATCH --time=$walltime
 
 srun hostname
+source ~/activate.sh
 
 export KERASTUNER_TUNER_ID="chief"
 export KERASTUNER_ORACLE_IP=\$(hostname)
 export KERASTUNER_ORACLE_PORT=$port
+
 $module_load
 python3 main.py \
 --train_dataset_path "../DATA/train1.tfrecord" \
@@ -91,11 +91,12 @@ cat << EOF > tuner$i.sh
 $gpus
 
 srun hostname
-python3 -c "import tensorflow as tf; print(len(tf.config.list_physical_devices('GPU')))"
+source ~/activate.sh
 echo "KERASTUNER_ORACLE_ID: \$KERASTUNER_TUNER_ID"
 echo "KERASTUNER_ORACLE_IP: \$KERASTUNER_ORACLE_IP"
 echo "KERASTUNER_ORACLE_PORT: \$KERASTUNER_ORACLE_PORT"
 $module_load
+python3 -c "import tensorflow as tf; print(len(tf.config.list_physical_devices('GPU')))"
 python3 main.py \
 --train_dataset_path "../DATA/train1.tfrecord" \
 --test_dataset_path "../DATA/test1.tfrecord" \
@@ -127,6 +128,9 @@ cat << EOF > tuner.sh
 $gpus
 
 srun hostname
+source ~/activate.sh
+$module_load
+python3 -c "import tensorflow as tf; print(len(tf.config.list_physical_devices('GPU')))"
 
 python3 main.py \
 --train_dataset_path "../DATA/train1.tfrecord" \
