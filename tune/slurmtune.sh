@@ -26,9 +26,9 @@ elif [[ $(hostname) == *"klone"* ]]; then
 	chief_account="astro"
 	home_dir="/mmfs1/home/kmrakovc"
 	tuner_directory="/mmfs1/gscratch/dirac/kmrakovc/Tuner"
-	walltime="24:00:00"
+	walltime="168:00:00"
 	port=8000
-	cpus_per_task=6
+	cpus_per_task=12
 	gpus="#SBATCH --gpus=2"
 	module_load="module load cuda/12.3.2"
 	echo "HPC Klone detected"
@@ -143,8 +143,8 @@ python3 main.py \
 --start_lr 0.001 \
 --decay_lr_rate 0.95 \
 --decay_lr_patience 6 \
---factor 4 \
---hyperband_iterations 1
+--factor 2 \
+--hyperband_iterations 4
 EOF
 sbatch tuner.sh
 rm tuner.sh
