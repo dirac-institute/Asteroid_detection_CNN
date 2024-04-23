@@ -17,6 +17,7 @@ if [[ $(hostname) == *"bura"* ]]; then
 	port=8000
 	cpus_per_task=12
 	gpus=""
+	module_load=""
 	echo "HPC Bura detected"
 elif [[ $(hostname) == *"klone"* ]]; then
 	worker_node_name="gpu-a40"
@@ -29,6 +30,7 @@ elif [[ $(hostname) == *"klone"* ]]; then
 	port=8000
 	cpus_per_task=6
 	gpus="#SBATCH --gpus=2"
+	module_load="module load cuda/12.3.2"
 	echo "HPC Klone detected"
 fi
 
@@ -51,7 +53,7 @@ srun hostname
 export KERASTUNER_TUNER_ID="chief"
 export KERASTUNER_ORACLE_IP=\$(hostname)
 export KERASTUNER_ORACLE_PORT=$port
-
+$module_load
 python3 main.py \
 --train_dataset_path "../DATA/train1.tfrecord" \
 --test_dataset_path "../DATA/test1.tfrecord" \
@@ -89,11 +91,11 @@ cat << EOF > tuner$i.sh
 $gpus
 
 srun hostname
-
+python3 -c "import tensorflow as tf; print(len(tf.config.list_physical_devices('GPU')))"
 echo "KERASTUNER_ORACLE_ID: \$KERASTUNER_TUNER_ID"
 echo "KERASTUNER_ORACLE_IP: \$KERASTUNER_ORACLE_IP"
 echo "KERASTUNER_ORACLE_PORT: \$KERASTUNER_ORACLE_PORT"
-
+$module_load
 python3 main.py \
 --train_dataset_path "../DATA/train1.tfrecord" \
 --test_dataset_path "../DATA/test1.tfrecord" \
