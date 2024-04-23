@@ -81,6 +81,7 @@ do
 cat << EOF > tuner$i.sh
 #!/bin/bash
 #SBATCH --job-name=Tuner$i
+#SBATCH --mail-type=ALL
 #SBATCH --account=$worker_account
 #SBATCH --output=$home_dir/Results/Asteroids/tuner$[i-1].txt
 #SBATCH --partition=$worker_node_name
