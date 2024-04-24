@@ -28,7 +28,7 @@ elif [[ $(hostname) == *"klone"* ]]; then
 	tuner_directory="/mmfs1/gscratch/dirac/kmrakovc/Tuner"
 	walltime="168:00:00"
 	port=8000
-	cpus_per_task=12
+	cpus_per_task=4
 	gpus="#SBATCH --gpus=2"
 	module_load="module load cuda/12.3.2"
 	echo "HPC Klone detected"
