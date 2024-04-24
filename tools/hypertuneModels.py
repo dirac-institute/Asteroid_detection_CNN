@@ -5,6 +5,7 @@ else:
 import keras_tuner as kt
 import numpy as np
 import tensorflow as tf
+import os
 
 def get_best_hyperparameters(tuner, num_trials=1):
     trials = [t
@@ -71,9 +72,10 @@ class StockHyperModel(kt.HyperModel):
 
     def build(self, hp):
         arhitecture = create_architecture_dictionary(hp, self.hyperarh)
-        for i in arhitecture.keys():
-            print(i, arhitecture[i], end=", ")
-        print()
+        if os.environ.get('KERASTUNER_TUNER_ID', "chief") != "chief":
+            for i in arhitecture.keys():
+                print(i, arhitecture[i], end=", ")
+            print()
         model = m.unet_model(self.input_shape, arhitecture)
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), loss=self.loss,
                       metrics=["Precision", "Recall", m.F1_Score()])

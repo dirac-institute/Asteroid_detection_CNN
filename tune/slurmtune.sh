@@ -148,7 +148,7 @@ python3 main.py \
 --decay_lr_rate 0.95 \
 --decay_lr_patience 6 \
 --factor 2 \
---hyperband_iterations 4
+--hyperband_iterations 64
 EOF
 sbatch tuner.sh
 rm tuner.sh

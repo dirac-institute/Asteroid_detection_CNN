@@ -36,7 +36,7 @@ def main(args):
     terminateonnan_kb = tf.keras.callbacks.TerminateOnNaN()
     reducelronplateau_kb = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=args.decay_lr_rate,
                                                                 patience=args.decay_lr_patience, verbose=1)
-    tuner = kt.Hyperband(hypermodel=tools.hypertuneModels.StockHyperModel(tfrecord_shape, [FE]),
+    tuner = kt.Hyperband(hypermodel=tools.hypertuneModels.StockHyperModel(tfrecord_shape, [FE, CE]),
                          objective=kt.Objective('val_f1_score', "max"),
                          max_epochs=args.epochs,
                          factor=int(args.factor),
@@ -49,14 +49,15 @@ def main(args):
     print("Overhead time: ", time.time() - start_time, " seconds.")
     tuner.search(dataset_train, epochs=args.epochs, verbose=2, validation_data=dataset_val,
                  callbacks=[earlystopping_kb, terminateonnan_kb, reducelronplateau_kb])
-    best_hps = tools.hypertuneModels.get_best_hyperparameters(tuner, num_trials=10)
-    arhitecture = {}
-    for j, hyperparameters in enumerate(best_hps):
-        best_model = tuner.hypermodel.build(hyperparameters)
-        arhitecture[str(j)] = tools.model.get_architecture_from_model(best_model)
-        print(arhitecture[str(j)])
-    with open(args.arhitecture_destination, 'w') as f:
-        json.dump(arhitecture, f)
+    if os.environ.get('KERASTUNER_TUNER_ID', "chief") == "chief":
+        best_hps = tools.hypertuneModels.get_best_hyperparameters(tuner, num_trials=10)
+        arhitecture = {}
+        for j, hyperparameters in enumerate(best_hps):
+            best_model = tuner.hypermodel.build(hyperparameters)
+            arhitecture[str(j)] = tools.model.get_architecture_from_model(best_model)
+            print(arhitecture[str(j)])
+        with open(args.arhitecture_destination, 'w') as f:
+            json.dump(arhitecture, f)
     print("Program ended at: ", time.ctime(), " with duration: ", time.time() - start_time, " seconds.")
 
 
