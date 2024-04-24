@@ -15,6 +15,13 @@ import time
 sys.path.append("../")
 import tools
 
+def custom_loss_sum(losses):
+    def custom_loss(y_true, y_pred):
+        loss = 0
+        for i, l in enumerate(losses):
+            loss += l(y_true, y_pred)
+        return loss
+    return custom_loss
 
 def main(args):
     print("Program started at: ", time.ctime())
@@ -36,7 +43,7 @@ def main(args):
     terminateonnan_kb = tf.keras.callbacks.TerminateOnNaN()
     reducelronplateau_kb = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=args.decay_lr_rate,
                                                                 patience=args.decay_lr_patience, verbose=1)
-    tuner = kt.Hyperband(hypermodel=tools.hypertuneModels.StockHyperModel(tfrecord_shape, [FE, CE]),
+    tuner = kt.Hyperband(hypermodel=tools.hypertuneModels.StockHyperModel(tfrecord_shape, custom_loss_sum([FE, CE])),
                          objective=kt.Objective('val_f1_score', "max"),
                          max_epochs=args.epochs,
                          factor=int(args.factor),
