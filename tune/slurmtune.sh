@@ -38,6 +38,7 @@ if [ $num_workers -gt 1 ]; then
 cat << EOF > tunerchief.sh
 #!/bin/bash
 #SBATCH --job-name=TunerC
+#SBATCH --mail-type=ALL
 #SBATCH --account=$chief_account
 #SBATCH --output=$home_dir/Results/Asteroids/tunerchief.txt
 #SBATCH --partition=$chief_node_name
@@ -66,7 +67,7 @@ python3 main.py \
 --decay_lr_rate 0.95 \
 --decay_lr_patience 6 \
 --factor 4 \
---hyperband_iterations 1
+--hyperband_iterations 64
 EOF
 chief_job_num=$(sbatch tunerchief.sh | tr -dc '0-9')
 rm tunerchief.sh
@@ -81,7 +82,6 @@ do
 cat << EOF > tuner$i.sh
 #!/bin/bash
 #SBATCH --job-name=Tuner$i
-#SBATCH --mail-type=ALL
 #SBATCH --account=$worker_account
 #SBATCH --output=$home_dir/Results/Asteroids/tuner$[i-1].txt
 #SBATCH --partition=$worker_node_name
@@ -113,7 +113,7 @@ python3 main.py \
 --decay_lr_rate 0.95 \
 --decay_lr_patience 6 \
 --factor 4 \
---hyperband_iterations 1
+--hyperband_iterations 64
 EOF
 sbatch tuner$i.sh
 rm tuner$i.sh

@@ -21,6 +21,15 @@ def get_shape_of_quadratic_image_tfrecord(raw_dataset):
         parsed_features = tf.io.parse_single_example(i, keys_to_features)
         return (int(np.sqrt(parsed_features["x"].shape[0])), int(np.sqrt(parsed_features["x"].shape[0])), 1)
 
+
+def custom_loss_sum(losses):
+    def custom_loss(y_true, y_pred):
+        loss = 0
+        for i, l in enumerate(losses):
+            loss += l(y_true, y_pred)
+        return loss
+    return custom_loss
+
 class F1_Score(tf.keras.metrics.Metric):
     def __init__(self, name='f1_score', **kwargs):
         super().__init__(name=name, **kwargs)
