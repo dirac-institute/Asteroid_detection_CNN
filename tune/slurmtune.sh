@@ -86,7 +86,7 @@ cat << EOF > tuner$i.sh
 #SBATCH --output=$home_dir/Results/Asteroids/tuner$[i-1].txt
 #SBATCH --partition=$worker_node_name
 #SBATCH --cpus-per-task=$cpus_per_task
-#SBATCH --mem=10G
+#SBATCH --mem=24G
 #SBATCH --ntasks=1
 #SBATCH --time=$walltime
 $gpus
@@ -126,7 +126,7 @@ cat << EOF > tuner.sh
 #SBATCH --output=$home_dir/Results/Asteroids/tuner0.txt
 #SBATCH --partition=$worker_node_name
 #SBATCH --cpus-per-task=$cpus_per_task
-#SBATCH --mem=10G
+#SBATCH --mem=24G
 #SBATCH --ntasks=1
 #SBATCH --time=$walltime
 $gpus
