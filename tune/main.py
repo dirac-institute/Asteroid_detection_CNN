@@ -46,6 +46,15 @@ def main(args):
                          distribution_strategy=strategy)
 
     print("Overhead time: ", time.time() - start_time, " seconds.")
+    if os.environ.get('KERASTUNER_TUNER_ID', "chief") == "chief":
+        best_hps = tools.hypertuneModels.get_best_hyperparameters(tuner, num_trials=10)
+        arhitecture = {}
+        for j, hyperparameters in enumerate(best_hps):
+            best_model = tuner.hypermodel.build(hyperparameters)
+            arhitecture[str(j)] = tools.model.get_architecture_from_model(best_model)
+            print(arhitecture[str(j)])
+        with open(args.arhitecture_destination, 'w') as f:
+            json.dump(arhitecture, f)
     tuner.search(dataset_train, epochs=args.epochs, verbose=2, validation_data=dataset_val,
                  callbacks=[earlystopping_kb, terminateonnan_kb, reducelronplateau_kb])
     if os.environ.get('KERASTUNER_TUNER_ID', "chief") == "chief":
