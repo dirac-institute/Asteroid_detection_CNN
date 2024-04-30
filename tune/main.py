@@ -47,7 +47,7 @@ def main(args):
 
     print("Overhead time: ", time.time() - start_time, " seconds.")
     if os.environ.get('KERASTUNER_TUNER_ID', "chief") == "chief":
-        best_hps = tools.hypertuneModels.get_best_hyperparameters(tuner, num_trials=10)
+        best_hps = tuner.get_best_hyperparameters(10)
         arhitecture = {}
         for j, hyperparameters in enumerate(best_hps):
             best_model = tuner.hypermodel.build(hyperparameters)
@@ -58,7 +58,8 @@ def main(args):
     tuner.search(dataset_train, epochs=args.epochs, verbose=2, validation_data=dataset_val,
                  callbacks=[earlystopping_kb, terminateonnan_kb, reducelronplateau_kb])
     if os.environ.get('KERASTUNER_TUNER_ID', "chief") == "chief":
-        best_hps = tools.hypertuneModels.get_best_hyperparameters(tuner, num_trials=10)
+        #best_hps = tools.hypertuneModels.get_best_hyperparameters(tuner, num_trials=10)
+        best_hps = tuner.get_best_hyperparameters(10)
         arhitecture = {}
         for j, hyperparameters in enumerate(best_hps):
             best_model = tuner.hypermodel.build(hyperparameters)
