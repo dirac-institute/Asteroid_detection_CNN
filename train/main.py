@@ -8,7 +8,8 @@ import json
 def main (args):
     with open(args.arhitecture) as f:
         arhitecture = json.load(f)
-
+    if "0" in arhitecture.keys():
+        arhitecture = arhitecture["0"]
     dataset_train = tf.data.TFRecordDataset([args.train_dataset_path])
     tfrecord_shape = tools.model.get_shape_of_quadratic_image_tfrecord(dataset_train)
     dataset_train = dataset_train.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
@@ -22,7 +23,7 @@ def main (args):
     CE = tf.keras.losses.BinaryCrossentropy()
     with mirrored_strategy.scope():
         model = tools.model.unet_model((128, 128, 1), arhitecture)
-        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr), loss=[FE],
+        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr), loss=[FE, CE],
                       metrics=["Precision", "Recall", tools.model.F1_Score()])
     earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5*args.decay_lr_patience, verbose=1,
                                                         restore_best_weights=True)
@@ -50,16 +51,16 @@ def parse_arguments(args):
                         default='../DATA/test1.tfrecord',
                         help='Path to test dataset.')
     parser.add_argument('--arhitecture', type=str,
-                        default="../DATA/arhitecture1.json",
+                        default="../DATA/arhitecture_tuned.json",
                         help='Path to a JSON containing definition of an arhitecture.')
     parser.add_argument('--model_destination', type=str,
                         default="../DATA/Trained_model",
                         help='Path where to save the model once trained.')
     parser.add_argument('--epochs', type=int,
-                        default=150,
+                        default=64,
                         help='Number of epochs.')
     parser.add_argument('--batch_size', type=int,
-                        default=256,
+                        default=128,
                         help='Batch size.')
     parser.add_argument('--class_balancing_alpha', type=float,
                         default=0.95,
@@ -72,7 +73,7 @@ def parse_arguments(args):
                         help='Rate at which to decay the learning rate upon reaching the plateau.')
     parser.add_argument('--decay_lr_patience', type=float,
                         default=6,
-                        help='Number of iteration to wait upon reaching the plataeau.')
+                        help='Number of iteration to wait upon reaching the plateau.')
     return parser.parse_args(args)
 
 if __name__ == '__main__':
