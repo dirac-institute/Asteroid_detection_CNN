@@ -13,12 +13,11 @@ def main (args):
         mirrored_strategy = tf.distribute.MultiWorkerMirroredStrategy(cluster_resolver=slurm_resolver,
                                                                     communication_options=communication)
         print('Number of replicas:', mirrored_strategy.num_replicas_in_sync)
-        task_type, task_id = (strategy.cluster_resolver.task_type,
-                              strategy.cluster_resolver.task_id)
+        task_type, task_id = (mirrored_strategy.cluster_resolver.task_type,
+                              mirrored_strategy.cluster_resolver.task_id)
     else:
         mirrored_strategy = tf.distribute.MirroredStrategy()
-        task_type, task_id = (strategy.cluster_resolver.task_type,
-                              strategy.cluster_resolver.task_id)
+        task_type, task_id = (None, None)
     print("GPUS detected:", len(tf.config.list_physical_devices('GPU')))
     with open(args.arhitecture) as f:
         arhitecture = json.load(f)
