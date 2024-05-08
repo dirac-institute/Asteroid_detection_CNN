@@ -1,6 +1,6 @@
+from tensorflow.keras import backend as K
 import tensorflow as tf
 import numpy as np
-from tensorflow.keras import backend as K
 def SumLosses(losses):
     """
     Sum of multiple losses, passed to model as loss function.
