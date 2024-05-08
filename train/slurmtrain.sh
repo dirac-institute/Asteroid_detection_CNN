@@ -3,7 +3,7 @@
 #SBATCH --job-name=TrainD
 #SBATCH --mail-type=ALL
 #SBATCH --account=astro
-#SBATCH --output=/mmfs1/home/kmrakovc/Results/Asteroids/training.txt
+#SBATCH --output=/mmfs1/home/kmrakovc/Results/Asteroids/training_%j.txt
 #SBATCH --partition=ckpt
 #SBATCH --nodes=4
 #SBATCH --ntasks-per-node=1

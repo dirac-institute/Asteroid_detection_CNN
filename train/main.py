@@ -21,9 +21,8 @@ def main (args):
     dataset_val = dataset_val.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
     dataset_val = dataset_val.batch(args.batch_size).prefetch(2)
     slurm_resolver = tf.distribute.cluster_resolver.SlurmClusterResolver(port_base=15000)
-    communication = tf.distribute.experimental.CommunicationImplementation.NCCL
-    mirrored_strategy = tf.distribute.MultiWorkerMirroredStrategy(cluster_resolver=slurm_resolver, 
-                                                                  communication_options=communication)
+    #communication = tf.distribute.experimental.CommunicationImplementation.NCCL
+    mirrored_strategy = tf.distribute.MultiWorkerMirroredStrategy(cluster_resolver=slurm_resolver)
     print('Number of replicas:', mirrored_strategy.num_replicas_in_sync)
     #mirrored_strategy = tf.distribute.MirroredStrategy()
     with mirrored_strategy.scope():
