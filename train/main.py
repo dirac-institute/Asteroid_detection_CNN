@@ -20,6 +20,7 @@ def main (args):
     dataset_val = tf.data.TFRecordDataset([args.test_dataset_path])
     dataset_val = dataset_val.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
     dataset_val = dataset_val.batch(args.batch_size).prefetch(2)
+    multiworker = True
     if multiworker:
         slurm_resolver = tf.distribute.cluster_resolver.SlurmClusterResolver(port_base=15000)
         communication = tf.distribute.experimental.CommunicationOptions(
