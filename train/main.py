@@ -20,11 +20,21 @@ def main (args):
     dataset_val = tf.data.TFRecordDataset([args.test_dataset_path])
     dataset_val = dataset_val.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
     dataset_val = dataset_val.batch(args.batch_size).prefetch(2)
-    slurm_resolver = tf.distribute.cluster_resolver.SlurmClusterResolver(port_base=15000)
-    #communication = tf.distribute.experimental.CommunicationImplementation.NCCL
-    mirrored_strategy = tf.distribute.MultiWorkerMirroredStrategy(cluster_resolver=slurm_resolver)
-    print('Number of replicas:', mirrored_strategy.num_replicas_in_sync)
-    #mirrored_strategy = tf.distribute.MirroredStrategy()
+    if multiworker:
+        slurm_resolver = tf.distribute.cluster_resolver.SlurmClusterResolver(port_base=15000)
+        communication = tf.distribute.experimental.CommunicationOptions(
+            bytes_per_pack=50 * 1024 * 1024,
+            timeout_seconds=120.0,
+            implementation=tf.distribute.experimental.CommunicationImplementation.NCCL)
+        mirrored_strategy = tf.distribute.MultiWorkerMirroredStrategy(cluster_resolver=slurm_resolver,
+                                                                    communication_options=communication)
+        print('Number of replicas:', mirrored_strategy.num_replicas_in_sync)
+        task_type, task_id = (strategy.cluster_resolver.task_type,
+                              strategy.cluster_resolver.task_id)
+    else:
+        mirrored_strategy = tf.distribute.MirroredStrategy()
+        task_type, task_id = (strategy.cluster_resolver.task_type,
+                              strategy.cluster_resolver.task_id)
     with mirrored_strategy.scope():
         model = tools.model.unet_model((128, 128, 1), arhitecture)
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr), loss=tools.metrics.FocalTversky (alpha=0.9, gamma=2),
@@ -37,8 +47,9 @@ def main (args):
     checkpoint_kb = tf.keras.callbacks.ModelCheckpoint(filepath=args.model_destination, save_weights_only=False,
                                                        monitor='val_f1_score', mode='max', save_best_only=True)
     results = model.fit(dataset_train, epochs=args.epochs, validation_data=dataset_val,
-                        callbacks=[terminateonnan_kb, reducelronplateau_kb, checkpoint_kb], verbose=2)
-    model.save(args.model_destination)
+                        callbacks=[terminateonnan_kb, reducelronplateau_kb], verbose=2)
+    if (task_type == 'worker' and task_id == 0) or task_type is None:
+        model.save(args.model_destination)
 
 
 
