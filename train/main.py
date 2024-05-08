@@ -6,6 +6,7 @@ import tools.model
 import json
 
 def main (args):
+    print("GPUS detected:", len(tf.config.list_physical_devices('GPU')))
     with open(args.arhitecture) as f:
         arhitecture = json.load(f)
     if "0" in arhitecture.keys():

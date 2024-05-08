@@ -11,11 +11,9 @@
 #SBATCH --gres=gpu:2
 #SBATCH --time=168:00:00
 
-srun hostname
 source ~/activate.sh
 module load cuda/12.3.2
-python3 -c "import tensorflow as tf; print(len(tf.config.list_physical_devices('GPU')))"
-python3 main.py \
+srun python3 main.py \
 --train_dataset_path ../DATA/train1.tfrecord \
 --val_dataset_path ../DATA/test1.tfrecord \
 --arhitecture ../DATA/arhitecture_tuned.json \
