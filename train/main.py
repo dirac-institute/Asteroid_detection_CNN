@@ -6,20 +6,6 @@ import tools.model
 import json
 
 def main (args):
-    print("GPUS detected:", len(tf.config.list_physical_devices('GPU')))
-    with open(args.arhitecture) as f:
-        arhitecture = json.load(f)
-    if "0" in arhitecture.keys():
-        arhitecture = arhitecture["0"]
-    if args.model_destination[-6:] != ".keras":
-        args.model_destination += ".keras"
-    dataset_train = tf.data.TFRecordDataset([args.train_dataset_path])
-    tfrecord_shape = tools.model.get_shape_of_quadratic_image_tfrecord(dataset_train)
-    dataset_train = dataset_train.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
-    dataset_train = dataset_train.shuffle(5*args.batch_size).batch(args.batch_size).prefetch(2)
-    dataset_val = tf.data.TFRecordDataset([args.test_dataset_path])
-    dataset_val = dataset_val.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
-    dataset_val = dataset_val.batch(args.batch_size).prefetch(2)
     multiworker = True
     if multiworker:
         slurm_resolver = tf.distribute.cluster_resolver.SlurmClusterResolver(port_base=15000)
@@ -36,6 +22,20 @@ def main (args):
         mirrored_strategy = tf.distribute.MirroredStrategy()
         task_type, task_id = (strategy.cluster_resolver.task_type,
                               strategy.cluster_resolver.task_id)
+    print("GPUS detected:", len(tf.config.list_physical_devices('GPU')))
+    with open(args.arhitecture) as f:
+        arhitecture = json.load(f)
+    if "0" in arhitecture.keys():
+        arhitecture = arhitecture["0"]
+    if args.model_destination[-6:] != ".keras":
+        args.model_destination += ".keras"
+    dataset_train = tf.data.TFRecordDataset([args.train_dataset_path])
+    tfrecord_shape = tools.model.get_shape_of_quadratic_image_tfrecord(dataset_train)
+    dataset_train = dataset_train.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
+    dataset_train = dataset_train.shuffle(5*args.batch_size).batch(args.batch_size).prefetch(2)
+    dataset_val = tf.data.TFRecordDataset([args.test_dataset_path])
+    dataset_val = dataset_val.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
+    dataset_val = dataset_val.batch(args.batch_size).prefetch(2)
     with mirrored_strategy.scope():
         model = tools.model.unet_model((128, 128, 1), arhitecture)
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr), loss=tools.metrics.FocalTversky (alpha=0.9, gamma=2),

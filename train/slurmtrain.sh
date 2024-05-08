@@ -2,14 +2,14 @@
 
 #SBATCH --job-name=TrainD
 #SBATCH --mail-type=ALL
-#SBATCH --account=astro
+#SBATCH --account=escience
 #SBATCH --output=/mmfs1/home/kmrakovc/Results/Asteroids/training.txt
-#SBATCH --partition=ckpt
-#SBATCH --nodes=4
+#SBATCH --partition=gpu-a40
+#SBATCH --nodes=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:2
-#SBATCH --time=168:00:00
+#SBATCH --gres=gpu:1
+#SBATCH --time=2:00:00
 
 source ~/activate.sh
 module load cuda/12.3.2
