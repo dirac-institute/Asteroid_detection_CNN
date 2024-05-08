@@ -10,6 +10,8 @@ def main (args):
         arhitecture = json.load(f)
     if "0" in arhitecture.keys():
         arhitecture = arhitecture["0"]
+    if args.model_destination[-6:] != ".keras":
+        args.model_destination += ".keras"
     dataset_train = tf.data.TFRecordDataset([args.train_dataset_path])
     tfrecord_shape = tools.model.get_shape_of_quadratic_image_tfrecord(dataset_train)
     dataset_train = dataset_train.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
@@ -32,10 +34,10 @@ def main (args):
     terminateonnan_kb = tf.keras.callbacks.TerminateOnNaN()
     reducelronplateau_kb = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=args.decay_lr_rate,
                                                                 patience=args.decay_lr_patience, verbose=1)
+    checkpoint_kb = tf.keras.callbacks.ModelCheckpoint(filepath=args.model_destination, save_weights_only=False,
+                                                       monitor='val_f1_score', mode='max', save_best_only=True)
     results = model.fit(dataset_train, epochs=args.epochs, validation_data=dataset_val,
-                        callbacks=[earlystopping_kb, terminateonnan_kb, reducelronplateau_kb], verbose=2)
-    if args.model_destination[-3:] != ".h5":
-        args.model_destination += ".h5"
+                        callbacks=[terminateonnan_kb, reducelronplateau_kb, checkpoint_kb], verbose=2)
     model.save(args.model_destination)
 
 
