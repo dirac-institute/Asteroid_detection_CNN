@@ -15,7 +15,7 @@ source ~/activate.sh
 module load cuda/12.3.2
 srun python3 main.py \
 --train_dataset_path ../DATA/train1.tfrecord \
---val_dataset_path ../DATA/test1.tfrecord \
+--test_dataset_path ../DATA/test1.tfrecord \
 --arhitecture ../DATA/arhitecture_tuned.json \
 --model_destination ../DATA/Trained_model3 \
 --epochs 256 \
