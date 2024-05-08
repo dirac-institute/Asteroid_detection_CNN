@@ -1,4 +1,3 @@
-from keras import backend as K
 import tensorflow as tf
 import numpy as np
 def SumLosses(losses):
@@ -23,11 +22,11 @@ def tversky(y_true, y_pred, alpha=0.9):
     :return: Tversky coefficient
     """
     smooth = 1
-    y_true_pos = K.flatten(y_true)
-    y_pred_pos = K.flatten(y_pred)
-    true_pos = K.sum(y_true_pos * y_pred_pos)
-    false_neg = K.sum(y_true_pos * (1-y_pred_pos))
-    false_pos = K.sum((1-y_true_pos)*y_pred_pos)
+    y_true_pos = tf.reshape(y_true,[-1])
+    y_pred_pos = tf.reshape(y_pred,[-1])
+    true_pos = tf.reduce_sum(y_true_pos * y_pred_pos, axis=None)
+    false_neg = tf.reduce_sum(y_true_pos * (1-y_pred_pos), axis=None)
+    false_pos = tf.reduce_sum((1-y_true_pos)*y_pred_pos, axis=None)
     return (true_pos + smooth)/(true_pos + alpha*false_neg + (1-alpha)*false_pos + smooth)
 
 def tversky_loss(y_true, y_pred):
@@ -48,7 +47,7 @@ def FocalTversky (alpha=0.9, gamma=2):
     """
     def focal_tversky(y_true, y_pred):
         pt_1 = tversky(y_true, y_pred, alpha)
-        return K.pow((1 - pt_1), (1 / gamma))
+        return tf.math.pow((1 - pt_1), (1 / gamma))
     return focal_tversky
 
 
