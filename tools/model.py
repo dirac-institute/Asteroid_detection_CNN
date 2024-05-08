@@ -77,15 +77,13 @@ def encoder_mini_block(inputs, n_filters=32, activation="relu", dropout_prob=0.3
                                   padding='same',
                                   kernel_initializer='HeNormal',
                                   name="eblock" + name + "conv1")(inputs)
-    
-    """
+
     conv = tf.keras.layers.Conv2D(n_filters,
                                   3,  # filter size
                                   activation=activation,
                                   padding='same',
                                   kernel_initializer='HeNormal',
                                   name="eblock" + name + "conv2")(conv)
-    """
     if dropout_prob > 0:
         conv = tf.keras.layers.Dropout(dropout_prob, name="eblock" + name + "drop")(conv)
     if max_pooling:
@@ -127,14 +125,12 @@ def decoder_mini_block(prev_layer_input, skip_layer_input, n_filters=32, activat
                                   name="dblock" + name + "conv1")(conv)
     if dropout_prob > 0:
         conv = tf.keras.layers.Dropout(dropout_prob, name="dblock" + name + "drop")(conv)
-    """
     conv = tf.keras.layers.Conv2D(n_filters,
                                   3,  # filter size
                                   activation=activation,
                                   padding='same',
                                   kernel_initializer='HeNormal',
                                   name="dblock" + name + "conv2")(conv)
-    """
 
     return conv
 

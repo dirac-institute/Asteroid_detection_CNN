@@ -17,8 +17,12 @@ def main (args):
     dataset_val = tf.data.TFRecordDataset([args.test_dataset_path])
     dataset_val = dataset_val.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
     dataset_val = dataset_val.batch(args.batch_size).prefetch(2)
-
-    mirrored_strategy = tf.distribute.MirroredStrategy()
+    slurm_resolver = tf.distribute.cluster_resolver.SlurmClusterResolver(port_base=15000)
+    communication = tf.distribute.experimental.CommunicationImplementation.NCCL
+    mirrored_strategy = tf.distribute.MultiWorkerMirroredStrategy(cluster_resolver=slurm_resolver, 
+                                                                  communication_options=communication)
+    print('Number of replicas:', mirrored_strategy.num_replicas_in_sync)
+    #mirrored_strategy = tf.distribute.MirroredStrategy()
     with mirrored_strategy.scope():
         model = tools.model.unet_model((128, 128, 1), arhitecture)
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr), loss=tools.metrics.FocalTversky (alpha=0.9, gamma=2),
@@ -62,17 +66,14 @@ def parse_arguments(args):
     parser.add_argument('--batch_size', type=int,
                         default=128,
                         help='Batch size.')
-    parser.add_argument('--class_balancing_alpha', type=float,
-                        default=0.95,
-                        help='How much to weight the positive class in the loss function.')
     parser.add_argument('--start_lr', type=float,
                         default=0.001,
                         help='Initial learning rate.')
     parser.add_argument('--decay_lr_rate', type=float,
-                        default=0.95,
+                        default=0.6,
                         help='Rate at which to decay the learning rate upon reaching the plateau.')
     parser.add_argument('--decay_lr_patience', type=float,
-                        default=6,
+                        default=3,
                         help='Number of iteration to wait upon reaching the plateau.')
     return parser.parse_args(args)
 
