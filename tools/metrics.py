@@ -1,4 +1,4 @@
-from tensorflow.keras import backend as K
+from keras import backend as K
 import tensorflow as tf
 import numpy as np
 def SumLosses(losses):
