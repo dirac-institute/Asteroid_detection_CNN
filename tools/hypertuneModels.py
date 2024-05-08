@@ -1,7 +1,9 @@
 if __name__ == "__main__":
     import model as m
+    import metrics
 else:
     import tools.model as m
+    import tools.metrics as metrics
 import keras_tuner as kt
 import numpy as np
 import tensorflow as tf
@@ -78,7 +80,7 @@ class StockHyperModel(kt.HyperModel):
             print()
         model = m.unet_model(self.input_shape, arhitecture)
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), loss=self.loss,
-                      metrics=["Precision", "Recall", m.F1_Score()])
+                      metrics=["Precision", "Recall", metrics.F1_Score()])
         return model
 
 

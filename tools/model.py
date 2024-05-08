@@ -21,43 +21,6 @@ def get_shape_of_quadratic_image_tfrecord(raw_dataset):
         parsed_features = tf.io.parse_single_example(i, keys_to_features)
         return (int(np.sqrt(parsed_features["x"].shape[0])), int(np.sqrt(parsed_features["x"].shape[0])), 1)
 
-
-def custom_loss_sum(losses):
-    def custom_loss(y_true, y_pred):
-        loss = 0
-        for i, l in enumerate(losses):
-            loss += l(y_true, y_pred)
-        return loss
-    return custom_loss
-
-class F1_Score(tf.keras.metrics.Metric):
-    def __init__(self, name='f1_score', **kwargs):
-        super().__init__(name=name, **kwargs)
-        self.f1 = self.add_weight(name='f1', initializer='zeros')
-        self.counter = self.add_weight(name='counter', initializer='zeros')
-        self.precision_fn = tf.keras.metrics.Precision(thresholds=0.5)
-        self.recall_fn = tf.keras.metrics.Recall(thresholds=0.5)
-        self.count = self.add_weight(name='F1ScoreCount', initializer='zeros')
-
-    def update_state(self, y_true, y_pred, sample_weight=None):
-        self.precision_fn.reset_state()
-        self.recall_fn.reset_state()
-        p = self.precision_fn(y_true, y_pred)
-        r = self.recall_fn(y_true, y_pred)
-        self.f1.assign_add(2 * ((p * r) / (p + r + 1e-6)))
-        self.count.assign_add(1)
-
-
-    def result(self):
-        return self.f1/self.count
-
-    def reset_state(self):
-        # we also need to reset the state of the precision and recall objects
-        self.precision_fn.reset_state()
-        self.recall_fn.reset_state()
-        self.f1.assign(0)
-        self.count.assign(0)
-
 def get_architecture_from_model(model):
     """
     Extracts the architecture of a model and returns it as a dictionary.

@@ -27,15 +27,15 @@ def main(args):
     dataset_val = dataset_val.batch(args.batch_size).prefetch(2)
     strategy = tf.distribute.MirroredStrategy()
     #strategy = tf.distribute.get_strategy()
-    FE = tf.keras.losses.BinaryFocalCrossentropy(apply_class_balancing=True, alpha=args.class_balancing_alpha)
-    CE = tf.keras.losses.BinaryCrossentropy()
     earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5 * args.decay_lr_patience,
                                                         verbose=1,
                                                         restore_best_weights=True)
     terminateonnan_kb = tf.keras.callbacks.TerminateOnNaN()
     reducelronplateau_kb = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=args.decay_lr_rate,
                                                                 patience=args.decay_lr_patience, verbose=1)
-    tuner = kt.Hyperband(hypermodel=tools.hypertuneModels.StockHyperModel(tfrecord_shape, tools.model.custom_loss_sum([FE, CE])),
+    tuner = kt.Hyperband(hypermodel=tools.hypertuneModels.StockHyperModel(tfrecord_shape,
+                                                                          tools.metrics.FocalTversky (alpha=0.9,
+                                                                                                      gamma=2)),
                          objective=kt.Objective('val_f1_score', "max"),
                          max_epochs=args.epochs,
                          factor=int(args.factor),

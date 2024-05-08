@@ -19,12 +19,10 @@ def main (args):
     dataset_val = dataset_val.batch(args.batch_size).prefetch(2)
 
     mirrored_strategy = tf.distribute.MirroredStrategy()
-    FE = tf.keras.losses.BinaryFocalCrossentropy(apply_class_balancing=True, alpha=args.class_balancing_alpha)
-    CE = tf.keras.losses.BinaryCrossentropy()
     with mirrored_strategy.scope():
         model = tools.model.unet_model((128, 128, 1), arhitecture)
-        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr), loss=[FE, CE],
-                      metrics=["Precision", "Recall", tools.model.F1_Score()])
+        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr), loss=tools.metrics.FocalTversky (alpha=0.9, gamma=2),
+                      metrics=["Precision", "Recall", tools.metrics.F1_Score()])
     earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5*args.decay_lr_patience, verbose=1,
                                                         restore_best_weights=True)
     terminateonnan_kb = tf.keras.callbacks.TerminateOnNaN()
@@ -32,6 +30,8 @@ def main (args):
                                                                 patience=args.decay_lr_patience, verbose=1)
     results = model.fit(dataset_train, epochs=args.epochs, validation_data=dataset_val,
                         callbacks=[earlystopping_kb, terminateonnan_kb, reducelronplateau_kb], verbose=2)
+    if args.model_destination[-3:] != ".h5":
+        args.model_destination += ".h5"
     model.save(args.model_destination)
 
 
@@ -54,7 +54,7 @@ def parse_arguments(args):
                         default="../DATA/arhitecture_tuned.json",
                         help='Path to a JSON containing definition of an arhitecture.')
     parser.add_argument('--model_destination', type=str,
-                        default="../DATA/Trained_model",
+                        default="../DATA/Trained_model3",
                         help='Path where to save the model once trained.')
     parser.add_argument('--epochs', type=int,
                         default=64,
