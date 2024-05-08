@@ -6,12 +6,9 @@ import tools.model
 import json
 
 def main (args):
-    multiworker = True
-    if multiworker:
-        slurm_resolver = tf.distribute.cluster_resolver.SlurmClusterResolver(port_base=15000)
+    if args.multiworker:
+        slurm_resolver = tf.distribute.cluster_resolver.SlurmClusterResolver(port_base=8000)
         communication = tf.distribute.experimental.CommunicationOptions(
-            bytes_per_pack=50 * 1024 * 1024,
-            timeout_seconds=120.0,
             implementation=tf.distribute.experimental.CommunicationImplementation.NCCL)
         mirrored_strategy = tf.distribute.MultiWorkerMirroredStrategy(cluster_resolver=slurm_resolver,
                                                                     communication_options=communication)
@@ -47,8 +44,12 @@ def main (args):
                                                                 patience=args.decay_lr_patience, verbose=1)
     checkpoint_kb = tf.keras.callbacks.ModelCheckpoint(filepath=args.model_destination, save_weights_only=False,
                                                        monitor='val_f1_score', mode='max', save_best_only=True)
+    if (task_type == 'worker' and task_id == 0) or task_type is None:
+        kb = [terminateonnan_kb, reducelronplateau_kb, checkpoint_kb]
+    else:
+        kb = [terminateonnan_kb, reducelronplateau_kb]
     results = model.fit(dataset_train, epochs=args.epochs, validation_data=dataset_val,
-                        callbacks=[terminateonnan_kb, reducelronplateau_kb], verbose=2)
+                        callbacks=kb, verbose=2)
     if (task_type == 'worker' and task_id == 0) or task_type is None:
         model.save(args.model_destination)
 
@@ -74,6 +75,9 @@ def parse_arguments(args):
     parser.add_argument('--model_destination', type=str,
                         default="../DATA/Trained_model3",
                         help='Path where to save the model once trained.')
+    parser.add_argument('-d', '--multiworker', action=argparse.BooleanOptionalAction,
+                        default=False,
+                        help='Use multiworker strategy.')
     parser.add_argument('--epochs', type=int,
                         default=64,
                         help='Number of epochs.')

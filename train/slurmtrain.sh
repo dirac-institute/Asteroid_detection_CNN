@@ -4,11 +4,11 @@
 #SBATCH --mail-type=ALL
 #SBATCH --account=escience
 #SBATCH --output=/mmfs1/home/kmrakovc/Results/Asteroids/training.txt
-#SBATCH --partition=gpu-a40
-#SBATCH --nodes=2
+#SBATCH --partition=gpu-rtx6k
+#SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=10
+#SBATCH --gres=gpu:2
 #SBATCH --time=2:00:00
 
 source ~/activate.sh
@@ -18,6 +18,7 @@ srun python3 main.py \
 --test_dataset_path ../DATA/test1.tfrecord \
 --arhitecture ../DATA/arhitecture_tuned.json \
 --model_destination ../DATA/Trained_model_3 \
+--no-multiworker \
 --epochs 256 \
 --batch_size 128 \
 --start_lr 0.001 \
