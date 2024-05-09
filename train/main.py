@@ -34,7 +34,7 @@ def main (args):
     dataset_val = dataset_val.batch(args.batch_size).prefetch(2)
     with mirrored_strategy.scope():
         if os.path.isfile(args.model_destination):
-            model = tf.keras.models.load_model(args.model_destination)
+            model = tf.keras.models.load_model(args.model_destination, compile=False)
         else:
             model = tools.model.unet_model((128, 128, 1), arhitecture)
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr), loss=tools.metrics.FocalTversky(alpha=0.9, gamma=2),

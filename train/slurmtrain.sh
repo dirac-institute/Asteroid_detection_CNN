@@ -9,7 +9,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=10
 #SBATCH --gres=gpu:2
-#SBATCH --time=125:00:00
+#SBATCH --time=48:00:00
 
 source ~/activate.sh
 module load cuda/12.3.2
