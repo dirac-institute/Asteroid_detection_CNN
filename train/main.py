@@ -1,5 +1,5 @@
 import argparse
-import sys
+import sys, os
 import tensorflow as tf
 sys.path.append("../")
 import tools.model
