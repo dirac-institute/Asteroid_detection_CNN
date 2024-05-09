@@ -21,6 +21,6 @@ srun python3 main.py \
 --no-multiworker \
 --epochs 256 \
 --batch_size 128 \
---start_lr 0.001 \
---decay_lr_rate 0.6 \
---decay_lr_patience 3
+--start_lr 0.0005 \
+--decay_lr_rate 0.75 \
+--decay_lr_patience 10
