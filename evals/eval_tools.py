@@ -132,65 +132,79 @@ def LSST_stack_comparation_histogram_data(repo, output_coll, val_index_path,
     return np.concatenate(list_cat)
 
 
-
-def get_asteroid_num(img, pixel_gap=2):
-    img=np.copy(img)
-    height = img.shape[0]
-    width = img.shape[1]
-    n_clusters = 0
-    while img.sum()!=0:
-        roots = np.where(img==1)
-        n_clusters += 1
-        todo = [(roots[0][0], roots[1][0])]
+def FDS(img, roots, pixel_gap, visited_pixels=None):
+    if visited_pixels is None:
         visited_pixels = set()
-        while todo:
-            j, i = todo.pop()
-            if (0 <= j < height) and (0 <= i < width) and (img[j, i] > 0):
-                visited_pixels.add((j, i))
-                img[j, i] = 0
-                if not (j + 1, i) in visited_pixels:
-                    todo += [(j + 1, i)]
-                if not (j - 1, i) in visited_pixels:
-                    todo += [(j - 1, i)]
-                if not (j, i + 1) in visited_pixels:
-                    todo += [(j, i + 1)]
-                if not (j, i - 1) in visited_pixels:
-                    todo += [(j, i - 1)]
-                if not (j - 1, i - 1) in visited_pixels:
-                    todo += [(j - 1, i - 1)]
-                if not (j + 1, i + 1) in visited_pixels:
-                    todo += [(j + 1, i + 1)]
-    return n_clusters
-
-def depthfirstsearch(img, root_j, root_i):
     height = img.shape[0]
     width = img.shape[1]
-    mask = np.zeros([height, width])
-    try:
-        _ = iter(root_j)
-    except TypeError:
-        todo = [(int(root_j), int(root_i))]
-    else:
-        assert len(root_j) == len(root_i)
-        todo = []
-        for k in range(len(root_j)):
-            todo += [(int(root_j[k]), int(root_i[k]))]
-    visited_pixels = set()
+    todo = [(roots[0], roots[1])]
+    mask = np.zeros((height, width))
     while todo:
         j, i = todo.pop()
-        if (0 <= j < height) and (0 <= i < width) and (img[j, i] > 0):
-            visited_pixels.add((j, i))
+        visited_pixels.add((j, i))
+        if img[j, i] != 0:
+            img[j, i] = 0
             mask[j, i] = 1
-            if not (j + 1, i) in visited_pixels:
-                todo += [(j + 1, i)]
-            if not (j - 1, i) in visited_pixels:
-                todo += [(j - 1, i)]
-            if not (j, i + 1) in visited_pixels:
-                todo += [(j, i + 1)]
-            if not (j, i - 1) in visited_pixels:
-                todo += [(j, i - 1)]
-            if not (j - 1, i - 1) in visited_pixels:
-                todo += [(j - 1, i - 1)]
-            if not (j + 1, i + 1) in visited_pixels:
-                todo += [(j + 1, i + 1)]
-    return mask
+            for gap_x in range(-pixel_gap - 1, pixel_gap + 1):
+                for gap_y in range(-pixel_gap - 1, pixel_gap + 1):
+                    if not (j + gap_x, i + gap_y) in visited_pixels and (0 <= j + gap_x < height) and (
+                            0 <= i + gap_y < width):
+                        todo += [(j + gap_x, i + gap_y)]
+    return mask, visited_pixels
+
+
+def get_one_image_mask(true_img, prediction_img, pixel_gap=15):
+    p_img = np.copy(prediction_img)
+    t_img = np.copy(true_img)
+    mask = np.zeros((t_img.shape))
+    tp = 0
+    fp = 0
+    fn = 0
+    while p_img.sum() != 0:
+        roots = np.where(p_img != 0)
+        mask_p, __ = FDS(p_img, (roots[0][0], roots[1][0]), pixel_gap)
+        if np.any(mask_p * true_img != 0):
+            tp += 1
+            mask[mask_p != 0] = 1
+        else:
+            fp += 1
+            mask[mask_p != 0] = 2
+    while t_img.sum() != 0:
+        roots = np.where(t_img != 0)
+        mask_t, __ = FDS(t_img, (roots[0][0], roots[1][0]), pixel_gap=1)
+        if not np.any(mask_t * prediction_img != 0):
+            fn += 1
+            mask[mask_t != 0] = 3
+    return tp, fp, fn, mask
+
+
+def get_mask(truths, predictions, batch_size=None):
+    parameters = [(truths[i], predictions[i]) for i in range(truths.shape[0])]
+    masks = np.empty(truths.shape)
+    true_positive = np.empty(truths.shape[0])
+    false_positive = np.empty(truths.shape[0])
+    false_negative = np.empty(truths.shape[0])
+    if batch_size is None:
+        batch_size = os.cpu_count() - 3
+    pool = multiprocessing.Pool(batch_size)
+    list_cat = pool.starmap(get_one_image_mask, parameters)
+    pool.close()
+    pool.join()
+    for i, (tp, fp, fn, mask) in enumerate(list_cat):
+        true_positive[i] = tp
+        false_positive[i] = fp
+        false_negative[i] = fn
+        masks[i, :, :] = mask
+    return true_positive, false_positive, false_negative, masks
+
+
+def f1_score(tp, fp, fn):
+    return tp / (tp + 0.5 * (fp + fn))
+
+
+def precision(tp, fp, fn):
+    return tp / (tp + fp)
+
+
+def recall(tp, fp, fn):
+    return tp / (tp + fn)
