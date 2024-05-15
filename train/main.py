@@ -37,13 +37,16 @@ def main (args):
             model = tf.keras.models.load_model(args.model_destination, compile=False)
         else:
             model = tools.model.unet_model((128, 128, 1), arhitecture)
-        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr), loss=tools.metrics.FocalTversky(alpha=0.9, gamma=2),
+        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr),
+                      loss=tools.metrics.FocalTversky(alpha=0.9, gamma=5),
                       metrics=["Precision", "Recall", tools.metrics.F1_Score()])
     earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5*args.decay_lr_patience, verbose=1,
                                                         restore_best_weights=True)
     terminateonnan_kb = tf.keras.callbacks.TerminateOnNaN()
-    reducelronplateau_kb = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=args.decay_lr_rate,
-                                                                patience=args.decay_lr_patience, verbose=1)
+    reducelronplateau_kb = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=args.decay_lr_rate,
+                                                                patience=args.decay_lr_patience,
+                                                                cooldown=args.decay_lr_patience,
+                                                                verbose=1)
     checkpoint_kb = tf.keras.callbacks.ModelCheckpoint(filepath=args.model_destination, save_weights_only=False,
                                                        monitor='val_f1_score', mode='max', save_best_only=True)
     if (task_type == 'worker' and task_id == 0) or task_type is None:
@@ -90,10 +93,10 @@ def parse_arguments(args):
                         default=0.001,
                         help='Initial learning rate.')
     parser.add_argument('--decay_lr_rate', type=float,
-                        default=0.6,
+                        default=0.75,
                         help='Rate at which to decay the learning rate upon reaching the plateau.')
     parser.add_argument('--decay_lr_patience', type=float,
-                        default=3,
+                        default=2,
                         help='Number of iteration to wait upon reaching the plateau.')
     return parser.parse_args(args)
 

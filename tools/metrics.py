@@ -22,8 +22,8 @@ def tversky(y_true, y_pred, alpha=0.9):
     :return: Tversky coefficient
     """
     smooth = 1
-    y_true_pos = tf.reshape(y_true,[-1])
-    y_pred_pos = tf.reshape(y_pred,[-1])
+    y_true_pos = tf.reshape(y_true, [-1])
+    y_pred_pos = tf.reshape(y_pred, [-1])
     true_pos = tf.reduce_sum(y_true_pos * y_pred_pos, axis=None)
     false_neg = tf.reduce_sum(y_true_pos * (1-y_pred_pos), axis=None)
     false_pos = tf.reduce_sum((1-y_true_pos)*y_pred_pos, axis=None)
@@ -36,7 +36,7 @@ def tversky_loss(y_true, y_pred):
     :param y_pred: Predictions from model
     :return: Tversky loss
     """
-    return 1 - tversky(y_true,y_pred)
+    return 1 - tversky(y_true, y_pred)
 
 def FocalTversky (alpha=0.9, gamma=2):
     """
@@ -47,7 +47,7 @@ def FocalTversky (alpha=0.9, gamma=2):
     """
     def focal_tversky(y_true, y_pred):
         pt_1 = tversky(y_true, y_pred, alpha)
-        return tf.math.pow((1 - pt_1), (1 / gamma))
+        return tf.math.pow((1 - pt_1), (gamma))
     return focal_tversky
 
 

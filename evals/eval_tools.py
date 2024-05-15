@@ -63,9 +63,8 @@ def compare_NN_predictions(p, repo, output_coll, val_index=None, batch_size=None
     return pd.DataFrame(list_cat)
 
 
-def NN_comparation_histogram_data(model_path, tf_dataset_path, val_index_path, repo, output_coll,
-                                  column_name="trail_length", batch_size=None, threshold=0.5):
-    predictions = create_NN_prediction(tf_dataset_path, model_path, threshold=threshold)
+def NN_comparation_histogram_data(predictions, val_index_path, repo, output_coll,
+                                  column_name="trail_length", batch_size=None):
     with open(val_index_path, 'rb') as f:
         val_index = np.load(f)
         val_index.sort()
