@@ -17,10 +17,10 @@ srun python3 main.py \
 --train_dataset_path ../DATA/train1.tfrecord \
 --test_dataset_path ../DATA/test1.tfrecord \
 --arhitecture ../DATA/arhitecture_tuned.json \
---model_destination ../DATA/Trained_model_%j \
+--model_destination ../DATA/Trained_model_0 \
 --no-multiworker \
---epochs 1024 \
+--epochs 512 \
 --batch_size 128 \
 --start_lr 0.001 \
 --decay_lr_rate 0.75 \
---decay_lr_patience 2
+--decay_lr_patience 8

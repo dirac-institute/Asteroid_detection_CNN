@@ -37,12 +37,12 @@ def main (args):
 
             model = tools.model.unet_model(tfrecord_shape, arhitecture)
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr),
-                      loss=tools.metrics.FocalTversky(alpha=0.9, gamma=5),
+                      loss=tools.metrics.FocalTversky(alpha=0.9, gamma=4),
                       metrics=["Precision", "Recall", tools.metrics.F1_Score()])
 
     if tuple(model.outputs[0].shape[1:]) != tfrecord_shape:
-        dataset_train = dataset_train.map(reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
-        dataset_val = dataset_val.map(reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
+        dataset_train = dataset_train.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
+        dataset_val = dataset_val.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
 
     dataset_train = dataset_train.shuffle(5 * args.batch_size).batch(args.batch_size).prefetch(2)
     dataset_val = dataset_val.batch(args.batch_size).prefetch(2)
