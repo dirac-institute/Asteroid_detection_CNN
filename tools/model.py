@@ -14,6 +14,15 @@ def parse_function(img_shape=(128, 128, 1), test=False):
             return parsed_features['x'], parsed_features['y']
     return parsing
 
+
+def reshape_outputs(img_shape=(32, 32)):
+    def reshaping(inputs, targets):
+        targets = tf.image.resize(targets, img_shape)
+        targets = tf.math.ceil(targets)
+        return inputs, targets
+    return reshaping
+
+
 def get_shape_of_quadratic_image_tfrecord(raw_dataset):
     keys_to_features = {'x': tf.io.VarLenFeature(dtype=tf.float32),
                         'y': tf.io.VarLenFeature(dtype=tf.int64)}
@@ -37,20 +46,20 @@ def get_architecture_from_model(model):
         "upDropout": []}
     for layer in model.layers:
         if ("block" in layer.name.lower()) and ("conv1" in layer.name.lower()):
-            if layer.name.lower()[0]=="e":
+            if layer.name.lower()[0] == "e":
                 architecture["downFilters"].append(layer.filters)
                 architecture["downActivation"].append(layer.activation.__name__)
-            elif layer.name.lower()[0]=="d":
+            elif layer.name.lower()[0] == "d":
                 architecture["upFilters"].append(layer.filters)
                 architecture["upActivation"].append(layer.activation.__name__)
         elif ("block" in layer.name.lower()) and ("drop" in layer.name.lower()):
-            if layer.name.lower()[0]=="e":
+            if layer.name.lower()[0] == "e":
                 architecture["downDropout"].append(layer.rate)
-            elif layer.name.lower()[0]=="d":
+            elif layer.name.lower()[0] == "d":
                 architecture["upDropout"].append(layer.rate)
         elif ("eblock" in layer.name.lower()) and ("pool" in layer.name.lower()):
             current_layer = int(layer.name.lower()[6])
-            if len(architecture["downMaxPool"])<current_layer:
+            if len(architecture["downMaxPool"]) < current_layer:
                 for i in range(current_layer-len(architecture["downMaxPool"])):
                     architecture["downMaxPool"].append(False)
             architecture["downMaxPool"].append(True)
@@ -190,7 +199,7 @@ def unet_model(input_size, arhitecture):
         skip_connections.append(skip)
         # Decoder
     for i in range(len(arhitecture["upFilters"])):
-        skip_con = skip_connections[len(arhitecture["upFilters"]) - 1 - i]
+        skip_con = skip_connections[len(skip_connections)-1-i]
         layer = decoder_mini_block(layer,
                                    skip_con,
                                    n_filters=arhitecture["upFilters"][i],

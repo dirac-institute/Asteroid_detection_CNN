@@ -28,23 +28,30 @@ def main (args):
     dataset_train = tf.data.TFRecordDataset([args.train_dataset_path])
     tfrecord_shape = tools.model.get_shape_of_quadratic_image_tfrecord(dataset_train)
     dataset_train = dataset_train.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
-    dataset_train = dataset_train.shuffle(5*args.batch_size).batch(args.batch_size).prefetch(2)
     dataset_val = tf.data.TFRecordDataset([args.test_dataset_path])
     dataset_val = dataset_val.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
-    dataset_val = dataset_val.batch(args.batch_size).prefetch(2)
     with mirrored_strategy.scope():
         if os.path.isfile(args.model_destination):
             model = tf.keras.models.load_model(args.model_destination, compile=False)
         else:
-            model = tools.model.unet_model((128, 128, 1), arhitecture)
+
+            model = tools.model.unet_model(tfrecord_shape, arhitecture)
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr),
                       loss=tools.metrics.FocalTversky(alpha=0.9, gamma=5),
                       metrics=["Precision", "Recall", tools.metrics.F1_Score()])
+
+    if tuple(model.outputs[0].shape[1:]) != tfrecord_shape:
+        dataset_train = dataset_train.map(reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
+        dataset_val = dataset_val.map(reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
+
+    dataset_train = dataset_train.shuffle(5 * args.batch_size).batch(args.batch_size).prefetch(2)
+    dataset_val = dataset_val.batch(args.batch_size).prefetch(2)
+
     earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5*args.decay_lr_patience, verbose=1,
                                                         restore_best_weights=True)
     terminateonnan_kb = tf.keras.callbacks.TerminateOnNaN()
     reducelronplateau_kb = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=args.decay_lr_rate,
-                                                                patience=args.decay_lr_patience,
+                                                                patience=2*args.decay_lr_patience,
                                                                 cooldown=args.decay_lr_patience,
                                                                 verbose=1)
     checkpoint_kb = tf.keras.callbacks.ModelCheckpoint(filepath=args.model_destination, save_weights_only=False,

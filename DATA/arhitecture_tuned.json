@@ -1,11 +1,11 @@
 {
   "0": {
     "downFilters": [
-      16,
       32,
       64,
       128,
       256,
+      512,
       512
     ],
     "downActivation": [
@@ -34,11 +34,9 @@
     ],
     "upFilters": [
       512,
+      512,
       256,
-      128,
-      64,
-      32,
-      16
+      128
     ],
     "upActivation": [
       "sigmoid",
