@@ -17,7 +17,7 @@ srun python3 main.py \
 --train_dataset_path ../DATA/train1.tfrecord \
 --test_dataset_path ../DATA/test1.tfrecord \
 --arhitecture ../DATA/arhitecture_tuned.json \
---model_destination ../DATA/Trained_model_0 \
+--model_destination ../DATA/Trained_model_1 \
 --no-multiworker \
 --epochs 512 \
 --batch_size 128 \

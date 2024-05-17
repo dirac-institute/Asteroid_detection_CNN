@@ -1,17 +1,19 @@
 import argparse
 import sys, os
 import tensorflow as tf
+
 sys.path.append("../")
 import tools.model
 import json
 
-def main (args):
+
+def main(args):
     if args.multiworker:
         slurm_resolver = tf.distribute.cluster_resolver.SlurmClusterResolver(port_base=8000)
         communication = tf.distribute.experimental.CommunicationOptions(
             implementation=tf.distribute.experimental.CommunicationImplementation.NCCL)
         mirrored_strategy = tf.distribute.MultiWorkerMirroredStrategy(cluster_resolver=slurm_resolver,
-                                                                    communication_options=communication)
+                                                                      communication_options=communication)
         print('Number of replicas:', mirrored_strategy.num_replicas_in_sync)
         task_type, task_id = (mirrored_strategy.cluster_resolver.task_type,
                               mirrored_strategy.cluster_resolver.task_id)
@@ -34,7 +36,6 @@ def main (args):
         if os.path.isfile(args.model_destination):
             model = tf.keras.models.load_model(args.model_destination, compile=False)
         else:
-
             model = tools.model.unet_model(tfrecord_shape, arhitecture)
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr),
                       loss=tools.metrics.FocalTversky(alpha=0.9, gamma=1.5),
@@ -47,11 +48,12 @@ def main (args):
     dataset_train = dataset_train.shuffle(5 * args.batch_size).batch(args.batch_size).prefetch(2)
     dataset_val = dataset_val.batch(args.batch_size).prefetch(2)
 
-    earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5*args.decay_lr_patience, verbose=1,
+    earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5 * args.decay_lr_patience,
+                                                        verbose=1,
                                                         restore_best_weights=True)
     terminateonnan_kb = tf.keras.callbacks.TerminateOnNaN()
     reducelronplateau_kb = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=args.decay_lr_rate,
-                                                                patience=2*args.decay_lr_patience,
+                                                                patience=2 * args.decay_lr_patience,
                                                                 cooldown=args.decay_lr_patience,
                                                                 verbose=1)
     checkpoint_kb = tf.keras.callbacks.ModelCheckpoint(filepath=args.model_destination, save_weights_only=False,
@@ -64,7 +66,6 @@ def main (args):
                         callbacks=kb, verbose=2)
     #if (task_type == 'worker' and task_id == 0) or task_type is None:
     #    model.save(args.model_destination)
-
 
 
 def parse_arguments(args):
@@ -106,6 +107,7 @@ def parse_arguments(args):
                         default=2,
                         help='Number of iteration to wait upon reaching the plateau.')
     return parser.parse_args(args)
+
 
 if __name__ == '__main__':
     main(parse_arguments(sys.argv[1:]))
