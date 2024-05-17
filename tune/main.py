@@ -16,6 +16,16 @@ sys.path.append("../")
 import tools
 
 def main(args):
+    training_parameters = {"alpha": 0.95, "gamma": 5, "LR": 0.01}
+    arhitecture = {
+    "downFilters": [32, 64, 128, 256, 512, 512],
+    "downActivation": ["relu", "sigmoid", "relu", "sigmoid", "relu", "sigmoid"],
+    "downDropout": [0.1, 0.1, 0.1, 0.1, 0.1, 0.1],
+    "downMaxPool": [True, True, True, True, True, True],
+    "upFilters": [512, 512, 256, 128],
+    "upActivation": ["sigmoid", "relu", "sigmoid", "relu"],
+    "upDropout": [0.1, 0.1, 0.1, 0.1],
+    "attention": [True, True, True, True]}
     print("Program started at: ", time.ctime())
     start_time = time.time()
     dataset_train = tf.data.TFRecordDataset([args.train_dataset_path])
@@ -34,8 +44,8 @@ def main(args):
     reducelronplateau_kb = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=args.decay_lr_rate,
                                                                 patience=args.decay_lr_patience, verbose=1)
     tuner = kt.Hyperband(hypermodel=tools.hypertuneModels.StockHyperModel(tfrecord_shape,
-                                                                          tools.metrics.FocalTversky (alpha=0.9,
-                                                                                                      gamma=2)),
+                         training_parameters=training_parameters,
+                         arhitecture=arhitecture),
                          objective=kt.Objective('val_f1_score', "max"),
                          max_epochs=args.epochs,
                          factor=int(args.factor),
@@ -58,13 +68,13 @@ def main(args):
     tuner.search(dataset_train, epochs=args.epochs, verbose=2, validation_data=dataset_val,
                  callbacks=[earlystopping_kb, terminateonnan_kb, reducelronplateau_kb])
     if os.environ.get('KERASTUNER_TUNER_ID', "chief") == "chief":
-        #best_hps = tools.hypertuneModels.get_best_hyperparameters(tuner, num_trials=10)
         best_hps = tuner.get_best_hyperparameters(10)
         arhitecture = {}
         for j, hyperparameters in enumerate(best_hps):
             best_model = tuner.hypermodel.build(hyperparameters)
             arhitecture[str(j)] = tools.model.get_architecture_from_model(best_model)
-            print(arhitecture[str(j)])
+            arhitecture[str(j)]["attention"] = [True for i in range(len(arhitecture[str(j)]["downFilters"]))]
+            print(hyperparameters)
         with open(args.arhitecture_destination, 'w') as f:
             json.dump(arhitecture, f)
     print("Program ended at: ", time.ctime(), " with duration: ", time.time() - start_time, " seconds.")

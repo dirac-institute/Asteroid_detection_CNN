@@ -1,10 +1,11 @@
 import tensorflow as tf
 import numpy as np
 
+
 def parse_function(img_shape=(128, 128, 1), test=False):
     def parsing(example_proto):
-        keys_to_features = {'x':tf.io.FixedLenFeature(shape=img_shape, dtype=tf.float32),
-                        'y': tf.io.FixedLenFeature(shape=img_shape, dtype=tf.int64)}
+        keys_to_features = {'x': tf.io.FixedLenFeature(shape=img_shape, dtype=tf.float32),
+                            'y': tf.io.FixedLenFeature(shape=img_shape, dtype=tf.int64)}
         parsed_features = tf.io.parse_single_example(example_proto, keys_to_features)
         parsed_features['y'] = tf.cast(parsed_features['y'], tf.float32)
         parsed_features['x'] = tf.clip_by_value(parsed_features['x'], -100, 100)
@@ -12,6 +13,7 @@ def parse_function(img_shape=(128, 128, 1), test=False):
             return parsed_features['x']
         else:
             return parsed_features['x'], parsed_features['y']
+
     return parsing
 
 
@@ -20,6 +22,7 @@ def reshape_outputs(img_shape=(32, 32)):
         targets = tf.image.resize(targets, img_shape)
         targets = tf.math.ceil(targets)
         return inputs, targets
+
     return reshaping
 
 
@@ -28,7 +31,8 @@ def get_shape_of_quadratic_image_tfrecord(raw_dataset):
                         'y': tf.io.VarLenFeature(dtype=tf.int64)}
     for i in raw_dataset.take(1):
         parsed_features = tf.io.parse_single_example(i, keys_to_features)
-        return (int(np.sqrt(parsed_features["x"].shape[0])), int(np.sqrt(parsed_features["x"].shape[0])), 1)
+        return int(np.sqrt(parsed_features["x"].shape[0])), int(np.sqrt(parsed_features["x"].shape[0])), 1
+
 
 def get_architecture_from_model(model):
     """
@@ -37,13 +41,13 @@ def get_architecture_from_model(model):
     :return: dictionary with the architecture
     """
     architecture = {
-        "downFilters":[],
+        "downFilters": [],
         "downActivation": [],
         "downDropout": [],
         "downMaxPool": [],
         "upFilters": [],
         "upActivation": [],
-        "upDropout": []}
+        "upDropout": [],}
     for layer in model.layers:
         if ("block" in layer.name.lower()) and ("conv1" in layer.name.lower()):
             if layer.name.lower()[0] == "e":
@@ -60,20 +64,20 @@ def get_architecture_from_model(model):
         elif ("eblock" in layer.name.lower()) and ("pool" in layer.name.lower()):
             current_layer = int(layer.name.lower()[6])
             if len(architecture["downMaxPool"]) < current_layer:
-                for i in range(current_layer-len(architecture["downMaxPool"])):
+                for i in range(current_layer - len(architecture["downMaxPool"])):
                     architecture["downMaxPool"].append(False)
             architecture["downMaxPool"].append(True)
     return architecture
 
 
 def attention_gate(g, s, num_filters):
-    Wg = tf.keras.layers.Conv2D(num_filters, 1, padding="same")(g)
-    Wg = tf.keras.layers.BatchNormalization()(Wg)
+    wg = tf.keras.layers.Conv2D(num_filters, 1, padding="same")(g)
+    wg = tf.keras.layers.BatchNormalization()(wg)
 
-    Ws = tf.keras.layers.Conv2D(num_filters, 1, padding="same")(s)
-    Ws = tf.keras.layers.BatchNormalization()(Ws)
+    ws = tf.keras.layers.Conv2D(num_filters, 1, padding="same")(s)
+    ws = tf.keras.layers.BatchNormalization()(ws)
 
-    out = tf.keras.layers.Activation("relu")(Wg + Ws)
+    out = tf.keras.layers.Activation("relu")(wg + ws)
     out = tf.keras.layers.Conv2D(num_filters, 1, padding="same")(out)
     out = tf.keras.layers.BatchNormalization()(out)
     out = tf.keras.layers.Activation("sigmoid")(out)
@@ -199,7 +203,7 @@ def unet_model(input_size, arhitecture):
         skip_connections.append(skip)
         # Decoder
     for i in range(len(arhitecture["upFilters"])):
-        skip_con = skip_connections[len(skip_connections)-1-i]
+        skip_con = skip_connections[len(skip_connections) - 1 - i]
         layer = decoder_mini_block(layer,
                                    skip_con,
                                    n_filters=arhitecture["upFilters"][i],
@@ -214,8 +218,9 @@ def unet_model(input_size, arhitecture):
     model = tf.keras.Model(inputs=[inputs], outputs=[outputs], name="AsteroidNET")
     return model
 
+
 if __name__ == "__main__":
-    arhit = {"downFilters":[16, 32, 64],
+    arhit = {"downFilters": [16, 32, 64],
              "downActivation": ["relu", "relu", "relu"],
              "downDropout": [0.11, 0.12, 0.13],
              "downMaxPool": [True, False, False],
@@ -225,4 +230,4 @@ if __name__ == "__main__":
     model = unet_model((128, 128, 1), arhit)
     arhit1 = get_architecture_from_model(model)
     model.summary()
-    print (arhit1)
+    print(arhit1)
