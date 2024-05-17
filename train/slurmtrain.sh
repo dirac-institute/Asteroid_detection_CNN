@@ -4,7 +4,7 @@
 #SBATCH --mail-type=ALL
 #SBATCH --account=escience
 #SBATCH --output=/mmfs1/home/kmrakovc/Results/Asteroids/training.txt
-#SBATCH --partition=gpu-rtx6k
+#SBATCH --partition=gpu-a40
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=10
