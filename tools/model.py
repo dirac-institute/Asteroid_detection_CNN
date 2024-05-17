@@ -102,7 +102,7 @@ def encoder_mini_block(inputs, n_filters=32, activation="relu", dropout_prob=0.3
     """
 
     conv = tf.keras.layers.Conv2D(n_filters,
-                                  3,  # filter size
+                                  5,  # filter size
                                   activation="linear",
                                   padding='same',
                                   kernel_initializer='HeNormal',
@@ -112,7 +112,7 @@ def encoder_mini_block(inputs, n_filters=32, activation="relu", dropout_prob=0.3
     conv = tf.keras.layers.Activation(activation=activation, name="eblock" + name + activation + "1")(conv)
 
     conv = tf.keras.layers.Conv2D(n_filters,
-                                  3,  # filter size
+                                  5,  # filter size
                                   activation="linear",
                                   padding='same',
                                   kernel_initializer='HeNormal',
@@ -151,7 +151,7 @@ def decoder_mini_block(prev_layer_input, skip_layer_input, n_filters=32, activat
         skip_layer_input = attention_gate(prev_layer_input, skip_layer_input, n_filters)
     merge = tf.keras.layers.concatenate([prev_layer_input, skip_layer_input], name="dblock" + name + "concat")
     conv = tf.keras.layers.Conv2D(n_filters,
-                                  3,  # filter size
+                                  5,  # filter size
                                   activation="linear",
                                   padding='same',
                                   kernel_initializer='HeNormal',
@@ -160,7 +160,7 @@ def decoder_mini_block(prev_layer_input, skip_layer_input, n_filters=32, activat
     conv = tf.keras.layers.Activation(activation=activation, name="dblock" + name + activation + "1")(conv)
 
     conv = tf.keras.layers.Conv2D(n_filters,
-                                  3,  # filter size
+                                  5,  # filter size
                                   activation="linear",
                                   padding='same',
                                   kernel_initializer='HeNormal',
@@ -220,14 +220,4 @@ def unet_model(input_size, arhitecture):
 
 
 if __name__ == "__main__":
-    arhit = {"downFilters": [16, 32, 64],
-             "downActivation": ["relu", "relu", "relu"],
-             "downDropout": [0.11, 0.12, 0.13],
-             "downMaxPool": [True, False, False],
-             "upFilters": [64, 32, 16],
-             "upActivation": ["relu", "relu", "relu"],
-             "upDropout": [0.1, 0.2, 0.3]}
-    model = unet_model((128, 128, 1), arhit)
-    arhit1 = get_architecture_from_model(model)
-    model.summary()
-    print(arhit1)
+    pass

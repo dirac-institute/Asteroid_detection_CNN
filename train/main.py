@@ -37,7 +37,7 @@ def main (args):
 
             model = tools.model.unet_model(tfrecord_shape, arhitecture)
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr),
-                      loss=tools.metrics.FocalTversky(alpha=0.9, gamma=4),
+                      loss=tools.metrics.FocalTversky(alpha=0.9, gamma=1.5),
                       metrics=["Precision", "Recall", tools.metrics.F1_Score()])
 
     if tuple(model.outputs[0].shape[1:]) != tfrecord_shape:
