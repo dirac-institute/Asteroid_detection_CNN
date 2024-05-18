@@ -26,14 +26,18 @@ def main(args):
     "upActivation": ["sigmoid", "relu", "sigmoid", "relu"],
     "upDropout": [0.1, 0.1, 0.1, 0.1],
     "attention": [True, True, True, True]}
+    #arhitecture = None
+    training_parameters = None
     print("Program started at: ", time.ctime())
     start_time = time.time()
     dataset_train = tf.data.TFRecordDataset([args.train_dataset_path])
     tfrecord_shape = tools.model.get_shape_of_quadratic_image_tfrecord(dataset_train)
     dataset_train = dataset_train.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
-    dataset_train = dataset_train.shuffle(5 * args.batch_size).batch(args.batch_size).prefetch(2)
     dataset_val = tf.data.TFRecordDataset([args.test_dataset_path])
     dataset_val = dataset_val.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
+    dataset_train = dataset_train.map(tools.model.reshape_outputs(img_shape=(32, 32)))
+    dataset_val = dataset_val.map(tools.model.reshape_outputs(img_shape=(32, 32)))
+    dataset_train = dataset_train.shuffle(5 * args.batch_size).batch(args.batch_size).prefetch(2)
     dataset_val = dataset_val.batch(args.batch_size).prefetch(2)
     strategy = tf.distribute.MirroredStrategy()
     #strategy = tf.distribute.get_strategy()
