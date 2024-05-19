@@ -20,6 +20,8 @@ srun python3 main.py \
 --model_destination ../DATA/Trained_model_1 \
 --no-multiworker \
 --epochs 512 \
+--alpha 0.9 \
+--gamma 3 \
 --batch_size 128 \
 --start_lr 0.001 \
 --decay_lr_rate 0.75 \

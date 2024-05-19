@@ -47,7 +47,7 @@ def get_architecture_from_model(model):
         "downMaxPool": [],
         "upFilters": [],
         "upActivation": [],
-        "upDropout": [],}
+        "upDropout": [], }
     for layer in model.layers:
         if ("block" in layer.name.lower()) and ("conv1" in layer.name.lower()):
             if layer.name.lower()[0] == "e":
@@ -70,19 +70,20 @@ def get_architecture_from_model(model):
     return architecture
 
 
-def attention_gate(g, s, num_filters):
-    wg = tf.keras.layers.Conv2D(num_filters, 1, padding="same")(g)
-    wg = tf.keras.layers.BatchNormalization()(wg)
+def attention_gate(g, s, num_filters, name=""):
+    wg = tf.keras.layers.Conv2D(num_filters, 1, padding="same", name="attention" + name + "_sconv")(g)
+    wg = tf.keras.layers.BatchNormalization(name="attention" + name + "_gnorm")(wg)
 
-    ws = tf.keras.layers.Conv2D(num_filters, 1, padding="same")(s)
-    ws = tf.keras.layers.BatchNormalization()(ws)
+    ws = tf.keras.layers.Conv2D(num_filters, 1, padding="same", name="attention" + name + "_gconv")(s)
+    ws = tf.keras.layers.BatchNormalization(name="attention" + name + "_snorm")(ws)
 
-    out = tf.keras.layers.Activation("relu")(wg + ws)
-    out = tf.keras.layers.Conv2D(num_filters, 1, padding="same")(out)
-    out = tf.keras.layers.BatchNormalization()(out)
-    out = tf.keras.layers.Activation("sigmoid")(out)
-
-    return out * s
+    out = tf.keras.layers.add([wg, ws], name="attention" + name + "_sum")
+    out = tf.keras.layers.Activation("relu", name="attention" + name + "_relu")(out)
+    out = tf.keras.layers.Conv2D(num_filters, 1, padding="same", name="attention" + name + "_conv")(out)
+    out = tf.keras.layers.BatchNormalization(name="attention" + name + "_norm")(out)
+    out = tf.keras.layers.Activation("sigmoid", name="attention" + name + "_sigmoid")(out)
+    out = tf.keras.layers.multiply([out, s], name="attention" + name + "_multiply")
+    return out
 
 
 def encoder_mini_block(inputs, n_filters=32, activation="relu", dropout_prob=0.3, max_pooling=True, name=""):
@@ -106,32 +107,32 @@ def encoder_mini_block(inputs, n_filters=32, activation="relu", dropout_prob=0.3
                                   activation="linear",
                                   padding='same',
                                   kernel_initializer='HeNormal',
-                                  name="eblock" + name + "conv1")(inputs)
+                                  name="eblock" + name + "_conv1")(inputs)
 
-    conv = tf.keras.layers.BatchNormalization(name="eblock" + name + "norm1")(conv)
-    conv = tf.keras.layers.Activation(activation=activation, name="eblock" + name + activation + "1")(conv)
+    conv = tf.keras.layers.BatchNormalization(name="eblock" + name + "_norm1")(conv)
+    conv = tf.keras.layers.Activation(activation=activation, name="eblock" + name + "_" + activation + "1")(conv)
 
     conv = tf.keras.layers.Conv2D(n_filters,
                                   5,  # filter size
                                   activation="linear",
                                   padding='same',
                                   kernel_initializer='HeNormal',
-                                  name="eblock" + name + "conv2")(conv)
-    conv = tf.keras.layers.BatchNormalization(name="eblock" + name + "norm2")(conv)
-    conv = tf.keras.layers.Activation(activation=activation, name="eblock" + name + activation + "2")(conv)
+                                  name="eblock" + name + "_conv2")(conv)
+    conv = tf.keras.layers.BatchNormalization(name="eblock" + name + "_norm2")(conv)
+    conv = tf.keras.layers.Activation(activation=activation, name="eblock" + name + "_" + activation + "2")(conv)
 
     if dropout_prob > 0:
-        conv = tf.keras.layers.Dropout(dropout_prob, name="eblock" + name + "drop")(conv)
+        conv = tf.keras.layers.Dropout(dropout_prob, name="eblock" + name + "_dropout")(conv)
     if max_pooling:
-        next_layer = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), name="eblock" + name + "pool")(conv)
+        next_layer = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), name="eblock" + name + "_pool")(conv)
     else:
         next_layer = conv
     skip_connection = conv
     return next_layer, skip_connection
 
 
-def decoder_mini_block(prev_layer_input, skip_layer_input, n_filters=32, activation="relu", dropout_prob=0.3,
-                       max_pooling=True, attention=True, name=""):
+def decoder_mini_block(prev_layer_input, skip_layer_input=None, n_filters=32, activation="relu", dropout_prob=0.3,
+                       max_pooling=True, attention=True, merge_operation="concat", name=""):
     """
     Decoder mini block for U-Net architecture that consists of a transposed convolutional layer followed by two
     convolutional layers. The skip connection is the concatenation of the transposed convolutional layer and the
@@ -146,34 +147,52 @@ def decoder_mini_block(prev_layer_input, skip_layer_input, n_filters=32, activat
     """
 
     if max_pooling:
-        prev_layer_input = tf.keras.layers.UpSampling2D(interpolation="bilinear")(prev_layer_input)
-    if attention and max_pooling:
-        skip_layer_input = attention_gate(prev_layer_input, skip_layer_input, n_filters)
-    merge = tf.keras.layers.concatenate([prev_layer_input, skip_layer_input], name="dblock" + name + "concat")
+        prev_layer_input = tf.keras.layers.UpSampling2D(interpolation="bilinear",
+                                                        name="dblock" + name + "_upsampling")(prev_layer_input)
+    prev_layer_input = tf.keras.layers.Conv2D(n_filters,
+                                              5,  # filter size
+                                              activation="linear",
+                                              padding='same',
+                                              kernel_initializer='HeNormal',
+                                              name="dblock" + name + "_conv0")(prev_layer_input)
+    prev_layer_input = tf.keras.layers.BatchNormalization(name="dblock" + name + "_norm0")(prev_layer_input)
+    prev_layer_input = tf.keras.layers.Activation(activation=activation,
+                                                  name="dblock" + name + "_" + activation + "0")(prev_layer_input)
+    if skip_layer_input is not None:
+        if attention and max_pooling:
+            skip_layer_input = attention_gate(prev_layer_input, skip_layer_input, n_filters, name=name)
+        if merge_operation == "concat":
+            merge = tf.keras.layers.concatenate([prev_layer_input, skip_layer_input],
+                                                name="dblock" + name + "_merge")
+        elif merge_operation == "add":
+            merge = tf.keras.layers.add([prev_layer_input, skip_layer_input],
+                                        name="dblock" + name + "_merge")
+    else:
+        merge = prev_layer_input
     conv = tf.keras.layers.Conv2D(n_filters,
                                   5,  # filter size
                                   activation="linear",
                                   padding='same',
                                   kernel_initializer='HeNormal',
-                                  name="dblock" + name + "conv1")(merge)
-    conv = tf.keras.layers.BatchNormalization(name="dblock" + name + "norm1")(conv)
-    conv = tf.keras.layers.Activation(activation=activation, name="dblock" + name + activation + "1")(conv)
+                                  name="dblock" + name + "_conv1")(merge)
+    conv = tf.keras.layers.BatchNormalization(name="dblock" + name + "_norm1")(conv)
+    conv = tf.keras.layers.Activation(activation=activation, name="dblock" + name + "_" + activation + "1")(conv)
 
     conv = tf.keras.layers.Conv2D(n_filters,
                                   5,  # filter size
                                   activation="linear",
                                   padding='same',
                                   kernel_initializer='HeNormal',
-                                  name="dblock" + name + "conv2")(conv)
-    conv = tf.keras.layers.BatchNormalization(name="dblock" + name + "norm2")(conv)
-    conv = tf.keras.layers.Activation(activation=activation, name="dblock" + name + activation + "2")(conv)
+                                  name="dblock" + name + "_conv2")(conv)
+    conv = tf.keras.layers.BatchNormalization(name="dblock" + name + "_norm2")(conv)
+    conv = tf.keras.layers.Activation(activation=activation, name="dblock" + name + "_" + activation + "2")(conv)
     if dropout_prob > 0:
-        conv = tf.keras.layers.Dropout(dropout_prob, name="dblock" + name + "drop")(conv)
+        conv = tf.keras.layers.Dropout(dropout_prob, name="dblock" + name + "_dropout")(conv)
 
     return conv
 
 
-def unet_model(input_size, arhitecture):
+def unet_model(input_size, arhitecture, merge_operation="concat"):
     """
     U-Net model for semantic segmentation. The model consists of an encoder and a decoder. The encoder downsamples the
     input image and extracts features. The decoder upsamples the features and generates the segmentation mask. Skip
@@ -185,11 +204,9 @@ def unet_model(input_size, arhitecture):
     :param arhitecture: Dictionary containing the architecture of the U-Net model
     :return: U-Net model
     """
-
     inputs = tf.keras.layers.Input(input_size, name="input")
-    inputs = tf.keras.layers.BatchNormalization(name="inputNormalisation")(inputs)
+    layer = tf.keras.layers.BatchNormalization(name="input_normalisation")(inputs)
     skip_connections = []
-    layer = inputs
     if not "attention" in arhitecture.keys():
         arhitecture["attention"] = [False for i in arhitecture["upFilters"]]
     # Encoder
@@ -200,8 +217,12 @@ def unet_model(input_size, arhitecture):
                                          dropout_prob=arhitecture["downDropout"][i],
                                          max_pooling=arhitecture["downMaxPool"][i],
                                          name=str(i))
-        skip_connections.append(skip)
-        # Decoder
+        if i != len(arhitecture["downFilters"]):
+            skip_connections.append(skip)
+        else:
+            skip_connections.append(None)
+
+    # Decoder
     for i in range(len(arhitecture["upFilters"])):
         skip_con = skip_connections[len(skip_connections) - 1 - i]
         layer = decoder_mini_block(layer,
@@ -211,6 +232,7 @@ def unet_model(input_size, arhitecture):
                                    attention=arhitecture["attention"][i],
                                    dropout_prob=arhitecture["upDropout"][i],
                                    max_pooling=arhitecture["downMaxPool"][len(arhitecture["upFilters"]) - 1 - i],
+                                   merge_operation=merge_operation,
                                    name=str(len(arhitecture["upFilters"]) - 1 - i))
 
     outputs = tf.keras.layers.Conv2D(1, (1, 1), activation='sigmoid', name="output")(layer)

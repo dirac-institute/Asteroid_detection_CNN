@@ -38,14 +38,14 @@ def main(args):
         else:
             model = tools.model.unet_model(tfrecord_shape, arhitecture)
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr),
-                      loss=tools.metrics.FocalTversky(alpha=0.9, gamma=1.5),
+                      loss=tools.metrics.FocalTversky(alpha=args.alpha, gamma=args.gamma),
                       metrics=["Precision", "Recall", tools.metrics.F1_Score()])
 
     if tuple(model.outputs[0].shape[1:]) != tfrecord_shape:
         dataset_train = dataset_train.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
         dataset_val = dataset_val.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
 
-    dataset_train = dataset_train.shuffle(5 * args.batch_size).batch(args.batch_size).prefetch(2)
+    dataset_train = dataset_train.shuffle(500 * args.batch_size).batch(args.batch_size).prefetch(2)
     dataset_val = dataset_val.batch(args.batch_size).prefetch(2)
 
     earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5 * args.decay_lr_patience,
@@ -94,6 +94,12 @@ def parse_arguments(args):
     parser.add_argument('--epochs', type=int,
                         default=64,
                         help='Number of epochs.')
+    parser.add_argument('--alpha', type=float,
+                        default=0.9,
+                        help='Alpha parameter in loss function.')
+    parser.add_argument('--gamma', type=float,
+                        default=3,
+                        help='Gamma parameter in loss function.')
     parser.add_argument('--batch_size', type=int,
                         default=128,
                         help='Batch size.')
