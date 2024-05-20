@@ -79,9 +79,11 @@ def attention_gate(g, s, num_filters, kernel_size=3, name=""):
 
     out = tf.keras.layers.add([wg, ws], name="attention" + name + "_sum")
     out = tf.keras.layers.Activation("relu", name="attention" + name + "_relu")(out)
-    out = tf.keras.layers.Conv2D(num_filters, 3, padding="same", name="attention" + name + "_conv")(out)
+    out = tf.keras.layers.Conv2D(num_filters, kernel_size, padding="same", name="attention" + name + "_conv")(out)
     out = tf.keras.layers.BatchNormalization(name="attention" + name + "_norm")(out)
     out = tf.keras.layers.Activation("sigmoid", name="attention" + name + "_sigmoid")(out)
+
+    s = tf.keras.layers.DepthwiseConv2D(kernel_size, padding="same", name="attention" + name + "_depthwise")(s)
     out = tf.keras.layers.multiply([out, s], name="attention" + name + "_multiply")
     return out
 

@@ -46,7 +46,7 @@ def main(args):
         dataset_train = dataset_train.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
         dataset_val = dataset_val.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
 
-    dataset_train = dataset_train.shuffle(500 * args.batch_size).batch(args.batch_size).prefetch(10)
+    dataset_train = dataset_train.shuffle(64000).batch(args.batch_size).prefetch(10)
     dataset_val = dataset_val.batch(args.batch_size).prefetch(10)
 
     earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5 * args.decay_lr_patience,
@@ -108,7 +108,7 @@ def parse_arguments(args):
                         help='Size of the kernel.')
 
     parser.add_argument('--merge_operation', type=str,
-                        default="add",
+                        default="concat",
                         help='Merge operation to be used in the model.')
 
     parser.add_argument('--epochs', type=int,
@@ -140,7 +140,7 @@ def parse_arguments(args):
                         help='Number of iteration to wait upon reaching the plateau.')
 
     parser.add_argument('-v', '--verbose', action=argparse.BooleanOptionalAction,
-                        default=False,
+                        default=True,
                         help='Verbose output.')
 
     return parser.parse_args(args)

@@ -4,7 +4,7 @@
 #SBATCH --mail-type=ALL
 #SBATCH --account=escience
 #SBATCH --output=/mmfs1/home/kmrakovc/Results/Asteroids/training_%j.txt
-#SBATCH --partition=gpu-a40
+#SBATCH --partition=gpu-rtx6k
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=10
@@ -20,7 +20,7 @@ srun python3 main.py \
 --model_destination ../DATA/Trained_model_$SLURM_JOB_ID \
 --no-multiworker \
 --kernel_size 3 \
---merge_operation "add" \
+--merge_operation "concat" \
 --epochs 512 \
 --alpha 0.9 \
 --gamma 3 \
