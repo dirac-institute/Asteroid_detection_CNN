@@ -84,7 +84,7 @@ def parse_arguments(args):
                         help='Path to training dataset.')
 
     parser.add_argument('--test_dataset_path', type=str,
-                        default='../DATA/train1.tfrecord',
+                        default='../DATA/test1.tfrecord',
                         help='Path to test dataset.')
 
     parser.add_argument('--arhitecture', type=str,
