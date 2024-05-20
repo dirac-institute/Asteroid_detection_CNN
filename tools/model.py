@@ -71,15 +71,15 @@ def get_architecture_from_model(model):
 
 
 def attention_gate(g, s, num_filters, name=""):
-    wg = tf.keras.layers.Conv2D(num_filters, 1, padding="same", name="attention" + name + "_sconv")(g)
+    wg = tf.keras.layers.Conv2D(num_filters, 3, padding="same", name="attention" + name + "_sconv")(g)
     wg = tf.keras.layers.BatchNormalization(name="attention" + name + "_gnorm")(wg)
 
-    ws = tf.keras.layers.Conv2D(num_filters, 1, padding="same", name="attention" + name + "_gconv")(s)
+    ws = tf.keras.layers.Conv2D(num_filters, 3, padding="same", name="attention" + name + "_gconv")(s)
     ws = tf.keras.layers.BatchNormalization(name="attention" + name + "_snorm")(ws)
 
     out = tf.keras.layers.add([wg, ws], name="attention" + name + "_sum")
     out = tf.keras.layers.Activation("relu", name="attention" + name + "_relu")(out)
-    out = tf.keras.layers.Conv2D(num_filters, 1, padding="same", name="attention" + name + "_conv")(out)
+    out = tf.keras.layers.Conv2D(num_filters, 3, padding="same", name="attention" + name + "_conv")(out)
     out = tf.keras.layers.BatchNormalization(name="attention" + name + "_norm")(out)
     out = tf.keras.layers.Activation("sigmoid", name="attention" + name + "_sigmoid")(out)
     out = tf.keras.layers.multiply([out, s], name="attention" + name + "_multiply")
@@ -103,7 +103,8 @@ def encoder_mini_block(inputs, n_filters=32, activation="relu", dropout_prob=0.3
     """
 
     conv = tf.keras.layers.Conv2D(n_filters,
-                                  5,  # filter size
+                                  7,  # filter size
+                                  strides=1,
                                   activation="linear",
                                   padding='same',
                                   kernel_initializer='HeNormal',
@@ -113,7 +114,8 @@ def encoder_mini_block(inputs, n_filters=32, activation="relu", dropout_prob=0.3
     conv = tf.keras.layers.Activation(activation=activation, name="eblock" + name + "_" + activation + "1")(conv)
 
     conv = tf.keras.layers.Conv2D(n_filters,
-                                  5,  # filter size
+                                  7,  # filter size
+                                  strides=1,
                                   activation="linear",
                                   padding='same',
                                   kernel_initializer='HeNormal',
@@ -150,7 +152,8 @@ def decoder_mini_block(prev_layer_input, skip_layer_input=None, n_filters=32, ac
         prev_layer_input = tf.keras.layers.UpSampling2D(interpolation="bilinear",
                                                         name="dblock" + name + "_upsampling")(prev_layer_input)
     prev_layer_input = tf.keras.layers.Conv2D(n_filters,
-                                              5,  # filter size
+                                              7,  # filter size
+                                              strides=1,
                                               activation="linear",
                                               padding='same',
                                               kernel_initializer='HeNormal',
@@ -167,10 +170,13 @@ def decoder_mini_block(prev_layer_input, skip_layer_input=None, n_filters=32, ac
         elif merge_operation == "add":
             merge = tf.keras.layers.add([prev_layer_input, skip_layer_input],
                                         name="dblock" + name + "_merge")
+        else:
+            raise ValueError("Merge operation " + merge_operation + " not supported")
     else:
         merge = prev_layer_input
     conv = tf.keras.layers.Conv2D(n_filters,
-                                  5,  # filter size
+                                  7,  # filter size
+                                  strides=1,
                                   activation="linear",
                                   padding='same',
                                   kernel_initializer='HeNormal',
@@ -179,7 +185,8 @@ def decoder_mini_block(prev_layer_input, skip_layer_input=None, n_filters=32, ac
     conv = tf.keras.layers.Activation(activation=activation, name="dblock" + name + "_" + activation + "1")(conv)
 
     conv = tf.keras.layers.Conv2D(n_filters,
-                                  5,  # filter size
+                                  7,  # filter size
+                                  strides=1,
                                   activation="linear",
                                   padding='same',
                                   kernel_initializer='HeNormal',

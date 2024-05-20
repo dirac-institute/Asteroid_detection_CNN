@@ -3,7 +3,7 @@
 #SBATCH --job-name=TrainD
 #SBATCH --mail-type=ALL
 #SBATCH --account=escience
-#SBATCH --output=/mmfs1/home/kmrakovc/Results/Asteroids/training.txt
+#SBATCH --output=/mmfs1/home/kmrakovc/Results/Asteroids/training_%j.txt
 #SBATCH --partition=gpu-a40
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -17,7 +17,7 @@ srun python3 main.py \
 --train_dataset_path ../DATA/train1.tfrecord \
 --test_dataset_path ../DATA/test1.tfrecord \
 --arhitecture ../DATA/arhitecture_tuned.json \
---model_destination ../DATA/Trained_model_1 \
+--model_destination ../DATA/Trained_model_$SLURM_JOB_ID \
 --no-multiworker \
 --epochs 512 \
 --alpha 0.9 \
