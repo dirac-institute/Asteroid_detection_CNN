@@ -36,7 +36,8 @@ def main(args):
         if os.path.isfile(args.model_destination):
             model = tf.keras.models.load_model(args.model_destination, compile=False)
         else:
-            model = tools.model.unet_model(tfrecord_shape, arhitecture)
+            model = tools.model.unet_model(tfrecord_shape, arhitecture, kernel_size=args.kernel_size,
+                                           merge_operation="add")
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr),
                       loss=tools.metrics.FocalTversky(alpha=args.alpha, gamma=args.gamma),
                       metrics=["Precision", "Recall", tools.metrics.F1_Score()])
@@ -63,7 +64,7 @@ def main(args):
     else:
         kb = [terminateonnan_kb, reducelronplateau_kb]
     results = model.fit(dataset_train, epochs=args.epochs, validation_data=dataset_val,
-                        callbacks=kb, verbose=2)
+                        callbacks=kb, verbose=1)
     #if (task_type == 'worker' and task_id == 0) or task_type is None:
     #    model.save(args.model_destination)
 
@@ -75,43 +76,65 @@ def parse_arguments(args):
     Returns:
         args (Namespace): Parsed command line arguments.
     """
+
     parser = argparse.ArgumentParser()
+
     parser.add_argument('--train_dataset_path', type=str,
                         default='../DATA/train1.tfrecord',
                         help='Path to training dataset.')
+
     parser.add_argument('--test_dataset_path', type=str,
-                        default='../DATA/test1.tfrecord',
+                        default='../DATA/train1.tfrecord',
                         help='Path to test dataset.')
+
     parser.add_argument('--arhitecture', type=str,
                         default="../DATA/arhitecture_tuned.json",
                         help='Path to a JSON containing definition of an arhitecture.')
+
     parser.add_argument('--model_destination', type=str,
                         default="../DATA/Trained_model3",
                         help='Path where to save the model once trained.')
+
     parser.add_argument('-d', '--multiworker', action=argparse.BooleanOptionalAction,
                         default=False,
                         help='Use multiworker strategy.')
+
+    parser.add_argument('--kernel_size', type=int,
+                        default=3,
+                        help='Size of the kernel.')
+
+    parser.add_argument('--merge_operation', type=str,
+                        default="add",
+                        help='Merge operation to be used in the model.')
+
     parser.add_argument('--epochs', type=int,
-                        default=64,
+                        default=8,
                         help='Number of epochs.')
+
     parser.add_argument('--alpha', type=float,
                         default=0.9,
                         help='Alpha parameter in loss function.')
+
     parser.add_argument('--gamma', type=float,
                         default=3,
                         help='Gamma parameter in loss function.')
+
     parser.add_argument('--batch_size', type=int,
-                        default=128,
+                        default=32,
                         help='Batch size.')
+
     parser.add_argument('--start_lr', type=float,
                         default=0.001,
                         help='Initial learning rate.')
+
     parser.add_argument('--decay_lr_rate', type=float,
                         default=0.75,
                         help='Rate at which to decay the learning rate upon reaching the plateau.')
+
     parser.add_argument('--decay_lr_patience', type=float,
                         default=2,
                         help='Number of iteration to wait upon reaching the plateau.')
+
     return parser.parse_args(args)
 
 
