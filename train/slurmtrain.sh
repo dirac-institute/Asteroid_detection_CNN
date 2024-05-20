@@ -27,4 +27,5 @@ srun python3 main.py \
 --batch_size 512 \
 --start_lr 0.001 \
 --decay_lr_rate 0.75 \
---decay_lr_patience 8
+--decay_lr_patience 8 \
+--no-verbose

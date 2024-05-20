@@ -63,8 +63,12 @@ def main(args):
         kb = [terminateonnan_kb, reducelronplateau_kb, checkpoint_kb]
     else:
         kb = [terminateonnan_kb, reducelronplateau_kb]
+    if args.verbose:
+        verbose = 1
+    else:
+        verbose = 2
     results = model.fit(dataset_train, epochs=args.epochs, validation_data=dataset_val,
-                        callbacks=kb, verbose=1)
+                        callbacks=kb, verbose=verbose)
     #if (task_type == 'worker' and task_id == 0) or task_type is None:
     #    model.save(args.model_destination)
 
@@ -134,6 +138,10 @@ def parse_arguments(args):
     parser.add_argument('--decay_lr_patience', type=float,
                         default=2,
                         help='Number of iteration to wait upon reaching the plateau.')
+
+    parser.add_argument('-v', '--verbose', action=argparse.BooleanOptionalAction,
+                        default=False,
+                        help='Verbose output.')
 
     return parser.parse_args(args)
 
