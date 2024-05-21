@@ -254,7 +254,7 @@ def unet_model(input_size, arhitecture, kernel_size=3, merge_operation="concat")
                                    activation=arhitecture["upActivation"][i],
                                    attention=arhitecture["attention"][i],
                                    dropout_prob=arhitecture["upDropout"][i],
-                                   max_pooling=arhitecture["downMaxPool"][len(arhitecture["upFilters"]) - 1 - i],
+                                   max_pooling=arhitecture["downMaxPool"][len(arhitecture["downMaxPool"]) - 1 - i],
                                    merge_operation=merge_operation,
                                    name=str(len(arhitecture["upFilters"]) - 1 - i))
 
