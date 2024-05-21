@@ -16,7 +16,7 @@ def parse_function(img_shape=(128, 128, 1), test=False, clip=True):
         parsed_features = tf.io.parse_single_example(example_proto, keys_to_features)
         parsed_features['y'] = tf.cast(parsed_features['y'], tf.float32)
         if clip:
-            parsed_features['x'] = tf.clip_by_value(parsed_features['x'], -166.43/2, 169.96/2)
+            parsed_features['x'] = tf.clip_by_value(parsed_features['x'], -166.43, 169.96)
         if test:
             return parsed_features['x']
         else:
