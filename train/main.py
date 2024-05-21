@@ -40,7 +40,7 @@ def main(args):
                                            merge_operation="add")
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr),
                       loss=tools.metrics.FocalTversky(alpha=args.alpha, gamma=args.gamma),
-                      metrics=["Precision", "Recall", tools.metrics.F1_Score_objects()])
+                      metrics=["Precision", "Recall", tools.metrics.F1_Score()])
 
     if tuple(model.outputs[0].shape[1:]) != tfrecord_shape:
         dataset_train = dataset_train.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
