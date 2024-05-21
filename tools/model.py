@@ -16,7 +16,7 @@ def parse_function(img_shape=(128, 128, 1), test=False, clip=True):
         parsed_features = tf.io.parse_single_example(example_proto, keys_to_features)
         parsed_features['y'] = tf.cast(parsed_features['y'], tf.float32)
         if clip:
-            parsed_features['x'] = tf.clip_by_value(parsed_features['x'], -166.43, 169.96)
+            parsed_features['x'] = tf.clip_by_value(parsed_features['x'], -166.43/2, 169.96/2)
         if test:
             return parsed_features['x']
         else:
@@ -80,18 +80,20 @@ def get_architecture_from_model(model):
 
 def attention_gate(g, s, num_filters, kernel_size=3, name=""):
     wg = tf.keras.layers.Conv2D(num_filters, kernel_size, padding="same", name="attention" + name + "_sconv")(g)
-    wg = tf.keras.layers.BatchNormalization(name="attention" + name + "_gnorm")(wg)
+    #wg = tf.keras.layers.BatchNormalization(name="attention" + name + "_snorm")(wg)
 
     ws = tf.keras.layers.Conv2D(num_filters, kernel_size, padding="same", name="attention" + name + "_gconv")(s)
-    ws = tf.keras.layers.BatchNormalization(name="attention" + name + "_snorm")(ws)
+    #ws = tf.keras.layers.BatchNormalization(name="attention" + name + "_gnorm")(ws)
 
     out = tf.keras.layers.add([wg, ws], name="attention" + name + "_sum")
+    out = tf.keras.layers.BatchNormalization(name="attention" + name + "_sum_norm")(out)
     out = tf.keras.layers.Activation("relu", name="attention" + name + "_relu")(out)
     out = tf.keras.layers.Conv2D(num_filters, kernel_size, padding="same", name="attention" + name + "_conv")(out)
     out = tf.keras.layers.BatchNormalization(name="attention" + name + "_norm")(out)
     out = tf.keras.layers.Activation("sigmoid", name="attention" + name + "_sigmoid")(out)
 
-    s = tf.keras.layers.DepthwiseConv2D(kernel_size+2, padding="same", name="attention" + name + "_depthwise")(s)
+    s = tf.keras.layers.DepthwiseConv2D(kernel_size+2, activation="sigmoid", padding="same",
+                                        name="attention" + name + "_depthwise")(s)
     out = tf.keras.layers.multiply([out, s], name="attention" + name + "_multiply")
     return out
 
@@ -237,7 +239,7 @@ def unet_model(input_size, arhitecture, kernel_size=3, merge_operation="concat")
                                          dropout_prob=arhitecture["downDropout"][i],
                                          max_pooling=arhitecture["downMaxPool"][i],
                                          name=str(i))
-        if i != len(arhitecture["downFilters"]):
+        if i != len(arhitecture["downFilters"])-1:
             skip_connections.append(skip)
         else:
             skip_connections.append(None)
@@ -256,7 +258,9 @@ def unet_model(input_size, arhitecture, kernel_size=3, merge_operation="concat")
                                    merge_operation=merge_operation,
                                    name=str(len(arhitecture["upFilters"]) - 1 - i))
 
-    outputs = tf.keras.layers.Conv2D(1, kernel_size, activation='sigmoid', name="output")(layer)
+    outputs = tf.keras.layers.Conv2D(1, kernel_size, padding='same', name="output_conv")(layer)
+    outputs = tf.keras.layers.BatchNormalization(name="output_norm")(outputs)
+    outputs = tf.keras.layers.Activation(activation="sigmoid", name="output_sigmoid")(outputs)
 
     model = tf.keras.Model(inputs=[inputs], outputs=[outputs], name="AsteroidNET")
     return model

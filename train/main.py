@@ -37,7 +37,7 @@ def main(args):
             model = tf.keras.models.load_model(args.model_destination, compile=False)
         else:
             model = tools.model.unet_model(tfrecord_shape, arhitecture, kernel_size=args.kernel_size,
-                                           merge_operation="add")
+                                           merge_operation=args.merge_operation)
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr),
                       loss=tools.metrics.FocalTversky(alpha=args.alpha, gamma=args.gamma),
                       metrics=["Precision", "Recall", tools.metrics.F1_Score()])
@@ -67,8 +67,8 @@ def main(args):
         verbose = 1
     else:
         verbose = 2
-    results = model.fit(dataset_train, epochs=args.epochs, validation_data=dataset_val,
-                        callbacks=kb, verbose=verbose)
+    #tf.keras.utils.plot_model(model, to_file='model.png', show_shapes=True, show_layer_names=True)
+    results = model.fit(dataset_train, epochs=args.epochs, validation_data=dataset_val, callbacks=kb, verbose=verbose)
     #if (task_type == 'worker' and task_id == 0) or task_type is None:
     #    model.save(args.model_destination)
 
