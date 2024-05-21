@@ -2,7 +2,7 @@ import tensorflow as tf
 import numpy as np
 
 
-def parse_function(img_shape=(128, 128, 1), test=False, clip=False):
+def parse_function(img_shape=(128, 128, 1), test=False, clip=True):
     """
 
     :param img_shape:
@@ -16,7 +16,7 @@ def parse_function(img_shape=(128, 128, 1), test=False, clip=False):
         parsed_features = tf.io.parse_single_example(example_proto, keys_to_features)
         parsed_features['y'] = tf.cast(parsed_features['y'], tf.float32)
         if clip:
-            parsed_features['x'] = tf.clip_by_value(parsed_features['x'], -100, 100)
+            parsed_features['x'] = tf.clip_by_value(parsed_features['x'], -166.43, 169.96)
         if test:
             return parsed_features['x']
         else:
@@ -91,7 +91,7 @@ def attention_gate(g, s, num_filters, kernel_size=3, name=""):
     out = tf.keras.layers.BatchNormalization(name="attention" + name + "_norm")(out)
     out = tf.keras.layers.Activation("sigmoid", name="attention" + name + "_sigmoid")(out)
 
-    s = tf.keras.layers.DepthwiseConv2D(kernel_size, padding="same", name="attention" + name + "_depthwise")(s)
+    s = tf.keras.layers.DepthwiseConv2D(kernel_size+2, padding="same", name="attention" + name + "_depthwise")(s)
     out = tf.keras.layers.multiply([out, s], name="attention" + name + "_multiply")
     return out
 
