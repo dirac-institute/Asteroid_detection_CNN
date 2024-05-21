@@ -2,13 +2,21 @@ import tensorflow as tf
 import numpy as np
 
 
-def parse_function(img_shape=(128, 128, 1), test=False):
+def parse_function(img_shape=(128, 128, 1), test=False, clip=False):
+    """
+
+    :param img_shape:
+    :param test:
+    :param clip:
+    :return:
+    """
     def parsing(example_proto):
         keys_to_features = {'x': tf.io.FixedLenFeature(shape=img_shape, dtype=tf.float32),
                             'y': tf.io.FixedLenFeature(shape=img_shape, dtype=tf.int64)}
         parsed_features = tf.io.parse_single_example(example_proto, keys_to_features)
         parsed_features['y'] = tf.cast(parsed_features['y'], tf.float32)
-        parsed_features['x'] = tf.clip_by_value(parsed_features['x'], -100, 100)
+        if clip:
+            parsed_features['x'] = tf.clip_by_value(parsed_features['x'], -100, 100)
         if test:
             return parsed_features['x']
         else:
