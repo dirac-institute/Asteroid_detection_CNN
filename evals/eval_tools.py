@@ -16,10 +16,12 @@ def create_NN_prediction(dataset_path, model_path="../DATA/Trained_model", thres
     with mirrored_strategy.scope():
         model = tf.keras.models.load_model(model_path, compile=False)
         predictions = model.predict(dataset_test, verbose=0)
-    if tuple(model.outputs[0].shape[1:]) == tfrecord_shape:
+    if threshold > 0:
         predictions = (predictions > threshold).astype(float)
     else:
-        predictions = np.ceil(np.array(tf.image.resize((predictions > threshold).astype(float), tfrecord_shape[:-1])))
+        predictions = predictions.astype(float)
+    if not tuple(model.outputs[0].shape[1:]) == tfrecord_shape:
+        predictions = np.ceil(np.array(tf.image.resize(predictions, tfrecord_shape[:-1])))
     predictions = tools.data.npy_merge(predictions, (4176, 2048))
     return predictions
 
