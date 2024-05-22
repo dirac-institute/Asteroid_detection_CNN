@@ -7,7 +7,8 @@ import numpy as np
 import pandas as pd
 import multiprocessing
 
-def create_NN_prediction(dataset_path, model_path="../DATA/Trained_model", threshold=0.5, batch_size=1024):
+def create_NN_prediction(dataset_path, model_path="../DATA/Trained_model", threshold=0.5, batch_size=1024,
+                         verbose=True):
     dataset_test = tf.data.TFRecordDataset([dataset_path])
     tfrecord_shape = tools.model.get_shape_of_quadratic_image_tfrecord(dataset_test)
     dataset_test = dataset_test.map(tools.model.parse_function(img_shape=tfrecord_shape, test=True))
@@ -15,7 +16,7 @@ def create_NN_prediction(dataset_path, model_path="../DATA/Trained_model", thres
     mirrored_strategy = tf.distribute.MirroredStrategy()
     with mirrored_strategy.scope():
         model = tf.keras.models.load_model(model_path, compile=False)
-        predictions = model.predict(dataset_test, verbose=0)
+        predictions = model.predict(dataset_test, verbose=1 if verbose else 0)
     if threshold > 0:
         predictions = (predictions > threshold).astype(float)
     else:
