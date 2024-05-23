@@ -1,13 +1,15 @@
 {
   "0": {
     "downFilters": [
-      8,
+      32,
+      64,
       128,
       256,
       512,
-      512
+      1024
     ],
     "downActivation": [
+      "sigmoid",
       "relu",
       "sigmoid",
       "relu",
@@ -15,13 +17,15 @@
       "relu"
     ],
     "downDropout": [
-      0,
-      0,
-      0,
-      0,
-      0
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1
     ],
     "downMaxPool": [
+      true,
       true,
       true,
       true,

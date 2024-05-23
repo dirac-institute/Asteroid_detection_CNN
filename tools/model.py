@@ -78,7 +78,7 @@ def get_architecture_from_model(model):
     return architecture
 
 
-def attention_gate(g, s, num_filters, kernel_size=3, name=""):
+def attention_gate(g, s, num_filters, kernel_size=5, name=""):
     wg = tf.keras.layers.Conv2D(num_filters, kernel_size, padding="same", name="attention" + name + "_sconv")(g)
     #wg = tf.keras.layers.BatchNormalization(name="attention" + name + "_snorm")(wg)
 
