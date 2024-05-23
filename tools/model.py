@@ -1,5 +1,6 @@
 import tensorflow as tf
 import numpy as np
+from tools.attention_module import attach_attention_module
 
 
 def parse_function(img_shape=(128, 128, 1), test=False, clip=True):
@@ -134,6 +135,7 @@ def encoder_mini_block(inputs, n_filters=32, kernel_size=3, activation="relu", d
                                   name="eblock" + name + "_conv2")(conv)
     conv = tf.keras.layers.BatchNormalization(name="eblock" + name + "_norm2")(conv)
     conv = tf.keras.layers.Activation(activation=activation, name="eblock" + name + "_" + activation + "2")(conv)
+    conv = attach_attention_module(conv, "cbam_block")
 
     if dropout_prob > 0:
         conv = tf.keras.layers.Dropout(dropout_prob, name="eblock" + name + "_dropout")(conv)
@@ -209,6 +211,7 @@ def decoder_mini_block(prev_layer_input, skip_layer_input=None, n_filters=32, ke
     conv = tf.keras.layers.Activation(activation=activation, name="dblock" + name + "_" + activation + "2")(conv)
     if dropout_prob > 0:
         conv = tf.keras.layers.Dropout(dropout_prob, name="dblock" + name + "_dropout")(conv)
+    conv = attach_attention_module(conv, "cbam_block")
 
     return conv
 
