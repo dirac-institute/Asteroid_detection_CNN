@@ -81,13 +81,13 @@ def get_architecture_from_model(model):
 
 def attention_gate(g, s, num_filters, kernel_size=1, name=""):
     wg = tf.keras.layers.Conv2D(num_filters, kernel_size, padding="same", name="attention" + name + "_sconv")(g)
-    #wg = tf.keras.layers.BatchNormalization(name="attention" + name + "_snorm")(wg)
+    wg = tf.keras.layers.BatchNormalization(name="attention" + name + "_snorm")(wg)
 
     ws = tf.keras.layers.Conv2D(num_filters, kernel_size, padding="same", name="attention" + name + "_gconv")(s)
-    #ws = tf.keras.layers.BatchNormalization(name="attention" + name + "_gnorm")(ws)
+    ws = tf.keras.layers.BatchNormalization(name="attention" + name + "_gnorm")(ws)
 
     out = tf.keras.layers.add([wg, ws], name="attention" + name + "_sum")
-    out = tf.keras.layers.BatchNormalization(name="attention" + name + "_sum_norm")(out)
+    #out = tf.keras.layers.BatchNormalization(name="attention" + name + "_sum_norm")(out)
     out = tf.keras.layers.Activation("relu", name="attention" + name + "_relu")(out)
     out = tf.keras.layers.Conv2D(num_filters, kernel_size, padding="same", name="attention" + name + "_conv")(out)
     out = tf.keras.layers.BatchNormalization(name="attention" + name + "_norm")(out)
@@ -98,7 +98,8 @@ def attention_gate(g, s, num_filters, kernel_size=1, name=""):
     return out
 
 
-def encoder_mini_block(inputs, n_filters=32, kernel_size=3, activation="relu", dropout_prob=0.3, max_pooling=True, name=""):
+def encoder_mini_block(inputs, n_filters=32, kernel_size=3, activation="relu", dropout_prob=0.3, max_pooling=True,
+                       attention=True, name=""):
     """
     Encoder mini block for U-Net architecture. It consists of two convolutional layers with the same activation function
     and number of filters. Optionally, a dropout layer can be added after the second convolutional layer. If max_pooling
@@ -134,7 +135,8 @@ def encoder_mini_block(inputs, n_filters=32, kernel_size=3, activation="relu", d
                                   name="eblock" + name + "_conv2")(conv)
     conv = tf.keras.layers.BatchNormalization(name="eblock" + name + "_norm2")(conv)
     conv = tf.keras.layers.Activation(activation=activation, name="eblock" + name + "_" + activation + "2")(conv)
-    conv = attach_attention_module(conv, "cbam_block")
+    if attention:
+        conv = attach_attention_module(conv, "cbam_block")
 
     if dropout_prob > 0:
         conv = tf.keras.layers.Dropout(dropout_prob, name="eblock" + name + "_dropout")(conv)
@@ -147,7 +149,7 @@ def encoder_mini_block(inputs, n_filters=32, kernel_size=3, activation="relu", d
 
 
 def decoder_mini_block(prev_layer_input, skip_layer_input=None, n_filters=32, kernel_size=3, activation="relu", dropout_prob=0.3,
-                       max_pooling=True, attention=True, merge_operation="concat", name=""):
+                       max_pooling=True, attention=True, name=""):
     """
     Decoder mini block for U-Net architecture that consists of a transposed convolutional layer followed by two
     convolutional layers. The skip connection is the concatenation of the transposed convolutional layer and the
@@ -160,7 +162,6 @@ def decoder_mini_block(prev_layer_input, skip_layer_input=None, n_filters=32, ke
     :param name: Name of the block (Optional)
     :return: The output tensor of the block
     """
-
     if max_pooling:
         prev_layer_input = tf.keras.layers.Conv2DTranspose(skip_layer_input.shape[-1], strides=2, padding='same',
                                                           kernel_size=kernel_size, name="dblock" + name + "_upsampling")(prev_layer_input)
@@ -182,9 +183,7 @@ def decoder_mini_block(prev_layer_input, skip_layer_input=None, n_filters=32, ke
         prev_layer_input = tf.keras.layers.Activation(activation=activation,
                                                       name="dblock" + name + "_" + activation + "0")(prev_layer_input)"""
 
-        if attention and max_pooling:
-            skip_layer_input = attention_gate(prev_layer_input, skip_layer_input, skip_layer_input.shape[-1],
-                                              name=name)
+        skip_layer_input = attention_gate(prev_layer_input, skip_layer_input, skip_layer_input.shape[-1], name=name)
         merge = tf.keras.layers.concatenate([prev_layer_input, skip_layer_input], name="dblock" + name + "_merge")
     else:
         merge = prev_layer_input
@@ -207,14 +206,15 @@ def decoder_mini_block(prev_layer_input, skip_layer_input=None, n_filters=32, ke
                                   name="dblock" + name + "_conv2")(conv)
     conv = tf.keras.layers.BatchNormalization(name="dblock" + name + "_norm2")(conv)
     conv = tf.keras.layers.Activation(activation=activation, name="dblock" + name + "_" + activation + "2")(conv)
-    conv = attach_attention_module(conv, "cbam_block")
+    if attention:
+        conv = attach_attention_module(conv, "cbam_block")
     if dropout_prob > 0:
         conv = tf.keras.layers.Dropout(dropout_prob, name="dblock" + name + "_dropout")(conv)
 
     return conv
 
 
-def unet_model(input_size, arhitecture, kernel_size=3, merge_operation="concat"):
+def unet_model(input_size, arhitecture, kernel_size=3):
     """
     U-Net model for semantic segmentation. The model consists of an encoder and a decoder. The encoder downsamples the
     input image and extracts features. The decoder upsamples the features and generates the segmentation mask. Skip
@@ -229,8 +229,6 @@ def unet_model(input_size, arhitecture, kernel_size=3, merge_operation="concat")
     inputs = tf.keras.layers.Input(input_size, name="input")
     layer = tf.keras.layers.BatchNormalization(name="input_normalisation")(inputs)
     skip_connections = []
-    if not "attention" in arhitecture.keys():
-        arhitecture["attention"] = [False for i in arhitecture["upFilters"]]
     arhitecture["downMaxPool"][len(arhitecture["downFilters"])-1] = False
     # Encoder
     for i in range(len(arhitecture["downFilters"])):
@@ -240,6 +238,7 @@ def unet_model(input_size, arhitecture, kernel_size=3, merge_operation="concat")
                                          activation=arhitecture["downActivation"][i],
                                          dropout_prob=arhitecture["downDropout"][i],
                                          max_pooling=arhitecture["downMaxPool"][i],
+                                         attention=False if i == 0 else True,
                                          name=str(i))
         if i != len(arhitecture["downFilters"])-1:
             skip_connections.append(skip)
@@ -254,10 +253,9 @@ def unet_model(input_size, arhitecture, kernel_size=3, merge_operation="concat")
                                    kernel_size=kernel_size,
                                    n_filters=arhitecture["upFilters"][i],
                                    activation=arhitecture["upActivation"][i],
-                                   attention=arhitecture["attention"][i],
+                                   attention=True,
                                    dropout_prob=arhitecture["upDropout"][i],
                                    max_pooling=arhitecture["downMaxPool"][len(arhitecture["downMaxPool"]) - 1 - i],
-                                   merge_operation=merge_operation,
                                    name=str(len(arhitecture["upFilters"]) - 1 - i))
 
     outputs = tf.keras.layers.Conv2D(1, kernel_size, padding='same', name="output_conv")(layer)

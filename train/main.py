@@ -36,8 +36,7 @@ def main(args):
         if os.path.isfile(args.model_destination):
             model = tf.keras.models.load_model(args.model_destination, compile=False)
         else:
-            model = tools.model.unet_model(tfrecord_shape, arhitecture, kernel_size=args.kernel_size,
-                                           merge_operation=args.merge_operation)
+            model = tools.model.unet_model(tfrecord_shape, arhitecture, kernel_size=args.kernel_size)
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=args.start_lr),
                       loss=tools.metrics.FocalTversky(alpha=args.alpha, gamma=args.gamma),
                       metrics=["Precision", "Recall", tools.metrics.F1_Score()])
