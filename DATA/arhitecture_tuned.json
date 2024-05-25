@@ -17,12 +17,12 @@
       "relu"
     ],
     "downDropout": [
-      0.1,
-      0.1,
-      0.1,
-      0.1,
-      0.1,
-      0.1
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
     ],
     "downMaxPool": [
       true,
@@ -48,6 +48,7 @@
       0
     ],
     "attention": [
+      true,
       true,
       true,
       true

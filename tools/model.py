@@ -79,7 +79,7 @@ def get_architecture_from_model(model):
     return architecture
 
 
-def attention_gate(g, s, num_filters, kernel_size=5, name=""):
+def attention_gate(g, s, num_filters, kernel_size=1, name=""):
     wg = tf.keras.layers.Conv2D(num_filters, kernel_size, padding="same", name="attention" + name + "_sconv")(g)
     #wg = tf.keras.layers.BatchNormalization(name="attention" + name + "_snorm")(wg)
 
@@ -93,8 +93,7 @@ def attention_gate(g, s, num_filters, kernel_size=5, name=""):
     out = tf.keras.layers.BatchNormalization(name="attention" + name + "_norm")(out)
     out = tf.keras.layers.Activation("sigmoid", name="attention" + name + "_sigmoid")(out)
 
-    s = tf.keras.layers.DepthwiseConv2D(kernel_size+2, activation="sigmoid", padding="same",
-                                        name="attention" + name + "_depthwise")(s)
+    #s = tf.keras.layers.DepthwiseConv2D(kernel_size+2, activation="sigmoid", padding="same", name="attention" + name + "_depthwise")(s)
     out = tf.keras.layers.multiply([out, s], name="attention" + name + "_multiply")
     return out
 
@@ -163,10 +162,16 @@ def decoder_mini_block(prev_layer_input, skip_layer_input=None, n_filters=32, ke
     """
 
     if max_pooling:
+        prev_layer_input = tf.keras.layers.Conv2DTranspose(skip_layer_input.shape[-1], strides=2, padding='same',
+                                                          kernel_size=kernel_size, name="dblock" + name + "_upsampling")(prev_layer_input)
+        prev_layer_input = tf.keras.layers.BatchNormalization(name="dblock" + name + "_norm0")(prev_layer_input)
+        prev_layer_input = tf.keras.layers.Activation(activation=activation,
+                                                      name="dblock" + name + "_" + activation + "0")(prev_layer_input)
+
         #prev_layer_input = tf.keras.layers.UpSampling2D(interpolation="bilinear", name="dblock" + name + "_upsampling")(prev_layer_input)
-        prev_layer_input = tf.nn.depth_to_space(prev_layer_input, block_size=2, name="dblock" + name + "_upsampling")
+        #prev_layer_input = tf.nn.depth_to_space(prev_layer_input, block_size=2, name="dblock" + name + "_upsampling")
     if skip_layer_input is not None:
-        prev_layer_input = tf.keras.layers.Conv2D(skip_layer_input.shape[-1],
+        """prev_layer_input = tf.keras.layers.Conv2D(skip_layer_input.shape[-1],
                                                   kernel_size,  # filter size
                                                   strides=1,
                                                   activation="linear",
@@ -175,19 +180,12 @@ def decoder_mini_block(prev_layer_input, skip_layer_input=None, n_filters=32, ke
                                                   name="dblock" + name + "_conv0")(prev_layer_input)
         prev_layer_input = tf.keras.layers.BatchNormalization(name="dblock" + name + "_norm0")(prev_layer_input)
         prev_layer_input = tf.keras.layers.Activation(activation=activation,
-                                                      name="dblock" + name + "_" + activation + "0")(prev_layer_input)
+                                                      name="dblock" + name + "_" + activation + "0")(prev_layer_input)"""
 
         if attention and max_pooling:
-            skip_layer_input = attention_gate(prev_layer_input, skip_layer_input, skip_layer_input.shape[-1], kernel_size=kernel_size,
+            skip_layer_input = attention_gate(prev_layer_input, skip_layer_input, skip_layer_input.shape[-1],
                                               name=name)
-        if merge_operation == "concat":
-            merge = tf.keras.layers.concatenate([prev_layer_input, skip_layer_input],
-                                                name="dblock" + name + "_merge")
-        elif merge_operation == "add":
-            merge = tf.keras.layers.add([prev_layer_input, skip_layer_input],
-                                        name="dblock" + name + "_merge")
-        else:
-            raise ValueError("Merge operation " + merge_operation + " not supported")
+        merge = tf.keras.layers.concatenate([prev_layer_input, skip_layer_input], name="dblock" + name + "_merge")
     else:
         merge = prev_layer_input
     conv = tf.keras.layers.Conv2D(n_filters,
@@ -209,9 +207,9 @@ def decoder_mini_block(prev_layer_input, skip_layer_input=None, n_filters=32, ke
                                   name="dblock" + name + "_conv2")(conv)
     conv = tf.keras.layers.BatchNormalization(name="dblock" + name + "_norm2")(conv)
     conv = tf.keras.layers.Activation(activation=activation, name="dblock" + name + "_" + activation + "2")(conv)
+    conv = attach_attention_module(conv, "cbam_block")
     if dropout_prob > 0:
         conv = tf.keras.layers.Dropout(dropout_prob, name="dblock" + name + "_dropout")(conv)
-    conv = attach_attention_module(conv, "cbam_block")
 
     return conv
 
@@ -233,6 +231,7 @@ def unet_model(input_size, arhitecture, kernel_size=3, merge_operation="concat")
     skip_connections = []
     if not "attention" in arhitecture.keys():
         arhitecture["attention"] = [False for i in arhitecture["upFilters"]]
+    arhitecture["downMaxPool"][len(arhitecture["downFilters"])-1] = False
     # Encoder
     for i in range(len(arhitecture["downFilters"])):
         layer, skip = encoder_mini_block(layer,
@@ -262,7 +261,7 @@ def unet_model(input_size, arhitecture, kernel_size=3, merge_operation="concat")
                                    name=str(len(arhitecture["upFilters"]) - 1 - i))
 
     outputs = tf.keras.layers.Conv2D(1, kernel_size, padding='same', name="output_conv")(layer)
-    outputs = tf.keras.layers.BatchNormalization(name="output_norm")(outputs)
+    #outputs = tf.keras.layers.BatchNormalization(name="output_norm")(outputs)
     outputs = tf.keras.layers.Activation(activation="sigmoid", name="output_sigmoid")(outputs)
 
     model = tf.keras.Model(inputs=[inputs], outputs=[outputs], name="AsteroidNET")
