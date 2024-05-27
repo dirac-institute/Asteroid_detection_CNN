@@ -38,7 +38,7 @@ echo -e "\nInjection catalog generated\n"
 rm ~/inject_log_$RUN_NUM.txt
 pipetask --log-file ~/inject_log_$RUN_NUM.txt run --register-dataset-types \
 -b $REPO_PATH \
--i $INPUT_COLL, $OUTPUT_COLL/injection_inputs_$RUN_NUM, $VISIT_SUMMARY \
+-i $INPUT_COLL,$OUTPUT_COLL/injection_inputs_$RUN_NUM,$VISIT_SUMMARY \
 -o $OUTPUT_COLL/single_frame_injection_$RUN_NUM \
 -p $PROJECT_PATH/DATA/DRP-RC2_subset_injection.yaml#nightlyStep1 \
 -j 16 \
