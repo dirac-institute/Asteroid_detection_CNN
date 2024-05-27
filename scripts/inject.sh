@@ -42,8 +42,8 @@ pipetask --log-file ~/inject_log_$RUN_NUM.txt run --register-dataset-types \
 -o $OUTPUT_COLL/single_frame_injection_$RUN_NUM \
 -p $PROJECT_PATH/DATA/DRP-RC2_subset_injection.yaml#nightlyStep1 \
 -j 16 \
--c inject_exposure:process_all_data_ids=True
--where "detector not in (58, 50, 42, 47, 49, 41) AND visit not in (29336, 11690, 11698, 29350, 11696, 11704, 11710, 11694, 1220, 1204, 23694, 1206, 23706, 23704, 1214, 23718, 19694, 19680, 30490, 1242, 19684, 30482, 19696, 1248, 1178, 17948, 17950, 17904, 1184, 17906, 17926, 17900, 11738, 358, 11724, 346, 22632, 11740, 22662, 322) and tract != 9813 and skymap = 'hsc_rings_v1'"
+-c inject_exposure:process_all_data_ids=True \
+-d $COLL_FILTER
 echo -e "\nFINISHED\n"
 
 # Capture the end time and calculate the total runtime.
