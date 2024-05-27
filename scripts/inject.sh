@@ -16,7 +16,7 @@ start_time=$(date +%s)
 
 
 # Make pipeline with injection
-make_injection_pipeline -t postISRCCD -r $DRP_PIPE_DIR/pipelines/HSC/DRP-RC2_subset.yaml \
+make_injection_pipeline -t postISRCCD -r $DRP_PIPE_DIR/pipelines/HSC/DRP-RC2.yaml \
 -f $PROJECT_PATH/DATA/DRP-RC2_subset_injection.yaml --overwrite
 pipetask build -p $PROJECT_PATH/DATA/DRP-RC2_subset_injection.yaml \
 -c inject_exposure:selection="np.isin(injection_catalog['visit'], {visit})" \
