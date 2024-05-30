@@ -263,7 +263,7 @@ def unet_model(input_size, arhitecture, kernel_size=3, multi_input=True):
                                    name=str(len(arhitecture["upFilters"]) - 1 - i))
 
     outputs = tf.keras.layers.Conv2D(1, kernel_size, padding='same', name="output_conv")(layer)
-    outputs = tf.keras.layers.LayerNormalization(name="output_norm")(outputs)
+    #outputs = tf.keras.layers.LayerNormalization(name="output_norm")(outputs)
     outputs = tf.keras.layers.Activation(activation="sigmoid", name="output_sigmoid")(outputs)
     model = tf.keras.Model(inputs=[inputs], outputs=[outputs], name="AsteroidNET")
     return model
