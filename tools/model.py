@@ -214,7 +214,7 @@ def decoder_mini_block(prev_layer_input, skip_layer_input=None, n_filters=32, ke
     return conv
 
 
-def unet_model(input_size, arhitecture, kernel_size=3):
+def unet_model(input_size, arhitecture, kernel_size=3, multi_input=True):
     """
     U-Net model for semantic segmentation. The model consists of an encoder and a decoder. The encoder downsamples the
     input image and extracts features. The decoder upsamples the features and generates the segmentation mask. Skip
@@ -232,6 +232,10 @@ def unet_model(input_size, arhitecture, kernel_size=3):
     arhitecture["downMaxPool"][len(arhitecture["downFilters"])-1] = False
     # Encoder
     for i in range(len(arhitecture["downFilters"])):
+        if multi_input and i != 0 and i != len(arhitecture["downFilters"])-1:
+            down_input = tf.keras.layers.Resizing(layer.shape[1], layer.shape[2])(inputs)
+            down_input = tf.keras.layers.BatchNormalization()(down_input)
+            layer = tf.keras.layers.concatenate([down_input, layer])
         layer, skip = encoder_mini_block(layer,
                                          kernel_size=kernel_size,
                                          n_filters=arhitecture["downFilters"][i],
@@ -259,9 +263,8 @@ def unet_model(input_size, arhitecture, kernel_size=3):
                                    name=str(len(arhitecture["upFilters"]) - 1 - i))
 
     outputs = tf.keras.layers.Conv2D(1, kernel_size, padding='same', name="output_conv")(layer)
-    #outputs = tf.keras.layers.BatchNormalization(name="output_norm")(outputs)
+    outputs = tf.keras.layers.LayerNormalization(name="output_norm")(outputs)
     outputs = tf.keras.layers.Activation(activation="sigmoid", name="output_sigmoid")(outputs)
-
     model = tf.keras.Model(inputs=[inputs], outputs=[outputs], name="AsteroidNET")
     return model
 
