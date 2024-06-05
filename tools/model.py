@@ -271,7 +271,7 @@ def unet_model(input_size, arhitecture, kernel_size=3, multi_input=True):
 
 if __name__ == "__main__":
     import json
-    with open("../DATA/arhitecture_tuned.json") as f:
+    with open("../arhitecture_tuned.json") as f:
         arhitecture = json.load(f)
     model = unet_model((128, 128, 1), arhitecture["0"], kernel_size=5)
     tf.keras.utils.plot_model(model, to_file='../DATA/model_graph.png', show_shapes=True, show_layer_names=True)
