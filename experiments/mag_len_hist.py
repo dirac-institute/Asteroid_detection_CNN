@@ -1,6 +1,7 @@
 import sys
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+
 sys.path.append("..")
 import os
 import argparse
@@ -144,41 +145,43 @@ def main(args):
         f.write("Precision: " + str(evals.eval_tools.precision(tp, fp, fn)) + "\n")
         f.write("Recall: " + str(evals.eval_tools.recall(tp, fp, fn)) + "\n")
 
-    def parse_arguments(args):
-        parser = argparse.ArgumentParser()
 
-        parser.add_argument('--model_path', type=str,
-                            default="../DATA/Trained_model_18796700.keras",
-                            help='Path to the model.')
-        parser.add_argument('--batch_size', type=int,
-                            default=512,
-                            help='Batch size for the evaluation.')
-        parser.add_argument('--tf_dataset_path', type=str,
-                            default="../DATA/test1.tfrecord",
-                            help='Path to the TFrecords file.')
-        parser.add_argument('--output_path', type=str,
-                            default="../RESULTS/",
-                            help='Path to the output folder.')
-        parser.add_argument('--repo_path', type=str,
-                            default="../DATA/rc2_subset/SMALL_HSC/",
-                            help='Path to the Butler repo.')
-        parser.add_argument('--collection', type=str,
-                            default="u/kmrakovc/single_frame_injection_01",
-                            help='Collection name in the Butelr repo.')
-        parser.add_argument('--val_index_path', type=str,
-                            default="../DATA/val_index1.npy",
-                            help='Path to the validation index file.')
-        parser.add_argument('--cpu_count', type=int,
-                            default=9,
-                            help='Number of CPUs to use.')
-        parser.add_argument('--threshold', type=float,
-                            default=0.5,
-                            help='Threshold for the predictions.')
-        parser.add_argument('-v', '--verbose', action=argparse.BooleanOptionalAction,
-                            default=True,
-                            help='Verbose output.')
+def parse_arguments(args):
+    parser = argparse.ArgumentParser()
 
-        return parser.parse_args(args)
+    parser.add_argument('--model_path', type=str,
+                        default="../DATA/Trained_model_18796700.keras",
+                        help='Path to the model.')
+    parser.add_argument('--batch_size', type=int,
+                        default=512,
+                        help='Batch size for the evaluation.')
+    parser.add_argument('--tf_dataset_path', type=str,
+                        default="../DATA/test1.tfrecord",
+                        help='Path to the TFrecords file.')
+    parser.add_argument('--output_path', type=str,
+                        default="../RESULTS/",
+                        help='Path to the output folder.')
+    parser.add_argument('--repo_path', type=str,
+                        default="../DATA/rc2_subset/SMALL_HSC/",
+                        help='Path to the Butler repo.')
+    parser.add_argument('--collection', type=str,
+                        default="u/kmrakovc/single_frame_injection_01",
+                        help='Collection name in the Butelr repo.')
+    parser.add_argument('--val_index_path', type=str,
+                        default="../DATA/val_index1.npy",
+                        help='Path to the validation index file.')
+    parser.add_argument('--cpu_count', type=int,
+                        default=9,
+                        help='Number of CPUs to use.')
+    parser.add_argument('--threshold', type=float,
+                        default=0.5,
+                        help='Threshold for the predictions.')
+    parser.add_argument('-v', '--verbose', action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help='Verbose output.')
 
-    if __name__ == '__main__':
-        main(parse_arguments(sys.argv[1:]))
+    return parser.parse_args(args)
+
+
+if __name__ == '__main__':
+    main(parse_arguments(sys.argv[1:]))
