@@ -1,14 +1,13 @@
 import sys
-
+import matplotlib.pyplot as plt
+import matplotlib as mpl
 sys.path.append("..")
 import os
 import argparse
 import tools
 import evals
-import matplotlib.pyplot as plt
 import numpy as np
 from lsst.daf.butler import Butler
-import matplotlib as mpl
 
 
 def get_magnitude_bin(repo, output_coll):
