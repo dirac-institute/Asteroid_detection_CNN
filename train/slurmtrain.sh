@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --job-name=TrainD
-#SBATCH --mail-type=ALL
+#SBATCH --mail-type=END,FAIL,REQUEUE
 #SBATCH --account=escience
 #SBATCH --output=/mmfs1/home/kmrakovc/Results/Asteroids/training_%j.txt
 #SBATCH --partition=gpu-a40
