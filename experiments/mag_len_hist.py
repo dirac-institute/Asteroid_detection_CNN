@@ -165,7 +165,7 @@ def main(args):
                             default="../DATA/val_index1.npy",
                             help='Path to the validation index file.')
         parser.add_argument('--cpu_count', type=int,
-                            default=10,
+                            default=9,
                             help='Number of CPUs to use.')
         parser.add_argument('--threshold', type=float,
                             default=0.5,
