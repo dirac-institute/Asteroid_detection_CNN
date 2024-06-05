@@ -10,5 +10,4 @@
 
 source ~/activate.sh
 module load cuda/12.3.2
-srun python3 mag_len_hist.py \
---model_path ../DATA/Trained_model_18796700.keras
+python3 mag_len_hist.py --model_path ../DATA/Trained_model_18796700.keras
