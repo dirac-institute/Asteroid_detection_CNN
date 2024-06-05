@@ -76,10 +76,12 @@ def main(args):
     if not os.path.exists(args.output_path):
         os.makedirs(args.output_path)
     args.output_path += model_name
+    if args.verbose:
+        print("Model evaluating started")
     predictions = evals.eval_tools.create_NN_prediction(args.tf_dataset_path,
                                                         args.model_path,
                                                         threshold=args.threshold,
-                                                        batch_size=128,
+                                                        batch_size=args.batch_size,
                                                         verbose=False)
     if args.verbose:
         print("NN predictions created")
@@ -123,9 +125,9 @@ def main(args):
     fig_1t = plot_trail_histogram(NN_detected_asteroids_t, LSST_stack_detected_asteroids_t, true_asteroids_t)
     minmag, maxmag = get_magnitude_bin(args.repo_path, args.collection)
     _ = fig_1t.suptitle("Magnitude: " + str(round(minmag, 1)) + " - " + str(round(maxmag, 1)))
-    tp = tp1.sum()
-    fp = fp1.sum()
-    fn = fn1.sum()
+    tp = tp.sum()
+    fp = fp.sum()
+    fn = fn.sum()
 
     if args.verbose:
         print("True Positives:", int(tp), "False Positives:", int(fp), "False Negatives:", int(fn))
@@ -136,7 +138,7 @@ def main(args):
     fig_1m.savefig(args.output_path + "_magnitudes.png")
     fig_1t.savefig(args.output_path + "_trail_lengths.png")
     with open(args.output_path + "_scores.txt", "w") as f:
-        f.write("True Positives: " + str(int(tp)) + " False Positives: " + str(int(fp)) + " False Negatives: " + str(
+        f.write("True Positives: " + str(int(tp)) + "\nFalse Positives: " + str(int(fp)) + "\nFalse Negatives: " + str(
             int(fn)) + "\n")
         f.write("F1 score: " + str(evals.eval_tools.f1_score(tp, fp, fn)) + "\n")
         f.write("Precision: " + str(evals.eval_tools.precision(tp, fp, fn)) + "\n")
@@ -148,6 +150,9 @@ def main(args):
         parser.add_argument('--model_path', type=str,
                             default="../DATA/Trained_model_18796700.keras",
                             help='Path to the model.')
+        parser.add_argument('--batch_size', type=int,
+                            default=512,
+                            help='Batch size for the evaluation.')
         parser.add_argument('--tf_dataset_path', type=str,
                             default="../DATA/test1.tfrecord",
                             help='Path to the TFrecords file.')
