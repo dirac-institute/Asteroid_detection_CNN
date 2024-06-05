@@ -15,7 +15,7 @@ def create_NN_prediction(dataset_path, model_path="../DATA/Trained_model", thres
     dataset_test = dataset_test.batch(batch_size)
     mirrored_strategy = tf.distribute.MirroredStrategy()
     with mirrored_strategy.scope():
-        model = tf.keras.models.load_model(model_path, compile=False)
+        model = tf.keras.models.load_model(model_path, compile=False, safe_mode=False)
         predictions = model.predict(dataset_test, verbose=1 if verbose else 0)
     if threshold > 0:
         predictions = (predictions > threshold).astype(float)
