@@ -41,9 +41,13 @@
       1024,
       1024,
       512,
-      256
+      256,
+      128,
+      64
     ],
     "upActivation": [
+      "relu",
+      "relu",
       "relu",
       "relu",
       "relu",
@@ -51,6 +55,8 @@
       "relu"
     ],
     "upDropout": [
+      0,
+      0,
       0,
       0,
       0,

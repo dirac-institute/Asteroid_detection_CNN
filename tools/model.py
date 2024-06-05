@@ -233,7 +233,7 @@ def unet_model(input_size, arhitecture, kernel_size=3, multi_input=True):
     # Encoder
     for i in range(len(arhitecture["downFilters"])):
         if multi_input and i != 0 and i != len(arhitecture["downFilters"])-1:
-            down_input = tf.keras.layers.Resizing(layer.shape[1], layer.shape[2])(inputs)
+            down_input = tf.keras.layers.Resizing(layer.shape[1], layer.shape[2], interpolation="lanczos5")(inputs)
             down_input = tf.keras.layers.BatchNormalization()(down_input)
             layer = tf.keras.layers.concatenate([down_input, layer])
         layer, skip = encoder_mini_block(layer,
