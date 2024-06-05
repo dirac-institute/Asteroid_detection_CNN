@@ -24,7 +24,7 @@ srun python3 main.py \
 --epochs 512 \
 --alpha 0.9 \
 --gamma 3 \
---batch_size 512 \
+--batch_size 256 \
 --start_lr 0.001 \
 --decay_lr_rate 0.75 \
 --decay_lr_patience 8 \
