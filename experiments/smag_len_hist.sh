@@ -10,5 +10,7 @@
 #SBATCH --time=24:00:00
 
 source ~/activate.sh
-module load cuda/12.3.2
-python3 mag_len_hist.py --model_path ../DATA/Trained_model_18796700.keras
+python3 mag_len_hist.py \
+--model_path ../DATA/Trained_model_18796700.keras \
+--tf_dataset_path ../DATA/test1.tfrecord \
+--collection u/kmrakovc/single_frame_injection_01

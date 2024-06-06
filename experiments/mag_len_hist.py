@@ -72,11 +72,13 @@ def plot_input_on_axis(img, ax):
 
 def main(args):
     model_name = args.model_path.split("_")[-1].split(".")[0]
+    dataset_name = args.tf_dataset_path.split("/")[-1].split(".")[0]
     if args.output_path[-1] != "/":
         args.output_path += "/"
+    args.output_path += model_name + "/"
     if not os.path.exists(args.output_path):
         os.makedirs(args.output_path)
-    args.output_path += model_name
+    args.output_path += dataset_name
     if args.verbose:
         print("Model evaluating started")
     predictions = evals.eval_tools.create_NN_prediction(args.tf_dataset_path,
@@ -162,7 +164,7 @@ def parse_arguments(args):
                         default="../RESULTS/",
                         help='Path to the output folder.')
     parser.add_argument('--repo_path', type=str,
-                        default="../DATA/rc2_subset/SMALL_HSC/",
+                        default="../rc2_subset/SMALL_HSC/",
                         help='Path to the Butler repo.')
     parser.add_argument('--collection', type=str,
                         default="u/kmrakovc/single_frame_injection_01",
