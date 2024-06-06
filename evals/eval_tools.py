@@ -22,7 +22,9 @@ def create_NN_prediction(dataset_path, model_path="../DATA/Trained_model", thres
     else:
         predictions = predictions.astype(float)
     if not tuple(model.outputs[0].shape[1:]) == tfrecord_shape:
-        predictions = np.ceil(np.array(tf.image.resize(predictions, tfrecord_shape[:-1])))
+        predictions = np.array(tf.image.resize(predictions, tfrecord_shape[:-1]))
+        if threshold > 0:
+            predictions = np.ceil(predictions)
     predictions = tools.data.npy_merge(predictions, (4176, 2048))
     return predictions
 
