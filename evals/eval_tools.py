@@ -26,9 +26,9 @@ def create_NN_prediction(dataset_path, model_path="../DATA/Trained_model", thres
 
             dataset_test = tf.data.TFRecordDataset([dataset_path])
             tfrecord_shape = tools.model.get_shape_of_quadratic_image_tfrecord(dataset_test)
-            dataset_test = dataset_test.map(tools.model.parse_function(img_shape=tfrecord_shape, test=True))
-            dataset_test = dataset_test.batch(batch_size)
-
+            dataset_test = dataset_test.interleave(lambda x: tf.data.Dataset.from_tensors(tools.model.parse_function(img_shape=tfrecord_shape, test=True)(x)),
+                                                   num_parallel_calls=tf.data.experimental.AUTOTUNE)
+            dataset_test = dataset_test.batch(batch_size).prefetch(tf.data.experimental.AUTOTUNE)
             predictions = model.predict(dataset_test, verbose=1 if verbose else 0)
             if threshold > 0:
                 predictions = (predictions > threshold).astype(float)

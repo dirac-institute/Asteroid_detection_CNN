@@ -26,6 +26,7 @@ def parse_function(img_shape=(128, 128, 1), test=False, clip=True):
     return parsing
 
 
+
 def reshape_outputs(img_shape=(32, 32)):
     def reshaping(inputs, targets):
         targets = tf.image.resize(targets, img_shape)
