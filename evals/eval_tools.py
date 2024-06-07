@@ -1,5 +1,6 @@
 import sys, os
 import tensorflow as tf
+
 sys.path.append("..")
 import tools
 from astroML.crossmatch import crossmatch_angular
@@ -7,26 +8,42 @@ import numpy as np
 import pandas as pd
 import multiprocessing
 
+
 def create_NN_prediction(dataset_path, model_path="../DATA/Trained_model", threshold=0.5, batch_size=1024,
                          verbose=True):
-    dataset_test = tf.data.TFRecordDataset([dataset_path])
-    tfrecord_shape = tools.model.get_shape_of_quadratic_image_tfrecord(dataset_test)
-    dataset_test = dataset_test.map(tools.model.parse_function(img_shape=tfrecord_shape, test=True))
-    dataset_test = dataset_test.batch(batch_size)
+    if type(dataset_path) is str:
+        dataset_path = [dataset_path]
+        dataset_path_iterable = False
+    else:
+        dataset_path_iterable = True
+    predictions_list = ()
     mirrored_strategy = tf.distribute.MirroredStrategy()
     with mirrored_strategy.scope():
         model = tf.keras.models.load_model(model_path, compile=False, safe_mode=False)
-        predictions = model.predict(dataset_test, verbose=1 if verbose else 0)
-    if threshold > 0:
-        predictions = (predictions > threshold).astype(float)
-    else:
-        predictions = predictions.astype(float)
-    if not tuple(model.outputs[0].shape[1:]) == tfrecord_shape:
-        predictions = np.array(tf.image.resize(predictions, tfrecord_shape[:-1]))
-        if threshold > 0:
-            predictions = np.ceil(predictions)
-    predictions = tools.data.npy_merge(predictions, (4176, 2048))
-    return predictions
+        for i, dataset in enumerate(dataset_path):
+            if not os.path.exists(dataset):
+                raise FileNotFoundError(f"Dataset {dataset} not found")
+
+            dataset_test = tf.data.TFRecordDataset([dataset_path])
+            tfrecord_shape = tools.model.get_shape_of_quadratic_image_tfrecord(dataset_test)
+            dataset_test = dataset_test.map(tools.model.parse_function(img_shape=tfrecord_shape, test=True))
+            dataset_test = dataset_test.batch(batch_size)
+
+            predictions = model.predict(dataset_test, verbose=1 if verbose else 0)
+            if threshold > 0:
+                predictions = (predictions > threshold).astype(float)
+            else:
+                predictions = predictions.astype(float)
+            if not tuple(model.outputs[0].shape[1:]) == tfrecord_shape:
+                predictions = np.array(tf.image.resize(predictions, tfrecord_shape[:-1]))
+            if threshold > 0:
+                predictions = np.ceil(predictions)
+            predictions = tools.data.npy_merge(predictions, (4176, 2048))
+            if not dataset_path_iterable:
+                return predictions
+            else:
+                predictions_list += (predictions,)
+    return predictions_list
 
 
 def one_hit(p, injected_calexp, catalog_row, i):
@@ -80,6 +97,7 @@ def NN_comparation_histogram_data(predictions, val_index_path, repo, output_coll
     cat = compare_NN_predictions(predictions, repo, output_coll, val_index=val_index, batch_size=batch_size)
     return cat[cat["detected"] == 1][column_name].to_numpy(), cat[column_name].to_numpy()
 
+
 def one_LSST_stack_comparison(butler, output_coll, injection_catalog_id, source_catalog_id, calexp_id,
                               column_name):
     injection_catalog = butler.get("injected_postISRCCD_catalog",
@@ -118,6 +136,7 @@ def one_LSST_stack_comparison(butler, output_coll, injection_catalog_id, source_
             matched_values = np.append(matched_values, injection_catalog[column_name][j])
     return matched_values
 
+
 def LSST_stack_comparation_histogram_data(repo, output_coll, val_index_path,
                                           column_name="trail_length", batch_size=None):
     from lsst.daf.butler import Butler
@@ -125,12 +144,13 @@ def LSST_stack_comparation_histogram_data(repo, output_coll, val_index_path,
         val_index = np.load(f)
         val_index.sort()
     butler = Butler(repo)
-    injection_catalog_ids = list(butler.registry.queryDatasets("injected_postISRCCD_catalog", collections=output_coll, instrument='HSC'))
+    injection_catalog_ids = list(
+        butler.registry.queryDatasets("injected_postISRCCD_catalog", collections=output_coll, instrument='HSC'))
     source_catalog_ids = list(butler.registry.queryDatasets("injected_src", collections=output_coll, instrument='HSC'))
     calexp_ids = list(butler.registry.queryDatasets("injected_calexp", collections=output_coll, instrument='HSC'))
     parameters = [(butler, output_coll,
-                    injection_catalog_ids[i], source_catalog_ids[i],
-                    calexp_ids[i], column_name) for i in val_index]
+                   injection_catalog_ids[i], source_catalog_ids[i],
+                   calexp_ids[i], column_name) for i in val_index]
     if batch_size is None:
         batch_size = os.cpu_count() - 1
     pool = multiprocessing.Pool(batch_size)

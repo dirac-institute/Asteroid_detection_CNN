@@ -71,6 +71,10 @@ def plot_input_on_axis(img, ax):
 
 
 def main(args):
+    collections = args.collection.split(',')
+    tf_dataset_paths = args.tf_dataset_path.split(',')
+    if len(collections) != len(tf_dataset_paths):
+        raise ValueError("Number of collections and TFrecords files should be the same")
     model_name = args.model_path.split("_")[-1].split(".")[0]
     dataset_name = args.tf_dataset_path.split("/")[-1].split(".")[0]
     if args.output_path[-1] != "/":
@@ -159,7 +163,7 @@ def parse_arguments(args):
                         help='Batch size for the evaluation.')
     parser.add_argument('--tf_dataset_path', type=str,
                         default="../DATA/test1.tfrecord",
-                        help='Path to the TFrecords file.')
+                        help='Comma-separated list of paths to the TFrecords files.')
     parser.add_argument('--output_path', type=str,
                         default="../RESULTS/",
                         help='Path to the output folder.')
@@ -168,7 +172,7 @@ def parse_arguments(args):
                         help='Path to the Butler repo.')
     parser.add_argument('--collection', type=str,
                         default="u/kmrakovc/single_frame_injection_01",
-                        help='Collection name in the Butelr repo.')
+                        help='Comma-separated list of collection names in the Butler repo.')
     parser.add_argument('--val_index_path', type=str,
                         default="../DATA/val_index1.npy",
                         help='Path to the validation index file.')
