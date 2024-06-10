@@ -147,6 +147,8 @@ def one_LSST_stack_comparison(butler, output_coll, injection_catalog_id, source_
                                                angle[j], length[j])
         if (mask_inject * mask_source).sum() > 0:
             matched_values.append(j)
+    if type(column_name) is str:
+        column_name = [column_name]
     return injection_catalog[column_name].to_pandas().iloc[list(matched_values)]
 
 
