@@ -56,23 +56,23 @@ def create_NN_prediction(dataset_path, model_path="../DATA/Trained_model", thres
 
 def one_image_hits(p, butler, ref, catalog_ref, output_coll, calexp_dimensions, n):
     injected_calexp = butler.get("injected_calexp.wcs",
-                                     dataId=ref.dataId,
-                                     collections=output_coll)
+                                 dataId=ref.dataId,
+                                 collections=output_coll)
     catalog = butler.get("injected_postISRCCD_catalog",
-                             dataId=catalog_ref.dataId,
-                             collections=output_coll)
+                         dataId=catalog_ref.dataId,
+                         collections=output_coll)
     list_cat = [None] * len(catalog)
     for i, catalog_row in enumerate(catalog):
         origin = injected_calexp.skyToPixelArray(np.array([catalog_row["ra"]]), np.array([catalog_row["dec"]]),
-                                             degrees=True)
+                                                 degrees=True)
         angle = catalog_row["beta"]
         length = catalog_row["trail_length"]
         mask = np.zeros(calexp_dimensions)
         mask = tools.data.draw_one_line(mask, origin, angle, length, line_thickness=6)
         list_cat[i] = {'injection_id': catalog_row['injection_id'], 'ra': catalog_row['ra'], 'dec': catalog_row['dec'],
-            'trail_length': catalog_row['trail_length'], 'beta': catalog_row['beta'],
-            'mag': catalog_row['mag'], 'n': n, 'x': round(origin[0][0]), 'y': round(origin[1][0]),
-            'detected': int(((mask == 1) & (p == 1)).sum() > 0)}
+                       'trail_length': catalog_row['trail_length'], 'beta': catalog_row['beta'],
+                       'mag': catalog_row['mag'], 'n': n, 'x': round(origin[0][0]), 'y': round(origin[1][0]),
+                       'detected': int(((mask == 1) & (p == 1)).sum() > 0)}
     return list_cat
 
 
@@ -90,17 +90,18 @@ def compare_NN_predictions(p, repo, output_coll, val_index=None, multiprocess_si
     if val_index is None:
         val_index = list(range(len(catalog_ref)))
     parameters = []
-    parameters += [(p[j], butler, ref[i], catalog_ref[i], output_coll, calexp_dimensions, i) for j,i in enumerate(val_index)]
+    parameters += [(p[j], butler, ref[i], catalog_ref[i], output_coll, calexp_dimensions, i) for j, i in
+                   enumerate(val_index)]
     if multiprocess_size is None:
         multiprocess_size = max(1, min(os.cpu_count() - 1, len(parameters)))
-    if multiprocess_size>1:
+    if multiprocess_size > 1:
         with multiprocessing.Pool(multiprocess_size) as pool:
             list_cat = pool.starmap(one_image_hits, parameters)
     else:
         list_cat = [None] * len(parameters)
         for i, p in enumerate(parameters):
             list_cat[i] = one_image_hits(*p)
-    return pd.DataFrame(list(np.array (list_cat).flatten()))
+    return pd.DataFrame(list(np.array(list_cat).flatten()))
 
 
 def NN_comparation_histogram_data(predictions, val_index_path, repo, output_coll,
@@ -108,7 +109,8 @@ def NN_comparation_histogram_data(predictions, val_index_path, repo, output_coll
     with open(val_index_path, 'rb') as f:
         val_index = np.load(f)
         val_index.sort()
-    cat = compare_NN_predictions(predictions, repo, output_coll, val_index=val_index, multiprocess_size=multiprocess_size)
+    cat = compare_NN_predictions(predictions, repo, output_coll, val_index=val_index,
+                                 multiprocess_size=multiprocess_size)
     return cat[cat["detected"] == 1][column_name].to_numpy(), cat[column_name].to_numpy()
 
 
@@ -131,11 +133,11 @@ def one_LSST_stack_comparison(butler, output_coll, injection_catalog_id, source_
     dist, ind = crossmatch_angular(sc[['coord_ra', 'coord_dec']].values,
                                    osc[['coord_ra', 'coord_dec']].values, 0.04 / 3600)
     source_origin = calexp.skyToPixelArray(np.array([source_catalog["coord_ra"][np.isinf(dist)]]),
-                                                    np.array([source_catalog["coord_dec"][np.isinf(dist)]]),
-                                                    degrees=False)
+                                           np.array([source_catalog["coord_dec"][np.isinf(dist)]]),
+                                           degrees=False)
     injected_origin = calexp.skyToPixelArray(np.array([injection_catalog["ra"]]),
-                                                      np.array([injection_catalog["dec"]]),
-                                                      degrees=True)
+                                             np.array([injection_catalog["dec"]]),
+                                             degrees=True)
     angle = injection_catalog["beta"]
     length = injection_catalog["trail_length"]
     mask_source = np.zeros(calexp_dimensions)
@@ -170,7 +172,7 @@ def LSST_stack_comparation_histogram_data(repo, output_coll, val_index_path,
                    calexp_ids[i], calexp_dimensions, column_name) for i in val_index]
     if multiprocess_size is None:
         multiprocess_size = max(1, os.cpu_count() - 1)
-    if multiprocess_size>1:
+    if multiprocess_size > 1:
         with multiprocessing.Pool(multiprocess_size) as pool:
             list_cat = pool.starmap(one_LSST_stack_comparison, parameters)
     else:

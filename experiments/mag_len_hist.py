@@ -85,71 +85,64 @@ def main(args):
     args.output_path += dataset_name
     if args.verbose:
         print("Model evaluating started")
-    predictions = evals.eval_tools.create_NN_prediction(args.tf_dataset_path,
+    predictions = evals.eval_tools.create_NN_prediction(tf_dataset_paths,
                                                         args.model_path,
                                                         threshold=args.threshold,
                                                         batch_size=args.batch_size,
                                                         verbose=False)
     if args.verbose:
         print("NN predictions created")
-    inputs, truths = tools.data.create_XY_pairs(args.tf_dataset_path)
-    tp, fp, fn, mask = evals.eval_tools.get_mask(truths, predictions, batch_size=args.cpu_count)
-    if args.verbose:
-        print("Scoring done")
-    NN_detected_asteroids_m, \
-        true_asteroids_m = evals.eval_tools.NN_comparation_histogram_data(predictions,
-                                                                          args.val_index_path,
-                                                                          args.repo_path,
-                                                                          args.collection,
-                                                                          column_name="mag",
-                                                                          batch_size=args.cpu_count)
-    if args.verbose:
-        print("Histogram data for magnitudes created")
-    NN_detected_asteroids_t, \
-        true_asteroids_t = evals.eval_tools.NN_comparation_histogram_data(predictions,
-                                                                          args.val_index_path,
-                                                                          args.repo_path,
-                                                                          args.collection,
-                                                                          column_name="trail_length",
-                                                                          batch_size=args.cpu_count)
-    if args.verbose:
-        print("Histogram data for trail length created")
-    LSST_stack_detected_asteroids_m = evals.eval_tools.LSST_stack_comparation_histogram_data(args.repo_path,
-                                                                                             args.collection,
-                                                                                             args.val_index_path,
-                                                                                             batch_size=args.cpu_count,
-                                                                                             column_name="mag")
-    if args.verbose:
-        print("LSST stack predictions for magnitudes created")
-    LSST_stack_detected_asteroids_t = evals.eval_tools.LSST_stack_comparation_histogram_data(args.repo_path,
-                                                                                             args.collection,
-                                                                                             args.val_index_path,
-                                                                                             batch_size=args.cpu_count)
-    if args.verbose:
-        print("LSST stack predictions for trail length created")
+    for i in range(len(collections)):
+        inputs, truths = tools.data.create_XY_pairs(tf_dataset_paths)
+        tp, fp, fn, mask = evals.eval_tools.get_mask(truths, predictions[i], multiprocess_size=args.cpu_count)
+        if args.verbose:
+            print(i, "Scoring done")
+        NN_detected_asteroids, \
+            true_asteroids = evals.eval_tools.NN_comparation_histogram_data(predictions[i],
+                                                                            args.val_index_path,
+                                                                            args.repo_path,
+                                                                            collections[i],
+                                                                            column_name=["mag", "trail_length"],
+                                                                            multiprocess_size=args.cpu_count)
+        NN_detected_asteroids_m = NN_detected_asteroids[:, 0]
+        NN_detected_asteroids_t = NN_detected_asteroids[:, 1]
+        true_asteroids_m = true_asteroids[:, 0]
+        true_asteroids_t = true_asteroids[:, 1]
+        if args.verbose:
+            print(i, "Histogram data created")
+        LSST_stack_detected_asteroids = evals.eval_tools.LSST_stack_comparation_histogram_data(args.repo_path,
+                                                                                               collections[i],
+                                                                                               args.val_index_path,
+                                                                                               multiprocess_size=args.cpu_count,
+                                                                                               column_name=["mag",
+                                                                                                            "trail_length"])
+        LSST_stack_detected_asteroids_m = LSST_stack_detected_asteroids[:, 0]
+        LSST_stack_detected_asteroids_t = LSST_stack_detected_asteroids[:, 1]
+        if args.verbose:
+            print(i, "LSST stack predictions created")
+        fig_1m = plot_magnitude_histogram(NN_detected_asteroids_m, LSST_stack_detected_asteroids_m, true_asteroids_m)
+        fig_1t = plot_trail_histogram(NN_detected_asteroids_t, LSST_stack_detected_asteroids_t, true_asteroids_t)
+        minmag, maxmag = get_magnitude_bin(args.repo_path, args.collection)
+        _ = fig_1t.suptitle("Magnitude: " + str(round(minmag, 1)) + " - " + str(round(maxmag, 1)))
+        tp = tp.sum()
+        fp = fp.sum()
+        fn = fn.sum()
 
-    fig_1m = plot_magnitude_histogram(NN_detected_asteroids_m, LSST_stack_detected_asteroids_m, true_asteroids_m)
-    fig_1t = plot_trail_histogram(NN_detected_asteroids_t, LSST_stack_detected_asteroids_t, true_asteroids_t)
-    minmag, maxmag = get_magnitude_bin(args.repo_path, args.collection)
-    _ = fig_1t.suptitle("Magnitude: " + str(round(minmag, 1)) + " - " + str(round(maxmag, 1)))
-    tp = tp.sum()
-    fp = fp.sum()
-    fn = fn.sum()
+        if args.verbose:
+            print("True Positives:", int(tp), "False Positives:", int(fp), "False Negatives:", int(fn))
+            print("F1 score", evals.eval_tools.f1_score(tp, fp, fn),
+                  "\nPrecision", evals.eval_tools.precision(tp, fp, fn),
+                  "\nRecall", evals.eval_tools.recall(tp, fp, fn))
 
-    if args.verbose:
-        print("True Positives:", int(tp), "False Positives:", int(fp), "False Negatives:", int(fn))
-        print("F1 score", evals.eval_tools.f1_score(tp, fp, fn),
-              "\nPrecision", evals.eval_tools.precision(tp, fp, fn),
-              "\nRecall", evals.eval_tools.recall(tp, fp, fn))
-
-    fig_1m.savefig(args.output_path + "_magnitudes.png")
-    fig_1t.savefig(args.output_path + "_trail_lengths.png")
-    with open(args.output_path + "_scores.txt", "w") as f:
-        f.write("True Positives: " + str(int(tp)) + "\nFalse Positives: " + str(int(fp)) + "\nFalse Negatives: " + str(
-            int(fn)) + "\n")
-        f.write("F1 score: " + str(evals.eval_tools.f1_score(tp, fp, fn)) + "\n")
-        f.write("Precision: " + str(evals.eval_tools.precision(tp, fp, fn)) + "\n")
-        f.write("Recall: " + str(evals.eval_tools.recall(tp, fp, fn)) + "\n")
+        fig_1m.savefig(args.output_path + "_magnitudes.png")
+        fig_1t.savefig(args.output_path + "_trail_lengths.png")
+        with open(args.output_path + "_scores.txt", "w") as f:
+            f.write(
+                "True Positives: " + str(int(tp)) + "\nFalse Positives: " + str(int(fp)) + "\nFalse Negatives: " + str(
+                    int(fn)) + "\n")
+            f.write("F1 score: " + str(evals.eval_tools.f1_score(tp, fp, fn)) + "\n")
+            f.write("Precision: " + str(evals.eval_tools.precision(tp, fp, fn)) + "\n")
+            f.write("Recall: " + str(evals.eval_tools.recall(tp, fp, fn)) + "\n")
 
 
 def parse_arguments(args):
