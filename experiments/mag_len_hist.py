@@ -1,10 +1,8 @@
 import time
-
 start_time = time.time()
 import sys
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-
 sys.path.append("..")
 import os
 import argparse
@@ -86,21 +84,21 @@ def main(args):
         os.makedirs(args.output_path)
 
     if args.verbose:
-        print("Model evaluating started")
+        print("Model evaluating started", flush=True)
     predictions = evals.eval_tools.create_NN_prediction(tf_dataset_paths,
                                                         args.model_path,
                                                         threshold=args.threshold,
                                                         batch_size=args.batch_size,
                                                         verbose=False)
     if args.verbose:
-        print("NN predictions created")
+        print("NN predictions created", flush=True)
     for i in range(len(collections)):
         dataset_name = tf_dataset_paths[i].split("/")[-1].split(".")[0]
         output_path = args.output_path + dataset_name
         inputs, truths = tools.data.create_XY_pairs(tf_dataset_paths)
         tp, fp, fn, mask = evals.eval_tools.get_mask(truths, predictions[i], multiprocess_size=args.cpu_count)
         if args.verbose:
-            print(i, "Scoring done")
+            print(i, "Scoring done", flush=True)
         NN_detected_asteroids, \
             true_asteroids = evals.eval_tools.NN_comparation_histogram_data(predictions[i],
                                                                             args.val_index_path,
@@ -113,7 +111,7 @@ def main(args):
         true_asteroids_m = true_asteroids[:, 0]
         true_asteroids_t = true_asteroids[:, 1]
         if args.verbose:
-            print(i, "Histogram data created")
+            print(i, "Histogram data created", flush=True)
         LSST_stack_detected_asteroids = evals.eval_tools.LSST_stack_comparation_histogram_data(args.repo_path,
                                                                                                collections[i],
                                                                                                args.val_index_path,
@@ -123,7 +121,7 @@ def main(args):
         LSST_stack_detected_asteroids_m = LSST_stack_detected_asteroids[:, 0]
         LSST_stack_detected_asteroids_t = LSST_stack_detected_asteroids[:, 1]
         if args.verbose:
-            print(i, "LSST stack predictions created")
+            print(i, "LSST stack predictions created", flush=True)
         fig_1m = plot_magnitude_histogram(NN_detected_asteroids_m, LSST_stack_detected_asteroids_m, true_asteroids_m)
         fig_1t = plot_trail_histogram(NN_detected_asteroids_t, LSST_stack_detected_asteroids_t, true_asteroids_t)
         minmag, maxmag = get_magnitude_bin(args.repo_path, args.collection)
@@ -133,11 +131,11 @@ def main(args):
         fn = fn.sum()
 
         if args.verbose:
-            print("Collection:", collections[i])
-            print("True Positives:", int(tp), "False Positives:", int(fp), "False Negatives:", int(fn))
+            print("Collection:", collections[i], flush=True)
+            print("True Positives:", int(tp), "False Positives:", int(fp), "False Negatives:", int(fn), flush=True)
             print("F1 score", evals.eval_tools.f1_score(tp, fp, fn),
                   "\nPrecision", evals.eval_tools.precision(tp, fp, fn),
-                  "\nRecall", evals.eval_tools.recall(tp, fp, fn))
+                  "\nRecall", evals.eval_tools.recall(tp, fp, fn), flush=True)
 
         fig_1m.savefig(output_path + "_magnitudes.png")
         fig_1t.savefig(output_path + "_trail_lengths.png")
@@ -188,5 +186,6 @@ def parse_arguments(args):
 
 
 if __name__ == '__main__':
-    print("Import time: {:.2f}s".format(time.time() - start_time))
+    print("Import time: {:.2f}s".format(time.time() - start_time), flush=True)
     main(parse_arguments(sys.argv[1:]))
+    print("Total execution time: {:.2f}s".format(time.time() - start_time), flush=True)
