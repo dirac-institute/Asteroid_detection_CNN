@@ -232,11 +232,11 @@ def get_one_image_mask(true_img, prediction_img, pixel_gap=15):
 
 def get_mask(truths, predictions, multiprocess_size=None):
     if multiprocess_size is None:
-        multiprocess_size = max(1, min(os.cpu_count() - 1, len(parameters)))
+        multiprocess_size = max(1, min(os.cpu_count() - 1, truths.shape[0]))
     if multiprocess_size > 1:
-        results = Parallel(n_jobs=multiprocess_size)(
-            delayed(get_one_image_mask)(truths[i], predictions[i]) for i in range(truths.shape[0])
-        )
+        parameters = [(truths[i], predictions[i]) for i in range(truths.shape[0])]
+        with multiprocessing.Pool(multiprocess_size) as pool:
+            results = pool.starmap(get_one_image_mask, parameters)
     else:
         results = [None] * truths.shape[0]
         for i in range(truths.shape[0]):
