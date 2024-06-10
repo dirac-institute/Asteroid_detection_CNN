@@ -13,6 +13,6 @@
 source ~/activate.sh
 srun python3 mag_len_hist.py \
 --model_path ../DATA/Trained_model_18796700.keras \
---tf_dataset_path ../DATA/test1.tfrecord \
---collection u/kmrakovc/single_frame_injection_01 \
+--tf_dataset_path ../DATA/test1.tfrecord,../DATA/test2.tfrecord,../DATA/test3.tfrecord,../DATA/test4.tfrecord  \
+--collection u/kmrakovc/single_frame_injection_01,u/kmrakovc/single_frame_injection_02,u/kmrakovc/single_frame_injection_03,u/kmrakovc/single_frame_injection_04 \
 --cpu_count $SLURM_CPUS_PER_TASK
