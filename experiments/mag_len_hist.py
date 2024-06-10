@@ -76,13 +76,12 @@ def main(args):
     if len(collections) != len(tf_dataset_paths):
         raise ValueError("Number of collections and TFrecords files should be the same")
     model_name = args.model_path.split("_")[-1].split(".")[0]
-    dataset_name = args.tf_dataset_path.split("/")[-1].split(".")[0]
     if args.output_path[-1] != "/":
         args.output_path += "/"
     args.output_path += model_name + "/"
     if not os.path.exists(args.output_path):
         os.makedirs(args.output_path)
-    args.output_path += dataset_name
+
     if args.verbose:
         print("Model evaluating started")
     predictions = evals.eval_tools.create_NN_prediction(tf_dataset_paths,
@@ -93,6 +92,8 @@ def main(args):
     if args.verbose:
         print("NN predictions created")
     for i in range(len(collections)):
+        dataset_name = tf_dataset_paths[i].split("/")[-1].split(".")[0]
+        output_path = args.output_path+dataset_name
         inputs, truths = tools.data.create_XY_pairs(tf_dataset_paths)
         tp, fp, fn, mask = evals.eval_tools.get_mask(truths, predictions[i], multiprocess_size=args.cpu_count)
         if args.verbose:
@@ -129,14 +130,15 @@ def main(args):
         fn = fn.sum()
 
         if args.verbose:
+            print("Collection:", collections[i])
             print("True Positives:", int(tp), "False Positives:", int(fp), "False Negatives:", int(fn))
             print("F1 score", evals.eval_tools.f1_score(tp, fp, fn),
                   "\nPrecision", evals.eval_tools.precision(tp, fp, fn),
                   "\nRecall", evals.eval_tools.recall(tp, fp, fn))
 
-        fig_1m.savefig(args.output_path + "_magnitudes.png")
-        fig_1t.savefig(args.output_path + "_trail_lengths.png")
-        with open(args.output_path + "_scores.txt", "w") as f:
+        fig_1m.savefig(output_path + "_magnitudes.png")
+        fig_1t.savefig(output_path + "_trail_lengths.png")
+        with open(output_path + "_scores.txt", "w") as f:
             f.write(
                 "True Positives: " + str(int(tp)) + "\nFalse Positives: " + str(int(fp)) + "\nFalse Negatives: " + str(
                     int(fn)) + "\n")
@@ -155,7 +157,7 @@ def parse_arguments(args):
                         default=512,
                         help='Batch size for the evaluation.')
     parser.add_argument('--tf_dataset_path', type=str,
-                        default="../DATA/test1.tfrecord",
+                        default="../DATA/test1.tfrecord,../DATA/test2.tfrecord,../DATA/test3.tfrecord,../DATA/test4.tfrecord",
                         help='Comma-separated list of paths to the TFrecords files.')
     parser.add_argument('--output_path', type=str,
                         default="../RESULTS/",
@@ -164,7 +166,7 @@ def parse_arguments(args):
                         default="../rc2_subset/SMALL_HSC/",
                         help='Path to the Butler repo.')
     parser.add_argument('--collection', type=str,
-                        default="u/kmrakovc/single_frame_injection_01",
+                        default="u/kmrakovc/single_frame_injection_01,u/kmrakovc/single_frame_injection_02,u/kmrakovc/single_frame_injection_03,u/kmrakovc/single_frame_injection_04",
                         help='Comma-separated list of collection names in the Butler repo.')
     parser.add_argument('--val_index_path', type=str,
                         default="../DATA/val_index1.npy",
