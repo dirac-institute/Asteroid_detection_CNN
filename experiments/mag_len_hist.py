@@ -1,3 +1,6 @@
+import time
+
+start_time = time.time()
 import sys
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -93,7 +96,7 @@ def main(args):
         print("NN predictions created")
     for i in range(len(collections)):
         dataset_name = tf_dataset_paths[i].split("/")[-1].split(".")[0]
-        output_path = args.output_path+dataset_name
+        output_path = args.output_path + dataset_name
         inputs, truths = tools.data.create_XY_pairs(tf_dataset_paths)
         tp, fp, fn, mask = evals.eval_tools.get_mask(truths, predictions[i], multiprocess_size=args.cpu_count)
         if args.verbose:
@@ -185,4 +188,5 @@ def parse_arguments(args):
 
 
 if __name__ == '__main__':
+    print("Import time: {:.2f}s".format(time.time() - start_time))
     main(parse_arguments(sys.argv[1:]))
