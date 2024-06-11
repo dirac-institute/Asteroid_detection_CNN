@@ -95,7 +95,7 @@ def main(args):
     for i in range(len(collections)):
         dataset_name = tf_dataset_paths[i].split("/")[-1].split(".")[0]
         output_path = args.output_path + dataset_name
-        inputs, truths = tools.data.create_XY_pairs(tf_dataset_paths)
+        inputs, truths = tools.data.create_XY_pairs(tf_dataset_paths[i])
         tp, fp, fn, mask = evals.eval_tools.get_mask(truths, predictions[i], multiprocess_size=args.cpu_count)
         if args.verbose:
             print(i, "Scoring done", flush=True)
