@@ -124,7 +124,7 @@ def main(args):
             print(i, "LSST stack predictions created", flush=True)
         fig_1m = plot_magnitude_histogram(NN_detected_asteroids_m, LSST_stack_detected_asteroids_m, true_asteroids_m)
         fig_1t = plot_trail_histogram(NN_detected_asteroids_t, LSST_stack_detected_asteroids_t, true_asteroids_t)
-        minmag, maxmag = get_magnitude_bin(args.repo_path, args.collection)
+        minmag, maxmag = get_magnitude_bin(args.repo_path, collections[i])
         _ = fig_1t.suptitle("Magnitude: " + str(round(minmag, 1)) + " - " + str(round(maxmag, 1)))
         tp = tp.sum()
         fp = fp.sum()
