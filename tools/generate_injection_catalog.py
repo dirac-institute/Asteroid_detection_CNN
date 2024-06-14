@@ -6,7 +6,7 @@ from matplotlib import pyplot as plt
 import argparse
 
 
-def generate_catalog(repo, input_coll, n_inject, trail_length, mag, beta, filter="", verbose=True):
+def generate_catalog(repo, input_coll, n_inject, trail_length, mag, beta, where="", verbose=True):
     """
     Create a catalog of trails to be injected in the input collection for the source injection. The catalog is saved in the
     astropy table format. The catalog is created by randomly selecting a position in the input collection and then
@@ -19,6 +19,7 @@ def generate_catalog(repo, input_coll, n_inject, trail_length, mag, beta, filter
     :param trail_length:
     :param mag:
     :param beta:
+    :param where:
     :param verbose:
     :return:
     """
@@ -32,10 +33,10 @@ def generate_catalog(repo, input_coll, n_inject, trail_length, mag, beta, filter
         names=('injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit'),
         dtype=('int64', 'float64', 'float64', 'str', 'int64', 'float64', 'float64', 'int64'))
     source_type = "calexp"
-    if filter == "":
+    if where == "":
         query = registry.queryDatasets(source_type, collections=input_coll, instrument='HSC')
     else:
-        query = registry.queryDatasets(source_type, collections=input_coll, instrument='HSC', where=filter)
+        query = registry.queryDatasets(source_type, collections=input_coll, instrument='HSC', where=where)
     length = len(list(query))
     for i, ref in enumerate(query):
         raw = butler.get(
@@ -104,7 +105,7 @@ def main(args):
     :return:
     """
     catalog = generate_catalog(args.repo, args.input_collection, args.number, args.trail_length, args.magnitude,
-                               args.beta, args.verbose)
+                               args.beta, where=args.where, verbose=args.verbose)
     write_catalog(catalog, args.repo, args.output_collection)
     return None
 
@@ -138,7 +139,7 @@ def parse_arguments(args):
     parser.add_argument('-b', '--beta', nargs=2, type=float,
                         default=[0.0, 180.0],
                         help='Lower and upper limit for the injected trails rotation angle.')
-    parser.add_argument('-f', '--where', type=str,
+    parser.add_argument('--where', type=str,
                         default="",
                         help='Filter the collection.')
     parser.add_argument('-v', '--verbose', action=argparse.BooleanOptionalAction,
