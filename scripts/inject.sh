@@ -1,14 +1,29 @@
 #!/bin/bash
 
-# Getting the run number for the output colection name
-if [ $# -lt 1 ]; then
-        echo "Please specify RUN number"
-		exit 1
-fi
-RUN_NUM=$1
+for i in "$@"; do
+  case $i in
+    -n=*|--name=*)
+      RUN_NUM="${i#*=}"
+      shift # past argument=value
+      ;;
+    -c=*|--cpus=*)
+      CPU_NUM="${i#*=}"
+      shift # past argument=value
+      ;;
+    -*|--*)
+      echo "Unknown option $i"
+      exit 1
+      ;;
+    *)
+      ;;
+  esac
+done
+
+echo "RUN_NUM  = ${RUN_NUM}"
+echo "CPU_NUM  = ${CPU_NUM}"
 
 # LSST stack activation
-source $LSST_STACK_PATH
+source $LSST_STACK_PATH || exit 1
 setup lsst_distrib
 setup source_injection
 echo -e "\nLSST stack activated\n"
@@ -20,7 +35,7 @@ make_injection_pipeline -t postISRCCD -r $DRP_PIPE_DIR/pipelines/HSC/DRP-RC2.yam
 -f $PROJECT_PATH/DATA/DRP-RC2_subset_injection.yaml --overwrite
 pipetask build -p $PROJECT_PATH/DATA/DRP-RC2_subset_injection.yaml \
 -c inject_exposure:selection="np.isin(injection_catalog['visit'], {visit})" \
--s $PROJECT_PATH/DATA/DRP-RC2_subset_injection.yaml
+-s $PROJECT_PATH/DATA/DRP-RC2_subset_injection.yaml || exit 1
 echo -e "\nPipeline with injection created\n"
 
 # Generate injection catalog
@@ -34,7 +49,7 @@ python3 $PROJECT_PATH/tools/generate_injection_catalog.py \
 -b 0.00 180.0 \
 --where "$COLL_FILTER" \
 --cpu_count 16 \
---verbose
+--verbose || exit 1
 echo -e "\nInjection catalog generated\n"
 
 # Run the pipeline with injection
@@ -46,7 +61,7 @@ pipetask --log-file ~/inject_log_$RUN_NUM.txt run --register-dataset-types \
 -p $PROJECT_PATH/DATA/DRP-RC2_subset_injection.yaml#step1 \
 -j 16 \
 -c inject_exposure:process_all_data_ids=True \
--d "$COLL_FILTER"
+-d "$COLL_FILTER" || exit 1
 echo -e "\nFINISHED\n"
 
 # Capture the end time and calculate the total runtime.
