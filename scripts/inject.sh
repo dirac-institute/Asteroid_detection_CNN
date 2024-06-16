@@ -48,7 +48,7 @@ python3 $PROJECT_PATH/tools/generate_injection_catalog.py \
 -m 20.0 25.5 \
 -b 0.00 180.0 \
 --where "$COLL_FILTER" \
---cpu_count 16 \
+--cpu_count $CPU_NUM \
 --verbose || exit 1
 echo -e "\nInjection catalog generated\n"
 
@@ -59,7 +59,7 @@ pipetask --log-file ~/inject_log_$RUN_NUM.txt run --register-dataset-types \
 -i $INPUT_COLL,$OUTPUT_COLL/injection_inputs_$RUN_NUM \
 -o $OUTPUT_COLL/single_frame_injection_$RUN_NUM \
 -p $PROJECT_PATH/DATA/DRP-RC2_subset_injection.yaml#step1 \
--j 16 \
+-j $CPU_NUM \
 -c inject_exposure:process_all_data_ids=True \
 -d "$COLL_FILTER" || exit 1
 echo -e "\nFINISHED\n"
