@@ -128,7 +128,7 @@ def main(args):
     :return:
     """
     catalog = generate_catalog(args.repo, args.input_collection, args.number, args.trail_length, args.magnitude,
-                               args.beta, where=args.where, verbose=args.verbose)
+                               args.beta, where=args.where, verbose=args.verbose, multiprocess_size=args.cpu_count)
     write_catalog(catalog, args.repo, args.output_collection)
     return None
 
@@ -165,6 +165,9 @@ def parse_arguments(args):
     parser.add_argument('--where', type=str,
                         default="",
                         help='Filter the collection.')
+    parer.add_argument('--cpu_count', type=int,
+                       default=1,
+                       help='Number of CPUs to use.')
     parser.add_argument('-v', '--verbose', action=argparse.BooleanOptionalAction,
                         default=False,
                         help='Verbose output.')

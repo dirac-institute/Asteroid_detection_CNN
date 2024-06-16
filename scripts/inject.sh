@@ -33,6 +33,7 @@ python3 $PROJECT_PATH/tools/generate_injection_catalog.py \
 -m 20.0 25.5 \
 -b 0.00 180.0 \
 --where "$COLL_FILTER" \
+--cpu_count 16 \
 --verbose
 echo -e "\nInjection catalog generated\n"
 
