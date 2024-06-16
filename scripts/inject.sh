@@ -32,7 +32,8 @@ python3 $PROJECT_PATH/tools/generate_injection_catalog.py \
 -l 4 74 \
 -m 20.0 25.5 \
 -b 0.00 180.0 \
---where "$COLL_FILTER"
+--where "$COLL_FILTER" \
+--verbose
 echo -e "\nInjection catalog generated\n"
 
 # Run the pipeline with injection

@@ -65,7 +65,6 @@ def generate_catalog(repo, input_coll, n_inject, trail_length, mag, beta, where=
     from lsst.daf.butler import Butler
     butler = Butler(repo)
     registry = butler.registry
-    last_id = 0
     source_type = "calexp"
     if where == "":
         query = registry.queryDatasets(source_type, collections=input_coll, instrument='HSC')
@@ -79,6 +78,8 @@ def generate_catalog(repo, input_coll, n_inject, trail_length, mag, beta, where=
     )
     parameters = [(n_inject, trail_length, mag, beta, butler, ref, input_coll, dimensions, source_type) for ref in
                   query]
+    if verbose:
+        print("Number of visits found: ", length)
     if multiprocess_size is None:
         multiprocess_size = max(1, min(os.cpu_count() - 1, len(parameters)))
     if multiprocess_size > 1:
