@@ -61,7 +61,7 @@ pipetask --log-file ~/inject_log_$RUN_NUM.txt run --register-dataset-types \
 -p $PROJECT_PATH/DATA/DRP-RC2_subset_injection.yaml#step1 \
 -j $CPU_NUM \
 -c inject_exposure:process_all_data_ids=True \
--d "$COLL_FILTER" || exit 1
+-d "$COLL_FILTER"
 echo -e "\nFINISHED\n"
 
 # Capture the end time and calculate the total runtime.
