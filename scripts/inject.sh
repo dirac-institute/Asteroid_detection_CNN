@@ -32,19 +32,19 @@ python3 $PROJECT_PATH/tools/generate_injection_catalog.py \
 -l 4 74 \
 -m 20.0 25.5 \
 -b 0.00 180.0 \
---where "\"$COLL_FILTER"\"
+--where "$COLL_FILTER"
 echo -e "\nInjection catalog generated\n"
 
 # Run the pipeline with injection
 rm ~/inject_log_$RUN_NUM.txt
 pipetask --log-file ~/inject_log_$RUN_NUM.txt run --register-dataset-types \
 -b $REPO_PATH \
--i $INPUT_COLL,$OUTPUT_COLL/injection_inputs_$RUN_NUM,$VISIT_SUMMARY \
+-i $INPUT_COLL,$OUTPUT_COLL/injection_inputs_$RUN_NUM \
 -o $OUTPUT_COLL/single_frame_injection_$RUN_NUM \
--p $PROJECT_PATH/DATA/DRP-RC2_subset_injection.yaml#nightlyStep1 \
+-p $PROJECT_PATH/DATA/DRP-RC2_subset_injection.yaml#step1 \
 -j 16 \
 -c inject_exposure:process_all_data_ids=True \
--d "\"$COLL_FILTER\""
+-d "$COLL_FILTER"
 echo -e "\nFINISHED\n"
 
 # Capture the end time and calculate the total runtime.
