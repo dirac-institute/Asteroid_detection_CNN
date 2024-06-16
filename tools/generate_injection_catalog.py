@@ -1,8 +1,8 @@
 import numpy as np
 import os
 import sys
-from astropy.table import QTable, Table, Column
-from matplotlib import pyplot as plt
+from astropy.table import QTable, Table, Column, vstack
+import multiprocessing
 import argparse
 
 
