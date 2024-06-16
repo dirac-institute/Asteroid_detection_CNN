@@ -38,14 +38,24 @@ def generate_catalog(repo, input_coll, n_inject, trail_length, mag, beta, where=
     else:
         query = registry.queryDatasets(source_type, collections=input_coll, instrument='HSC', where=where)
     length = len(list(query))
+    dimensions = butler.get(
+            source_type+".dimensions",
+            dataId=list(query)[0].dataId,
+            collections=input_coll,
+        )
     for i, ref in enumerate(query):
         raw = butler.get(
-            source_type,
+            source_type+".wcs",
             dataId=ref.dataId,
             collections=input_coll,
         )
-        start = raw.wcs.pixelToSky(0, 0)
-        end = raw.wcs.pixelToSky(raw.getDimensions()[0], raw.getDimensions()[1])
+        info = butler.get(
+            source_type+".visitInfo",
+            dataId=ref.dataId,
+            collections=input_coll,
+        )
+        start = raw.pixelToSky(0, 0)
+        end = raw.pixelToSky(dimensions[0], dimensions[1])
         min_ra = start.getRa()
         min_dec = start.getDec()
         max_ra = end.getRa()
@@ -65,11 +75,11 @@ def generate_catalog(repo, input_coll, n_inject, trail_length, mag, beta, where=
                 inject_length = np.random.uniform(low=trail_length[0], high=trail_length[1])
                 magnitude = np.random.uniform(low=mag[0], high=mag[1])
                 angle = np.random.uniform(low=beta[0], high=beta[1])
-                visitid = raw.getInfo().getVisitInfo().id
+                visitid = info.id
                 injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, magnitude, angle, visitid])
             last_id = k
         if verbose:
-            print("\r", i + 1, "/", length, end="")
+            print("\r", i + 1, "/", length, end="", flush=True)
     if verbose:
         print("")
     return injection_catalog
