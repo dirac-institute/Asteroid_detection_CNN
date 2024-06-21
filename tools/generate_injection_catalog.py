@@ -8,8 +8,8 @@ import argparse
 
 def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, input_coll, dimensions, source_type):
     injection_catalog = Table(
-        names=('injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit'),
-        dtype=('int64', 'float64', 'float64', 'str', 'int64', 'float64', 'float64', 'int64'))
+        names=('injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit', 'integrated_mag'),
+        dtype=('int64', 'float64', 'float64', 'str', 'float64', 'float64', 'float64', 'int64', 'float64'))
     injection_catalog.add_index('injection_id')
     raw = butler.get(
         source_type + ".wcs",
@@ -38,9 +38,10 @@ def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, input_coll
         dec_pos = np.random.uniform(low=min_dec.asDegrees(), high=max_dec.asDegrees())
         inject_length = np.random.uniform(low=trail_length[0], high=trail_length[1])
         magnitude = np.random.uniform(low=mag[0], high=mag[1])
+        surface_brightness = magnitude + 2.5 * np.log10(inject_length)
         angle = np.random.uniform(low=beta[0], high=beta[1])
         visitid = info.id
-        injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, magnitude, angle, visitid])
+        injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, visitid, magnitude])
     return injection_catalog
 
 
