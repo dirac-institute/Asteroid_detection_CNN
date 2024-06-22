@@ -54,7 +54,7 @@ python3 $PROJECT_PATH/tools/generate_injection_catalog.py \
 echo -e "\nInjection catalog generated\n"
 
 # Run the pipeline with injection
-if [[ $(hostname) == *"sfd"* ]]; then
+if [[ $(hostname) == *"sdf"* ]]; then
   echo -e "\nS3DF Detected, using BPS system...\n"
     bps submit -b $REPO_PATH \
   -i $INPUT_COLL,$OUTPUT_COLL/injection_inputs_$RUN_NUM,$VISIT_SUMMARY_COLL \
