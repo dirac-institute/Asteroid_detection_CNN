@@ -26,6 +26,7 @@ echo "CPU_NUM  = ${CPU_NUM}"
 source $LSST_STACK_PATH || exit 1
 setup lsst_distrib
 setup source_injection
+setup bps
 echo -e "\nLSST stack activated\n"
 start_time=$(date +%s)
 
@@ -53,16 +54,27 @@ python3 $PROJECT_PATH/tools/generate_injection_catalog.py \
 echo -e "\nInjection catalog generated\n"
 
 # Run the pipeline with injection
-rm ~/inject_log_$RUN_NUM.txt
-pipetask --log-file ~/inject_log_$RUN_NUM.txt run --register-dataset-types \
--b $REPO_PATH \
--i $INPUT_COLL,$OUTPUT_COLL/injection_inputs_$RUN_NUM,$VISIT_SUMMARY_COLL \
--o $OUTPUT_COLL/single_frame_injection_$RUN_NUM \
--p $PROJECT_PATH/DATA/DRP-RC2_subset_injection.yaml#step1 \
--j $CPU_NUM \
--c inject_exposure:process_all_data_ids=True \
--d "$COLL_FILTER"
-echo -e "\nFINISHED\n"
+if [[ $(hostname) == *"sfd"* ]]; then
+    bps submit -b $REPO_PATH \
+  -i $INPUT_COLL,$OUTPUT_COLL/injection_inputs_$RUN_NUM,$VISIT_SUMMARY_COLL \
+  -o $OUTPUT_COLL/single_frame_injection_$RUN_NUM \
+  -p $PROJECT_PATH/DATA/DRP-RC2_subset_injection.yaml#step1 \
+  -d "$COLL_FILTER" \
+  ${CTRL_BPS_DIR}/python/lsst/ctrl/bps/etc/bps_defaults.yaml
+  allocateNodes.py -v -n 80 -c 16 -m 1-00:00:00 -q milano -g 120 s3df
+  echo -e "\nFINISHED\n"
+else
+  rm ~/inject_log_$RUN_NUM.txt
+  pipetask --log-file ~/inject_log_$RUN_NUM.txt run --register-dataset-types \
+  -b $REPO_PATH \
+  -i $INPUT_COLL,$OUTPUT_COLL/injection_inputs_$RUN_NUM,$VISIT_SUMMARY_COLL \
+  -o $OUTPUT_COLL/single_frame_injection_$RUN_NUM \
+  -p $PROJECT_PATH/DATA/DRP-RC2_subset_injection.yaml#step1 \
+  -j $CPU_NUM \
+  -c inject_exposure:process_all_data_ids=True \
+  -d "$COLL_FILTER"
+  echo -e "\nFINISHED\n"
+fi
 
 # Capture the end time and calculate the total runtime.
 end_time=$(date +%s)
