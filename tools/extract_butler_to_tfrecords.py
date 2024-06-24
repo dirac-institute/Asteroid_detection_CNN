@@ -1,3 +1,5 @@
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 from lsst.daf.butler import Butler
 import numpy as np
 import argparse
