@@ -11,6 +11,7 @@ def main(args):
                                                     filename_train=args.filename_train,
                                                     filename_test=args.filename_test,
                                                     train_split=args.split,
+                                                    batch_size=args.cpu_count,
                                                     verbose=True,
                                                     seed=args.seed)
     val_index = np.array(val_index)
@@ -26,6 +27,7 @@ def parse_arguments(args):
     parser.add_argument("--filename_train", type=str, help="Filename of the train dataset", required=True)
     parser.add_argument("--filename_test", type=str, help="Filename of the test dataset", required=True)
     parser.add_argument("--filename_index", type=str, help="Filename of the index", required=True)
+    parser.add_argument("--cpu_count", type=int, help="Number of CPUs to use", default=1)
     parser.add_argument("--split", type=float, help="Split ratio", default=0.25)
     parser.add_argument("--seed", type=int, help="Seed for random split", default=42)
     return parser.parse_args(args)

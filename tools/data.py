@@ -140,7 +140,8 @@ def one_iteration(i, exp_ref, cat_ref, butler, output_coll, shape):
     return serialized_list
 
 
-def convert_butler_tfrecords(repo, output_coll, shape, filename_train, filename_test="", train_split=0.25, verbose=True,
+def convert_butler_tfrecords(repo, output_coll, shape, filename_train, filename_test="", train_split=0.25, batch_size=None,
+                             verbose=True,
                              seed=42):
     from lsst.daf.butler import Butler
     butler = Butler(repo)
@@ -169,7 +170,8 @@ def convert_butler_tfrecords(repo, output_coll, shape, filename_train, filename_
         filename_train = repo + "train.tfrecord"
     elif not filename_train.endswith(".tfrecord"):
         filename_train += ".tfrecord"
-    batch_size = os.cpu_count() - 1
+    if batch_size is None:
+        batch_size = os.cpu_count() - 1
     counter = 0
     with tf.io.TFRecordWriter(filename_train) as writer_train:
         with tf.io.TFRecordWriter(filename_test) as writer_test:
