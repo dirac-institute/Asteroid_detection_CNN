@@ -173,6 +173,9 @@ def convert_butler_tfrecords(repo, output_coll, shape, filename_train, filename_
     if batch_size is None:
         batch_size = os.cpu_count() - 1
     counter = 0
+    if verbose:
+        print("Train dataset size: ", len(ref) - len(index))
+        print("Test dataset size: ", len(index))
     with tf.io.TFRecordWriter(filename_train) as writer_train:
         with tf.io.TFRecordWriter(filename_test) as writer_test:
             while counter < len(ref):
