@@ -1,7 +1,9 @@
-import data
+from lsst.daf.butler import Butler
 import numpy as np
 import argparse
 import sys
+sys.path.append("../")
+import tools.data
 
 
 def main(args):
