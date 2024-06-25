@@ -45,7 +45,7 @@ def main(args):
         dataset_train = dataset_train.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
         dataset_val = dataset_val.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
 
-    dataset_train = dataset_train.shuffle(1000).batch(args.batch_size).repeat().prefetch(10)
+    dataset_train = dataset_train.repeat().shuffle(1000).batch(args.batch_size).prefetch(10)
     dataset_val = dataset_val.batch(args.batch_size).prefetch(10)
     if args.multiworker:
         options = tf.data.Options()
