@@ -46,7 +46,7 @@ def main(args):
         dataset_val = dataset_val.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
 
     dataset_train = dataset_train.repeat().shuffle(1000).batch(args.batch_size).prefetch(10)
-    dataset_val = dataset_val.batch(args.batch_size, num_parallel_calls).prefetch(10)
+    dataset_val = dataset_val.batch(args.batch_size).prefetch(10)
 
     earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5 * args.decay_lr_patience,
                                                         verbose=1,
