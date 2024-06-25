@@ -47,6 +47,11 @@ def main(args):
 
     dataset_train = dataset_train.shuffle(1000).batch(args.batch_size).prefetch(10)
     dataset_val = dataset_val.batch(args.batch_size).prefetch(10)
+    if args.multiworker:
+        options = tf.data.Options()
+        options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
+        dataset_train = dataset_train.with_options(options)
+        dataset_val = dataset_val.with_options(options)
 
     earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5 * args.decay_lr_patience,
                                                         verbose=1,
