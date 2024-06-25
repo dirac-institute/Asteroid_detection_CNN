@@ -15,7 +15,8 @@ def main(args):
                                                     train_split=args.split,
                                                     batch_size=args.cpu_count,
                                                     verbose=True,
-                                                    seed=args.seed)
+                                                    seed=args.seed,
+                                                    maxlen=10000)
     val_index = np.array(val_index)
     val_index.sort()
     with open(args.filename_index, 'wb') as f:

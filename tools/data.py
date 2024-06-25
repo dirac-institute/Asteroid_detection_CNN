@@ -141,8 +141,7 @@ def one_iteration(i, exp_ref, cat_ref, butler, output_coll, shape):
 
 
 def convert_butler_tfrecords(repo, output_coll, shape, filename_train, filename_test="", train_split=0.25, batch_size=None,
-                             verbose=True,
-                             seed=42):
+                             verbose=True, seed=42, maxlen=None):
     from lsst.daf.butler import Butler
     butler = Butler(repo)
     catalog_ref = list(butler.registry.queryDatasets("injected_postISRCCD_catalog",
@@ -151,6 +150,9 @@ def convert_butler_tfrecords(repo, output_coll, shape, filename_train, filename_
     ref = list(butler.registry.queryDatasets("injected_calexp",
                                              collections=output_coll,
                                              instrument='HSC'))
+    if maxlen is not None and maxlen < len(ref):
+        ref = ref[:maxlen]
+        catalog_ref = catalog_ref[:maxlen]
     if train_split < 0 or train_split > 1:
         raise ValueError("train_split must be between 0 and 1")
     elif train_split != 0:
