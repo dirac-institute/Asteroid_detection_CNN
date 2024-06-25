@@ -45,7 +45,7 @@ def main(args):
         dataset_train = dataset_train.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
         dataset_val = dataset_val.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
 
-    dataset_train = dataset_train.shuffle(1000).batch(args.batch_size).repeat().prefetch(10)
+    dataset_train = dataset_train.shuffle(1000).batch(args.batch_size).prefetch(10)
     dataset_val = dataset_val.batch(args.batch_size).prefetch(10)
 
     earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5 * args.decay_lr_patience,
@@ -67,8 +67,7 @@ def main(args):
     else:
         verbose = 2
     #tf.keras.utils.plot_model(model, to_file='model.png', show_shapes=True, show_layer_names=True)
-    results = model.fit(dataset_train, epochs=args.epochs, validation_data=dataset_val, callbacks=kb, verbose=verbose,
-                        steps_per_epoch=10000)
+    results = model.fit(dataset_train, epochs=args.epochs, validation_data=dataset_val, callbacks=kb, verbose=verbose)
     #if (task_type == 'worker' and task_id == 0) or task_type is None:
     #    model.save(args.model_destination)
 
