@@ -68,7 +68,7 @@ def main(args):
         verbose = 2
     #tf.keras.utils.plot_model(model, to_file='model.png', show_shapes=True, show_layer_names=True)
     results = model.fit(dataset_train, epochs=args.epochs, validation_data=dataset_val, callbacks=kb, verbose=verbose,
-                        steps_per_epoch=1000)
+                        steps_per_epoch=10000)
     #if (task_type == 'worker' and task_id == 0) or task_type is None:
     #    model.save(args.model_destination)
 
