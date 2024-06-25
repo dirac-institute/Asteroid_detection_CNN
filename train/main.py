@@ -9,7 +9,7 @@ import json
 
 def main(args):
     if args.multiworker:
-        slurm_resolver = tf.distribute.cluster_resolver.SlurmClusterResolver(port_base=8000)
+        slurm_resolver = tf.distribute.cluster_resolver.SlurmClusterResolver(port_base=8888)
         communication = tf.distribute.experimental.CommunicationOptions(
             implementation=tf.distribute.experimental.CommunicationImplementation.NCCL)
         mirrored_strategy = tf.distribute.MultiWorkerMirroredStrategy(cluster_resolver=slurm_resolver,
