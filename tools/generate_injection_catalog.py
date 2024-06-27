@@ -22,7 +22,7 @@ def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, input_coll
         collections=input_coll,
     )
     filter_name = butler.get(
-        source_type + ".visitInfo.filter",
+        source_type + ".filter",
         dataId=ref.dataId,
         collections=input_coll,
     )
