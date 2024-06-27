@@ -26,7 +26,6 @@ echo "CPU_NUM  = ${CPU_NUM}"
 source $LSST_STACK_PATH || exit 1
 setup lsst_distrib
 setup source_injection
-setup bps
 echo -e "\nLSST stack activated\n"
 start_time=$(date +%s)
 
@@ -61,7 +60,7 @@ if [[ $(hostname) == *"sdf"* ]]; then
 source $LSST_STACK_PATH || exit 1
 setup lsst_distrib
 setup source_injection
-setup bps
+setup ctrl_bps_htcondor
 echo -e "\nLSST stack activated\n"
 bps submit -b $REPO_PATH \
   -i $INPUT_COLL,$OUTPUT_COLL/injection_inputs_$RUN_NUM,$VISIT_SUMMARY_COLL \
