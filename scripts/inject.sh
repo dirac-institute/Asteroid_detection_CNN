@@ -68,7 +68,7 @@ bps submit -b $REPO_PATH \
   -p $PROJECT_PATH/DATA/DRP-RC2_subset_injection.yaml#step1 \
   -d "$COLL_FILTER" \
   ${CTRL_BPS_DIR}/python/lsst/ctrl/bps/etc/bps_defaults.yaml
-  allocateNodes.py -v -n 80 -c 16 -m 1-00:00:00 -q milano -g 120 s3df
+  allocateNodes.py -v -n 10 -c 16 -m 1-00:00:00 -q milano -g 120 s3df
 rm inject_bps.sh
 EOF
   echo -e "\nFINISHED\n"
