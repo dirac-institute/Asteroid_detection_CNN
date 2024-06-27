@@ -8,8 +8,8 @@ import argparse
 
 def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, input_coll, dimensions, source_type):
     injection_catalog = Table(
-        names=('injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit', 'integrated_mag'),
-        dtype=('int64', 'float64', 'float64', 'str', 'float64', 'float64', 'float64', 'int64', 'float64'))
+        names=('injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit', 'integrated_mag', 'physical_filter'),
+        dtype=('int64', 'float64', 'float64', 'str', 'float64', 'float64', 'float64', 'int64', 'float64', 'str'))
     injection_catalog.add_index('injection_id')
     raw = butler.get(
         source_type + ".wcs",
@@ -18,6 +18,11 @@ def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, input_coll
     )
     info = butler.get(
         source_type + ".visitInfo",
+        dataId=ref.dataId,
+        collections=input_coll,
+    )
+    filter_name = butler.get(
+        source_type + ".visitInfo.filter",
         dataId=ref.dataId,
         collections=input_coll,
     )
@@ -37,11 +42,17 @@ def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, input_coll
         ra_pos = np.random.uniform(low=min_ra.asDegrees(), high=max_ra.asDegrees())
         dec_pos = np.random.uniform(low=min_dec.asDegrees(), high=max_dec.asDegrees())
         inject_length = np.random.uniform(low=trail_length[0], high=trail_length[1])
-        magnitude = np.random.uniform(low=mag[0], high=mag[1])
-        surface_brightness = magnitude + 2.5 * np.log10(inject_length)
+        # rolling dice for the magnitude then calculating the surface brightness
+        # magnitude = np.random.uniform(low=mag[0], high=mag[1])
+        # surface_brightness = magnitude + 2.5 * np.log10(inject_length)
+
+        # rolling dice for the surface brightness then calculating the magnitude
+        surface_brightness = np.random.uniform(low=mag[0], high=mag[1])
+        magnitude = surface_brightness - 2.5 * np.log10(inject_length)
         angle = np.random.uniform(low=beta[0], high=beta[1])
         visitid = info.id
-        injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, visitid, magnitude])
+        injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, visitid,
+                                   magnitude, filter_name.bandLabel])
     return injection_catalog
 
 
@@ -111,10 +122,10 @@ def write_catalog(catalog, repo, output_coll):
     from lsst.daf.butler import Butler
     from lsst.source.injection import ingest_injection_catalog
     writeable_butler = Butler(repo, writeable=True)
-    for bands in ["g", "r", "i", "z", "y"]:
+    for bands in np.unique(catalog['physical_filter'].data):
         _ = ingest_injection_catalog(
             writeable_butler=writeable_butler,
-            table=catalog,
+            table=catalog[catalog['physical_filter'] == bands],
             band=bands,
             output_collection=output_coll)
     return None

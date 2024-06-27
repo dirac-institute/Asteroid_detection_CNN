@@ -55,14 +55,18 @@ echo -e "\nInjection catalog generated\n"
 
 # Run the pipeline with injection
 if [[ $(hostname) == *"sdf"* ]]; then
-  echo -e "\nS3DF Detected, using BPS system...\n"
-    bps submit -b $REPO_PATH \
+  echo -e "\nS3DF Detected, using BPS system. After job is finished, please run 'bash ~/inject.sh' "\n"
+  cat << EOF > $HOME/inject.sh
+#!/bin/bash
+source ~/actviate.sh
+bps submit -b $REPO_PATH \
   -i $INPUT_COLL,$OUTPUT_COLL/injection_inputs_$RUN_NUM,$VISIT_SUMMARY_COLL \
   -o $OUTPUT_COLL/single_frame_injection_$RUN_NUM \
   -p $PROJECT_PATH/DATA/DRP-RC2_subset_injection.yaml#step1 \
   -d "$COLL_FILTER" \
   ${CTRL_BPS_DIR}/python/lsst/ctrl/bps/etc/bps_defaults.yaml
   allocateNodes.py -v -n 80 -c 16 -m 1-00:00:00 -q milano -g 120 s3df
+EOF
   echo -e "\nFINISHED\n"
 else
   rm ~/inject_log_$RUN_NUM.txt
