@@ -55,10 +55,14 @@ echo -e "\nInjection catalog generated\n"
 
 # Run the pipeline with injection
 if [[ $(hostname) == *"sdf"* ]]; then
-  echo -e "\nS3DF Detected, using BPS system. After job is finished, please run 'bash ~/inject.sh' "\n"
-  cat << EOF > $HOME/inject.sh
+  echo -e "\nS3DF Detected, using BPS system. After job is finished, please run 'bash ~/inject_bps.sh' \n"
+  cat << EOF > $HOME/inject_bps.sh
 #!/bin/bash
-source ~/actviate.sh
+source $LSST_STACK_PATH || exit 1
+setup lsst_distrib
+setup source_injection
+setup bps
+echo -e "\nLSST stack activated\n"
 bps submit -b $REPO_PATH \
   -i $INPUT_COLL,$OUTPUT_COLL/injection_inputs_$RUN_NUM,$VISIT_SUMMARY_COLL \
   -o $OUTPUT_COLL/single_frame_injection_$RUN_NUM \
@@ -66,6 +70,7 @@ bps submit -b $REPO_PATH \
   -d "$COLL_FILTER" \
   ${CTRL_BPS_DIR}/python/lsst/ctrl/bps/etc/bps_defaults.yaml
   allocateNodes.py -v -n 80 -c 16 -m 1-00:00:00 -q milano -g 120 s3df
+rm inject_bps.sh
 EOF
   echo -e "\nFINISHED\n"
 else
