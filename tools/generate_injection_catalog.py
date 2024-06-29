@@ -79,9 +79,9 @@ def generate_catalog(repo, input_coll, n_inject, trail_length, mag, beta, where=
     registry = butler.registry
     source_type = "calexp"
     if where == "":
-        query = registry.queryDatasets(source_type, collections=input_coll, instrument='HSC')
+        query = set(registry.queryDatasets(source_type, collections=input_coll, instrument='HSC', findFirst=True))
     else:
-        query = registry.queryDatasets(source_type, collections=input_coll, instrument='HSC', where=where)
+        query = set(registry.queryDatasets(source_type, collections=input_coll, instrument='HSC', where=where, findFirst=True))
     length = len(list(query))
     dimensions = butler.get(
         source_type + ".dimensions",

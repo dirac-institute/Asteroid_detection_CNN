@@ -79,12 +79,14 @@ def one_image_hits(p, butler, ref, catalog_ref, output_coll, calexp_dimensions, 
 def compare_NN_predictions(p, repo, output_coll, val_index=None, multiprocess_size=10):
     from lsst.daf.butler import Butler
     butler = Butler(repo)
-    catalog_ref = list(butler.registry.queryDatasets("injected_postISRCCD_catalog",
+    catalog_ref = set(butler.registry.queryDatasets("injected_postISRCCD_catalog",
                                                      collections=output_coll,
-                                                     instrument='HSC'))
-    ref = list(butler.registry.queryDatasets("injected_calexp",
+                                                     instrument='HSC',
+                                                    findFirst=True))
+    ref = set(butler.registry.queryDatasets("injected_calexp",
                                              collections=output_coll,
-                                             instrument='HSC'))
+                                             instrument='HSC',
+                                             findFirst=True))
     calexp_dimensions = butler.get("injected_calexp.dimensions", dataId=ref[0].dataId, collections=output_coll)
     calexp_dimensions = (calexp_dimensions.y, calexp_dimensions.x)
     if val_index is None:
@@ -161,10 +163,10 @@ def LSST_stack_comparation_histogram_data(repo, output_coll, val_index_path,
         val_index = np.load(f)
         val_index.sort()
     butler = Butler(repo)
-    injection_catalog_ids = list(
-        butler.registry.queryDatasets("injected_postISRCCD_catalog", collections=output_coll, instrument='HSC'))
-    source_catalog_ids = list(butler.registry.queryDatasets("injected_src", collections=output_coll, instrument='HSC'))
-    calexp_ids = list(butler.registry.queryDatasets("injected_calexp", collections=output_coll, instrument='HSC'))
+    injection_catalog_ids = set(
+        butler.registry.queryDatasets("injected_postISRCCD_catalog", collections=output_coll, instrument='HSC', findFirst=True))
+    source_catalog_ids = set(butler.registry.queryDatasets("injected_src", collections=output_coll, instrument='HSC', findFirst=True))
+    calexp_ids = set(butler.registry.queryDatasets("injected_calexp", collections=output_coll, instrument='HSC', findFirst=True))
     calexp_dimensions = butler.get("injected_calexp.dimensions", dataId=calexp_ids[0].dataId, collections=output_coll)
     calexp_dimensions = (calexp_dimensions.y, calexp_dimensions.x)
     parameters = [(butler, output_coll,

@@ -140,16 +140,19 @@ def one_iteration(i, exp_ref, cat_ref, butler, output_coll, shape):
     return serialized_list
 
 
-def convert_butler_tfrecords(repo, output_coll, shape, filename_train, filename_test="", train_split=0.25, batch_size=None,
+def convert_butler_tfrecords(repo, output_coll, shape, filename_train, filename_test="", train_split=0.25,
+                             batch_size=None,
                              verbose=True, seed=42, maxlen=None):
     from lsst.daf.butler import Butler
     butler = Butler(repo)
-    catalog_ref = list(butler.registry.queryDatasets("injected_postISRCCD_catalog",
-                                                     collections=output_coll,
-                                                     instrument='HSC'))
-    ref = list(butler.registry.queryDatasets("injected_calexp",
-                                             collections=output_coll,
-                                             instrument='HSC'))
+    catalog_ref = set(butler.registry.queryDatasets("injected_postISRCCD_catalog",
+                                                    collections=output_coll,
+                                                    instrument='HSC',
+                                                    findFirst=True))
+    ref = set(butler.registry.queryDatasets("injected_calexp",
+                                            collections=output_coll,
+                                            instrument='HSC',
+                                            findFirst=True))
     if maxlen is not None and maxlen < len(ref):
         ref = ref[:maxlen]
         catalog_ref = catalog_ref[:maxlen]
@@ -204,12 +207,14 @@ def convert_butler_tfrecords(repo, output_coll, shape, filename_train, filename_
 def convert_butler_numpy(repo, output_coll, shape=(512, 512), parallelize=True):
     from lsst.daf.butler import Butler
     butler = Butler(repo)
-    catalog_ref = list(butler.registry.queryDatasets("injected_postISRCCD_catalog",
-                                                     collections=output_coll,
-                                                     instrument='HSC'))
-    ref = list(butler.registry.queryDatasets("injected_calexp",
-                                             collections=output_coll,
-                                             instrument='HSC'))
+    catalog_ref = set(butler.registry.queryDatasets("injected_postISRCCD_catalog",
+                                                    collections=output_coll,
+                                                    instrument='HSC',
+                                                    findFirst=True))
+    ref = set(butler.registry.queryDatasets("injected_calexp",
+                                            collections=output_coll,
+                                            instrument='HSC',
+                                            findFirst=True))
     if parallelize:
         data_ref = [(ref[i], catalog_ref[i], butler, output_coll, shape) for i in range(len(ref))]
         pool = multiprocessing.Pool(os.cpu_count() - 1)
