@@ -9,6 +9,8 @@ import tools.data
 
 
 def main(args):
+    if args.max_len <= 0:
+        args.max_len = None
     val_index = tools.data.convert_butler_tfrecords(args.repo, args.coll, shape=(128, 128),
                                                     filename_train=args.filename_train,
                                                     filename_test=args.filename_test,
@@ -16,7 +18,7 @@ def main(args):
                                                     batch_size=args.cpu_count,
                                                     verbose=True,
                                                     seed=args.seed,
-                                                    maxlen=10000)
+                                                    maxlen=args.max_len)
     val_index = np.array(val_index)
     val_index.sort()
     with open(args.filename_index, 'wb') as f:
@@ -33,6 +35,7 @@ def parse_arguments(args):
     parser.add_argument("--cpu_count", type=int, help="Number of CPUs to use", default=1)
     parser.add_argument("--split", type=float, help="Split ratio", default=0.25)
     parser.add_argument("--seed", type=int, help="Seed for random split", default=42)
+    parser.add_argument("--max_len", type=int, help="Maximum data length", default=0)
     return parser.parse_args(args)
 
 
