@@ -35,7 +35,8 @@ def parse_arguments(args):
     parser.add_argument("--cpu_count", type=int, help="Number of CPUs to use", default=1)
     parser.add_argument("--split", type=float, help="Split ratio", default=0.25)
     parser.add_argument("--seed", type=int, help="Seed for random split", default=42)
-    parser.add_argument("--max_len", type=int, help="Maximum data length", default=0)
+    parser.add_argument("--index_interval", type=int, nargs=2, help="Interval from which to create data",
+                        default=[358, 10458])
     return parser.parse_args(args)
 
 
