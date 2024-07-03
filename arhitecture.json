@@ -1,6 +1,71 @@
 {
   "0": {
     "downFilters": [
+      2,
+      4,
+      8,
+      16,
+      32,
+      64,
+      128
+    ],
+    "downActivation": [
+      "relu",
+      "relu",
+      "relu",
+      "relu",
+      "relu",
+      "relu",
+      "relu"
+    ],
+    "downDropout": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "downMaxPool": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "upFilters": [
+      256,
+      128,
+      64,
+      32,
+      16,
+      8,
+      4
+    ],
+    "upActivation": [
+      "relu",
+      "relu",
+      "relu",
+      "relu",
+      "relu",
+      "relu",
+      "relu"
+    ],
+    "upDropout": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "1": {
+    "downFilters": [
       32,
       64,
       128,
@@ -64,7 +129,7 @@
       0
     ]
   },
-  "1": {
+  "2": {
     "downFilters": [
       25,
       55,
@@ -113,444 +178,6 @@
       0.21132474421673886,
       0.4325783405963022,
       0.023229523281939002
-    ]
-  },
-  "2": {
-    "downFilters": [
-      43,
-      31,
-      36,
-      19
-    ],
-    "downActivation": [
-      "softmax",
-      "gelu",
-      "softplus",
-      "elu"
-    ],
-    "downDropout": [
-      0.13269444731498714,
-      0.2345592267277234,
-      0.038787792184968195,
-      0.011375134062048153
-    ],
-    "downMaxPool": [
-      true,
-      true,
-      true,
-      true
-    ],
-    "upFilters": [
-      13,
-      26,
-      58,
-      22
-    ],
-    "upActivation": [
-      "gelu",
-      "relu",
-      "softmax",
-      "tanh"
-    ],
-    "upDropout": [
-      0.3185686025822565,
-      0.1924445483280442,
-      0.22988087653035827,
-      0.4295003396324655
-    ]
-  },
-  "3": {
-    "downFilters": [
-      58,
-      21,
-      38,
-      32
-    ],
-    "downActivation": [
-      "softmax",
-      "selu",
-      "softplus",
-      "linear"
-    ],
-    "downDropout": [
-      0.29874767461395907,
-      0.06584892062082837,
-      0.014406414371625986,
-      0.3882538929869585
-    ],
-    "downMaxPool": [
-      true,
-      true,
-      true,
-      true
-    ],
-    "upFilters": [
-      39,
-      53,
-      40,
-      18
-    ],
-    "upActivation": [
-      "silu",
-      "linear",
-      "softplus",
-      "sigmoid"
-    ],
-    "upDropout": [
-      0.14695470814452316,
-      0.39070665189702114,
-      0.18114538368344724,
-      0.07038383783271634
-    ]
-  },
-  "4": {
-    "downFilters": [
-      7,
-      54,
-      29,
-      55,
-      35
-    ],
-    "downActivation": [
-      "silu",
-      "elu",
-      "selu",
-      "selu",
-      "hard_sigmoid"
-    ],
-    "downDropout": [
-      0.06633616245133062,
-      0.210983074797087,
-      0.18610948003540767,
-      0.18305803256722708,
-      0.4703440476156774
-    ],
-    "downMaxPool": [
-      true,
-      true,
-      true,
-      true,
-      true
-    ],
-    "upFilters": [
-      20,
-      31,
-      36,
-      53,
-      49
-    ],
-    "upActivation": [
-      "hard_sigmoid",
-      "silu",
-      "silu",
-      "tanh",
-      "elu"
-    ],
-    "upDropout": [
-      0.07895402340885005,
-      0.18915447957495618,
-      0.0550052874183124,
-      0.27952068938240676,
-      0.006090708494617902
-    ]
-  },
-  "5": {
-    "downFilters": [
-      38,
-      57,
-      17,
-      59
-    ],
-    "downActivation": [
-      "gelu",
-      "softmax",
-      "gelu",
-      "elu"
-    ],
-    "downDropout": [
-      0.3957076319266706,
-      0.33836228806359314,
-      0.010593853632155537,
-      0.20675056714910023
-    ],
-    "downMaxPool": [
-      true,
-      true,
-      true,
-      true
-    ],
-    "upFilters": [
-      54,
-      57,
-      48,
-      26
-    ],
-    "upActivation": [
-      "tanh",
-      "linear",
-      "gelu",
-      "silu"
-    ],
-    "upDropout": [
-      0.18919944753887769,
-      0.008272401532444573,
-      0.4420090695170341,
-      0.4227161717680181
-    ]
-  },
-  "6": {
-    "downFilters": [
-      15,
-      64,
-      34,
-      25,
-      21
-    ],
-    "downActivation": [
-      "linear",
-      "softmax",
-      "silu",
-      "gelu",
-      "relu"
-    ],
-    "downDropout": [
-      0.19104477465240294,
-      0.4259994978512047,
-      0.2784936295620268,
-      0.19385450425263645,
-      0.3441325279127997
-    ],
-    "downMaxPool": [
-      true,
-      true,
-      true,
-      true,
-      true
-    ],
-    "upFilters": [
-      58,
-      56,
-      45,
-      58,
-      54
-    ],
-    "upActivation": [
-      "elu",
-      "elu",
-      "tanh",
-      "hard_sigmoid",
-      "hard_sigmoid"
-    ],
-    "upDropout": [
-      0.24686500272251688,
-      0.18822286756527623,
-      0.0938041517634074,
-      0.45182381754661294,
-      0.16924103742232516
-    ]
-  },
-  "7": {
-    "downFilters": [
-      39,
-      5,
-      47,
-      19,
-      10
-    ],
-    "downActivation": [
-      "selu",
-      "selu",
-      "softmax",
-      "selu",
-      "softmax"
-    ],
-    "downDropout": [
-      0.16339766263206168,
-      0.07141739729733892,
-      0.2470459090697673,
-      0.10259245646386217,
-      0.1424956908819935
-    ],
-    "downMaxPool": [
-      true,
-      true,
-      true,
-      true,
-      true
-    ],
-    "upFilters": [
-      41,
-      48,
-      64,
-      28,
-      59
-    ],
-    "upActivation": [
-      "linear",
-      "hard_sigmoid",
-      "sigmoid",
-      "softsign",
-      "elu"
-    ],
-    "upDropout": [
-      0.2465454775845562,
-      0.01324093121389508,
-      0.0840261144061078,
-      0.3476720522176184,
-      0.0003832221154769777
-    ]
-  },
-  "8": {
-    "downFilters": [
-      39,
-      5,
-      47,
-      19,
-      10
-    ],
-    "downActivation": [
-      "selu",
-      "selu",
-      "softmax",
-      "selu",
-      "softmax"
-    ],
-    "downDropout": [
-      0.16339766263206168,
-      0.07141739729733892,
-      0.2470459090697673,
-      0.10259245646386217,
-      0.1424956908819935
-    ],
-    "downMaxPool": [
-      true,
-      true,
-      true,
-      true,
-      true
-    ],
-    "upFilters": [
-      41,
-      48,
-      64,
-      28,
-      59
-    ],
-    "upActivation": [
-      "linear",
-      "hard_sigmoid",
-      "sigmoid",
-      "softsign",
-      "elu"
-    ],
-    "upDropout": [
-      0.2465454775845562,
-      0.01324093121389508,
-      0.0840261144061078,
-      0.3476720522176184,
-      0.0003832221154769777
-    ]
-  },
-  "9": {
-    "downFilters": [
-      33,
-      15,
-      24,
-      9,
-      63
-    ],
-    "downActivation": [
-      "softsign",
-      "softmax",
-      "softplus",
-      "softmax",
-      "linear"
-    ],
-    "downDropout": [
-      0.24954813964856987,
-      0.4527883426988131,
-      0.19552288278243868,
-      0.00787794383437096,
-      0.4896229340105511
-    ],
-    "downMaxPool": [
-      true,
-      true,
-      true,
-      true,
-      true
-    ],
-    "upFilters": [
-      9,
-      55,
-      27,
-      32,
-      3
-    ],
-    "upActivation": [
-      "softsign",
-      "softsign",
-      "sigmoid",
-      "tanh",
-      "softplus"
-    ],
-    "upDropout": [
-      0.38624605142026086,
-      0.047446559658300025,
-      0.0952433629188072,
-      0.3972190011645164,
-      0.13740600173195144
-    ]
-  },
-  "10": {
-    "downFilters": [
-      62,
-      13,
-      17,
-      4,
-      47
-    ],
-    "downActivation": [
-      "softsign",
-      "softplus",
-      "softsign",
-      "tanh",
-      "elu"
-    ],
-    "downDropout": [
-      0.23196458902668843,
-      0.00949159277479994,
-      0.17955841274272893,
-      0.02738513806451992,
-      0.28544822284897825
-    ],
-    "downMaxPool": [
-      true,
-      true,
-      true,
-      true,
-      true
-    ],
-    "upFilters": [
-      17,
-      58,
-      48,
-      20,
-      30
-    ],
-    "upActivation": [
-      "softplus",
-      "softmax",
-      "silu",
-      "softmax",
-      "tanh"
-    ],
-    "upDropout": [
-      0.10162816811779901,
-      0.37680608996067355,
-      0.10831122984581865,
-      0.11575684359816024,
-      0.16707036463222885
     ]
   }
 }

@@ -17,7 +17,7 @@ srun python3 main.py \
 --arhitecture ../arhitecture.json \
 --model_destination ../DATA/Trained_model_$SLURM_JOB_ID \
 --no-multiworker \
---kernel_size 7 \
+--kernel_size 3 \
 --merge_operation "concat" \
 --epochs 1024 \
 --alpha 0.99 \
