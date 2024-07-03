@@ -36,7 +36,7 @@ def parse_arguments(args):
     parser.add_argument("--split", type=float, help="Split ratio", default=0.25)
     parser.add_argument("--seed", type=int, help="Seed for random split", default=42)
     parser.add_argument("--index_interval", type=int, nargs=2, help="Interval from which to create data",
-                        default=[358, 10458])
+                        default=[0, 0])
     return parser.parse_args(args)
 
 
