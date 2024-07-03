@@ -52,6 +52,8 @@ def main(args):
         options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
         dataset_train = dataset_train.with_options(options)
         dataset_val = dataset_val.with_options(options)
+        dataset_train = mirrored_strategy.experimental_distribute_dataset(dataset_train)
+        dataset_val = mirrored_strategy.experimental_distribute_dataset(dataset_val)
 
     earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5 * args.decay_lr_patience,
                                                         verbose=1,
