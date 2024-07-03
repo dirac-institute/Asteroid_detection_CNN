@@ -18,7 +18,7 @@ def main(args):
                                                     batch_size=args.cpu_count,
                                                     verbose=True,
                                                     seed=args.seed,
-                                                    maxlen=args.max_len)
+                                                    maxlen=args.index_interval)
     val_index = np.array(val_index)
     val_index.sort()
     with open(args.filename_index, 'wb') as f:

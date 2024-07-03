@@ -153,9 +153,9 @@ def convert_butler_tfrecords(repo, output_coll, shape, filename_train, filename_
                                             collections=output_coll,
                                             instrument='HSC',
                                             findFirst=True))))
-    if maxlen is not None and maxlen < len(ref):
-        ref = ref[:maxlen]
-        catalog_ref = catalog_ref[:maxlen]
+    if maxlen is not None:
+        ref = ref[maxlen[0]:maxlen[1]]
+        catalog_ref = catalog_ref[maxlen[0]:maxlen[1]]
     if train_split < 0 or train_split > 1:
         raise ValueError("train_split must be between 0 and 1")
     elif train_split != 0:
