@@ -9,8 +9,8 @@ import tools.data
 
 
 def main(args):
-    if args.max_len <= 0:
-        args.max_len = None
+    if args.index_interval[1]-args.index_interval[0] <= 0:
+        args.index_interval = None
     val_index = tools.data.convert_butler_tfrecords(args.repo, args.coll, shape=(128, 128),
                                                     filename_train=args.filename_train,
                                                     filename_test=args.filename_test,
