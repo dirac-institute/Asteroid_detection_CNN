@@ -46,7 +46,7 @@ def main(args):
         dataset_val = dataset_val.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
 
     dataset_train = dataset_train.repeat().shuffle(1000).batch(args.batch_size).prefetch(10)
-    dataset_val = dataset_val.batch(args.batch_size).prefetch(10)
+    dataset_val = dataset_val.repeat().batch(args.batch_size).prefetch(10)
     if args.multiworker:
         options = tf.data.Options()
         options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
@@ -76,8 +76,8 @@ def main(args):
         results = model.fit(dataset_train, epochs=args.epochs, validation_data=dataset_val, callbacks=kb, verbose=verbose,
                         steps_per_epoch=10000, validation_steps=100)
     else:
-        results = model.fit(dataset_train, epochs=args.epochs, callbacks=kb, verbose=0,
-                        steps_per_epoch=10000)
+        results = model.fit(dataset_train, epochs=args.epochs, validation_data=dataset_val, callbacks=kb, verbose=verbose,
+                        steps_per_epoch=10000, validation_steps=100)
     #if (task_type == 'worker' and task_id == 0) or task_type is None:
     #    model.save(args.model_destination)
 
