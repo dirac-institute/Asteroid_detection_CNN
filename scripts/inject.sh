@@ -45,7 +45,7 @@ python3 $PROJECT_PATH/tools/generate_injection_catalog.py \
 -o $OUTPUT_COLL/injection_inputs_$RUN_NUM \
 -n 20 \
 -l 6 60 \
--m 20.0 24.0 \
+-m 20.0 26.0 \
 -b 0.00 180.0 \
 --where "$COLL_FILTER" \
 --cpu_count $CPU_NUM \

@@ -201,6 +201,7 @@ def convert_butler_tfrecords(repo, output_coll, shape, filename_train, filename_
                     if verbose:
                         print("\r", counter + c + 1, "/", len(ref), end="")
                 counter += difference
+    index = index+maxlen[0] if maxlen is not None else index
     return index
 
 

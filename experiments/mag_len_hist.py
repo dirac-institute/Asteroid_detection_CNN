@@ -72,6 +72,8 @@ def plot_input_on_axis(img, ax):
 
 
 def main(args):
+    if args.val_index_path == "":
+        args.val_index_path = None
     collections = args.collection.split(',')
     tf_dataset_paths = args.tf_dataset_path.split(',')
     if len(collections) != len(tf_dataset_paths):
@@ -170,7 +172,7 @@ def parse_arguments(args):
                         default="u/kmrakovc/single_frame_injection_01,u/kmrakovc/single_frame_injection_02,u/kmrakovc/single_frame_injection_03,u/kmrakovc/single_frame_injection_04",
                         help='Comma-separated list of collection names in the Butler repo.')
     parser.add_argument('--val_index_path', type=str,
-                        default="../DATA/val_index1.npy",
+                        default="",
                         help='Path to the validation index file.')
     parser.add_argument('--cpu_count', type=int,
                         default=9,

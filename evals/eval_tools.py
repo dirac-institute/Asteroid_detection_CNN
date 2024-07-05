@@ -108,9 +108,12 @@ def compare_NN_predictions(p, repo, output_coll, val_index=None, multiprocess_si
 
 def NN_comparation_histogram_data(predictions, val_index_path, repo, output_coll,
                                   column_name="trail_length", multiprocess_size=10):
-    with open(val_index_path, 'rb') as f:
-        val_index = np.load(f)
-        val_index.sort()
+    if val_index_path is None:
+        val_index = None
+    else:
+        with open(val_index_path, 'rb') as f:
+            val_index = np.load(f)
+            val_index.sort()
     cat = compare_NN_predictions(predictions, repo, output_coll, val_index=val_index,
                                  multiprocess_size=multiprocess_size)
     return cat[cat["detected"] == 1][column_name].to_numpy(), cat[column_name].to_numpy()
@@ -156,7 +159,7 @@ def one_LSST_stack_comparison(butler, output_coll, injection_catalog_id, source_
     return injection_catalog[column_name].to_pandas().iloc[list(matched_values)]
 
 
-def LSST_stack_comparation_histogram_data(repo, output_coll, val_index_path,
+def LSST_stack_comparation_histogram_data(repo, output_coll, val_index_path=None,
                                           column_name="trail_length", multiprocess_size=None):
     from lsst.daf.butler import Butler
     with open(val_index_path, 'rb') as f:
