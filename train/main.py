@@ -68,17 +68,26 @@ def main(args):
     earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5 * args.decay_lr_patience,
                                                         verbose=1,
                                                         restore_best_weights=True)
-    terminateonnan_kb = tf.keras.callbacks.TerminateOnNaN()
-    reducelronplateau_kb = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=args.decay_lr_rate,
-                                                                patience=2 * args.decay_lr_patience,
-                                                                cooldown=args.decay_lr_patience,
-                                                                verbose=1)
-    checkpoint_kb = tf.keras.callbacks.ModelCheckpoint(filepath=args.model_destination, save_weights_only=False,
-                                                       monitor='val_f1_score', mode='max', save_best_only=True)
     if (task_type == 'worker' and task_id == 0) or task_type is None:
+        terminateonnan_kb = tf.keras.callbacks.TerminateOnNaN()
+        reducelronplateau_kb = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=args.decay_lr_rate,
+                                                                    patience=2 * args.decay_lr_patience,
+                                                                    cooldown=args.decay_lr_patience,
+                                                                    verbose=1)
+        checkpoint_kb = tf.keras.callbacks.ModelCheckpoint(filepath=args.model_destination, save_weights_only=False,
+                                                           monitor='val_f1_score', mode='max', save_best_only=True)
         kb = [terminateonnan_kb, reducelronplateau_kb, checkpoint_kb]
     else:
-        kb = [terminateonnan_kb, reducelronplateau_kb]
+        terminateonnan_kb = tf.keras.callbacks.TerminateOnNaN()
+        reducelronplateau_kb = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=args.decay_lr_rate,
+                                                                    patience=2 * args.decay_lr_patience,
+                                                                    cooldown=args.decay_lr_patience,
+                                                                    verbose=0)
+        checkpoint_kb = tf.keras.callbacks.ModelCheckpoint(filepath="/tmp/model_"+str(task_id)+".keras",
+                                                           save_weights_only=False,
+                                                           monitor='val_f1_score', mode='max',
+                                                           save_best_only=True)
+        kb = [terminateonnan_kb, reducelronplateau_kb, checkpoint_kb]
     if (task_type == 'worker' and task_id == 0) or task_type is None:
         if args.verbose:
             verbose = 1
@@ -86,12 +95,8 @@ def main(args):
             verbose = 2
     else:
         verbose = 0
-    #tf.keras.utils.plot_model(model, to_file='model.png', show_shapes=True, show_layer_names=True)
     results = model.fit(dataset_train, epochs=args.epochs, validation_data=dataset_val, callbacks=kb, verbose=verbose,
                         steps_per_epoch=args.steps_per_epoch)
-
-    #if (task_type == 'worker' and task_id == 0) or task_type is None:
-    #    model.save(args.model_destination)
 
 
 def parse_arguments(args):
