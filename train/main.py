@@ -14,13 +14,11 @@ def main(args):
             implementation=tf.distribute.experimental.CommunicationImplementation.NCCL)
         mirrored_strategy = tf.distribute.MultiWorkerMirroredStrategy(cluster_resolver=slurm_resolver,
                                                                       communication_options=communication)
-        print('Number of replicas:', mirrored_strategy.num_replicas_in_sync)
         task_type, task_id = (mirrored_strategy.cluster_resolver.task_type,
                               mirrored_strategy.cluster_resolver.task_id)
     else:
         mirrored_strategy = tf.distribute.MirroredStrategy()
         task_type, task_id = (None, None)
-    print("GPUS detected:", len(tf.config.list_physical_devices('GPU')))
     with open(args.arhitecture) as f:
         arhitecture = json.load(f)
     if "0" in arhitecture.keys():
@@ -44,14 +42,28 @@ def main(args):
     if tuple(model.outputs[0].shape[1:]) != tfrecord_shape:
         dataset_train = dataset_train.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
         dataset_val = dataset_val.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
-
-    dataset_train = dataset_train.repeat().shuffle(1000).batch(args.batch_size).prefetch(10)
-    dataset_val = dataset_val.repeat().batch(args.batch_size).prefetch(10)
     if args.multiworker:
-        options = tf.data.Options()
-        options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
-        dataset_train = dataset_train.with_options(options)
+        batch_size = args.batch_size*mirrored_strategy.num_replicas_in_sync*len(tf.config.list_physical_devices('GPU'))
+        if task_type == 'worker' and task_id == 0:
+            print('Number of replicas:', mirrored_strategy.num_replicas_in_sync)
+            print("GPUS detected on chief:", len(tf.config.list_physical_devices('GPU')))
+    else:
+        if len(tf.config.list_physical_devices('GPU')) == 0:
+            batch_size = args.batch_size
+        else:
+            batch_size = args.batch_size*len(tf.config.list_physical_devices('GPU'))
+        print("GPUS detected:", len(tf.config.list_physical_devices('GPU')))
+
+    dataset_train = dataset_train.repeat().shuffle(1000).batch(batch_size).prefetch(10)
+    dataset_val = dataset_val.batch(batch_size).prefetch(10)
+    if args.multiworker:
+        options_train = tf.data.Options()
+        options_train.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
+        dataset_train = dataset_train.with_options(options_train)
         dataset_train = mirrored_strategy.experimental_distribute_dataset(dataset_train)
+        options_val = tf.data.Options()
+        options_val.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
+        dataset_val = dataset_val.with_options(options_val)
 
     earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5 * args.decay_lr_patience,
                                                         verbose=1,
@@ -72,12 +84,9 @@ def main(args):
     else:
         verbose = 2
     #tf.keras.utils.plot_model(model, to_file='model.png', show_shapes=True, show_layer_names=True)
-    if (task_type == 'worker' and task_id == 0) or task_type is None:
-        results = model.fit(dataset_train, epochs=args.epochs, validation_data=dataset_val, callbacks=kb, verbose=verbose,
-                        steps_per_epoch=10000, validation_steps=100)
-    else:
-        results = model.fit(dataset_train, epochs=args.epochs, validation_data=dataset_val, callbacks=kb, verbose=verbose,
-                        steps_per_epoch=10000, validation_steps=100)
+    results = model.fit(dataset_train, epochs=args.epochs, validation_data=dataset_val, callbacks=kb, verbose=verbose,
+                        steps_per_epoch=10000)
+
     #if (task_type == 'worker' and task_id == 0) or task_type is None:
     #    model.save(args.model_destination)
 
