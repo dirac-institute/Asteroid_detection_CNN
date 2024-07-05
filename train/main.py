@@ -43,7 +43,21 @@ def main(args):
         dataset_train = dataset_train.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
         dataset_val = dataset_val.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
     if args.multiworker:
-        batch_size = args.batch_size*mirrored_strategy.num_replicas_in_sync*len(tf.config.list_physical_devices('GPU'))
+
+
+
+
+    if args.multiworker:
+        batch_size = args.batch_size*mirrored_strategy.num_replicas_in_sync
+        dataset_train = dataset_train.repeat().shuffle(1000).batch(batch_size).prefetch(10)
+        dataset_val = dataset_val.batch(batch_size).prefetch(10)
+        options_train = tf.data.Options()
+        options_train.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
+        dataset_train = dataset_train.with_options(options_train)
+        dataset_train = mirrored_strategy.experimental_distribute_dataset(dataset_train)
+        options_val = tf.data.Options()
+        options_val.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
+        dataset_val = dataset_val.with_options(options_val)
         if task_type == 'worker' and task_id == 0:
             print('Number of replicas:', mirrored_strategy.num_replicas_in_sync)
             print("GPUS detected on chief:", len(tf.config.list_physical_devices('GPU')))
@@ -53,17 +67,8 @@ def main(args):
         else:
             batch_size = args.batch_size*len(tf.config.list_physical_devices('GPU'))
         print("GPUS detected:", len(tf.config.list_physical_devices('GPU')))
-
-    dataset_train = dataset_train.repeat().shuffle(1000).batch(batch_size).prefetch(10)
-    dataset_val = dataset_val.batch(batch_size).prefetch(10)
-    if args.multiworker:
-        options_train = tf.data.Options()
-        options_train.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
-        dataset_train = dataset_train.with_options(options_train)
-        dataset_train = mirrored_strategy.experimental_distribute_dataset(dataset_train)
-        options_val = tf.data.Options()
-        options_val.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
-        dataset_val = dataset_val.with_options(options_val)
+        dataset_train = dataset_train.repeat().shuffle(1000).batch(batch_size).prefetch(10)
+        dataset_val = dataset_val.batch(batch_size).prefetch(10)
 
     earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5 * args.decay_lr_patience,
                                                         verbose=1,
@@ -79,13 +84,16 @@ def main(args):
         kb = [terminateonnan_kb, reducelronplateau_kb, checkpoint_kb]
     else:
         kb = [terminateonnan_kb, reducelronplateau_kb]
-    if args.verbose:
-        verbose = 1
+    if (task_type == 'worker' and task_id == 0) or task_type is None:
+        if args.verbose:
+            verbose = 1
+        else:
+            verbose = 2
     else:
-        verbose = 2
+        verbose = 0
     #tf.keras.utils.plot_model(model, to_file='model.png', show_shapes=True, show_layer_names=True)
     results = model.fit(dataset_train, epochs=args.epochs, validation_data=dataset_val, callbacks=kb, verbose=verbose,
-                        steps_per_epoch=1000)
+                        steps_per_epoch=args.steps_per_epoch)
 
     #if (task_type == 'worker' and task_id == 0) or task_type is None:
     #    model.save(args.model_destination)
@@ -131,6 +139,10 @@ def parse_arguments(args):
 
     parser.add_argument('--epochs', type=int,
                         default=8,
+                        help='Number of epochs.')
+
+    parser.add_argument('--steps_per_epoch', type=int,
+                        default=100,
                         help='Number of epochs.')
 
     parser.add_argument('--alpha', type=float,
