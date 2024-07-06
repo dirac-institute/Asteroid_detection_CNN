@@ -8,8 +8,11 @@ import argparse
 
 def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, input_coll, dimensions, source_type):
     injection_catalog = Table(
-        names=('injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit', 'integrated_mag', 'physical_filter'),
-        dtype=('int64', 'float64', 'float64', 'str', 'float64', 'float64', 'float64', 'int64', 'float64', 'str'))
+        names=(
+        'injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit', 'integrated_mag', 'PSF_mag',
+        'physical_filter'),
+        dtype=(
+        'int64', 'float64', 'float64', 'str', 'float64', 'float64', 'float64', 'int64', 'float64', 'float64', 'str'))
     injection_catalog.add_index('injection_id')
     raw = butler.get(
         source_type + ".wcs",
@@ -26,6 +29,19 @@ def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, input_coll
         dataId=ref.dataId,
         collections=input_coll,
     )
+
+    # parameters to use from http://arxiv.org/pdf/1711.10621
+    fwhm = {"u": 0.92, "g": 0.87, "r": 0.83, "i": 0.80, "z": 0.78, "y": 0.76}
+    # Taken from https://smtn-002.lsst.io/#source-footprint-n-eff
+    m5 = {"u": 23.7, "g": 24.97, "r": 24.52, "i": 24.13, "z": 23.56, "y": 22.55}
+    # Taken from https://smtn-002.lsst.io/#calculating-m5
+    psf_depth = m5[filter_name.bandLabel]
+    pixelScale = raw.getPixelScale().asArcseconds()
+    theta_p = fwhm[filter_name.bandLabel] * pixelScale
+    a = 0.67
+    b = 1.16
+
+    # calculating image bounds in skycoordinates
     start = raw.pixelToSky(0, 0)
     end = raw.pixelToSky(dimensions[0], dimensions[1])
     min_ra = start.getRa()
@@ -38,31 +54,30 @@ def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, input_coll
     max_ra = max_ra - 0.02 * diff_ra
     min_dec = min_dec + 0.02 * diff_dec
     max_dec = max_dec - 0.02 * diff_dec
+
     for k in range(n_inject):
         ra_pos = np.random.uniform(low=min_ra.asDegrees(), high=max_ra.asDegrees())
         dec_pos = np.random.uniform(low=min_dec.asDegrees(), high=max_dec.asDegrees())
         inject_length = np.random.uniform(low=trail_length[0], high=trail_length[1])
+        x = inject_length / (24 * theta_p)
         if mag[1] == 0:
             # calculating the upper limit magnitude based on the trail length and the maximum detectable limit
             # Taken from Jones et al. 2017: http://arxiv.org/pdf/1711.10621
-            psf_depth = 24.7
-            a = 0.67
-            b = 1.16
-            x = inject_length / (24 * theta_p)
-            upper_limit_mag = psf_depth + 1.25 * np.log10(1+ (a*x**2)/(1+b*x))
+            upper_limit_mag = psf_depth - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
         else:
             # user defined magnitude limits
             upper_limit_mag = mag[1]
         # rolling dice for the magnitude then calculating the surface brightness
         magnitude = np.random.uniform(low=mag[0], high=upper_limit_mag)
         surface_brightness = magnitude + 2.5 * np.log10(inject_length)
+        psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
         # rolling dice for the surface brightness then calculating the magnitude
         # surface_brightness = np.random.uniform(low=mag[0], high=mag[1])
         # magnitude = surface_brightness - 2.5 * np.log10(inject_length)
         angle = np.random.uniform(low=beta[0], high=beta[1])
         visitid = info.id
         injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, visitid,
-                                   magnitude, filter_name.bandLabel])
+                                   magnitude, psf_magnitude, filter_name.bandLabel])
     return injection_catalog
 
 
@@ -91,7 +106,8 @@ def generate_catalog(repo, input_coll, n_inject, trail_length, mag, beta, where=
     if where == "":
         query = set(registry.queryDatasets(source_type, collections=input_coll, instrument='HSC', findFirst=True))
     else:
-        query = set(registry.queryDatasets(source_type, collections=input_coll, instrument='HSC', where=where, findFirst=True))
+        query = set(
+            registry.queryDatasets(source_type, collections=input_coll, instrument='HSC', where=where, findFirst=True))
     length = len(list(query))
     dimensions = butler.get(
         source_type + ".dimensions",
