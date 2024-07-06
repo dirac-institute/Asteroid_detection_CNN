@@ -6,8 +6,7 @@ import multiprocessing
 import argparse
 
 
-def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, input_coll, dimensions, source_type,
-                      integrated_magnitude=False):
+def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, input_coll, dimensions, source_type):
     injection_catalog = Table(
         names=('injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit', 'integrated_mag', 'physical_filter'),
         dtype=('int64', 'float64', 'float64', 'str', 'float64', 'float64', 'float64', 'int64', 'float64', 'str'))
@@ -43,14 +42,23 @@ def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, input_coll
         ra_pos = np.random.uniform(low=min_ra.asDegrees(), high=max_ra.asDegrees())
         dec_pos = np.random.uniform(low=min_dec.asDegrees(), high=max_dec.asDegrees())
         inject_length = np.random.uniform(low=trail_length[0], high=trail_length[1])
-        if integrated_magnitude:
-            # rolling dice for the magnitude then calculating the surface brightness
-            magnitude = np.random.uniform(low=mag[0], high=mag[1])
-            surface_brightness = magnitude + 2.5 * np.log10(inject_length)
+        if mag[1] == 0:
+            # calculating the upper limit magnitude based on the trail length and the maximum detectable limit
+            # Taken from Jones et al. 2017: http://arxiv.org/pdf/1711.10621
+            psf_depth = 24.7
+            a = 0.67
+            b = 1.16
+            x = inject_length / (24 * theta_p)
+            upper_limit_mag = psf_depth + 1.25 * np.log10(1+ (a*x**2)/(1+b*x))
         else:
-            # rolling dice for the surface brightness then calculating the magnitude
-            surface_brightness = np.random.uniform(low=mag[0], high=mag[1])
-            magnitude = surface_brightness - 2.5 * np.log10(inject_length)
+            # user defined magnitude limits
+            upper_limit_mag = mag[1]
+        # rolling dice for the magnitude then calculating the surface brightness
+        magnitude = np.random.uniform(low=mag[0], high=upper_limit_mag)
+        surface_brightness = magnitude + 2.5 * np.log10(inject_length)
+        # rolling dice for the surface brightness then calculating the magnitude
+        # surface_brightness = np.random.uniform(low=mag[0], high=mag[1])
+        # magnitude = surface_brightness - 2.5 * np.log10(inject_length)
         angle = np.random.uniform(low=beta[0], high=beta[1])
         visitid = info.id
         injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, visitid,
@@ -59,7 +67,7 @@ def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, input_coll
 
 
 def generate_catalog(repo, input_coll, n_inject, trail_length, mag, beta, where="", verbose=True,
-                     multiprocess_size=None, integrated_magnitude=False):
+                     multiprocess_size=None):
     """
     Create a catalog of trails to be injected in the input collection for the source injection. The catalog is saved in the
     astropy table format. The catalog is created by randomly selecting a position in the input collection and then
@@ -90,8 +98,8 @@ def generate_catalog(repo, input_coll, n_inject, trail_length, mag, beta, where=
         dataId=list(query)[0].dataId,
         collections=input_coll,
     )
-    parameters = [(n_inject, trail_length, mag, beta, butler, ref, input_coll, dimensions, source_type,
-                   integrated_magnitude) for ref in query]
+    parameters = [(n_inject, trail_length, mag, beta, butler, ref,
+                   input_coll, dimensions, source_type,) for ref in query]
     if verbose:
         print("Number of visits found: ", length)
     if multiprocess_size is None:
@@ -142,8 +150,7 @@ def main(args):
     :return:
     """
     catalog = generate_catalog(args.repo, args.input_collection, args.number, args.trail_length, args.magnitude,
-                               args.beta, where=args.where, verbose=args.verbose, multiprocess_size=args.cpu_count,
-                               integrated_magnitude=args.integrated_magnitude)
+                               args.beta, where=args.where, verbose=args.verbose, multiprocess_size=args.cpu_count)
     write_catalog(catalog, args.repo, args.output_collection)
     return None
 
@@ -183,9 +190,6 @@ def parse_arguments(args):
     parser.add_argument('--cpu_count', type=int,
                         default=1,
                         help='Number of CPUs to use.')
-    parser.add_argument('--integrated_magnitude', action=argparse.BooleanOptionalAction,
-                        default=False,
-                        help='To use magnitude limits as integrated magnitude.')
     parser.add_argument('-v', '--verbose', action=argparse.BooleanOptionalAction,
                         default=False,
                         help='Verbose output.')
