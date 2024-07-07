@@ -27,30 +27,31 @@ def create_NN_prediction(dataset_path, model_path="../DATA/Trained_model", thres
         mirrored_strategy = tf.distribute.MirroredStrategy()
     with mirrored_strategy.scope():
         model = tf.keras.models.load_model(model_path, compile=False, safe_mode=False)
-        for i, dataset in enumerate(dataset_path):
-            if not os.path.exists(dataset):
-                raise FileNotFoundError(f"Dataset {dataset} not found")
+    for i, dataset in enumerate(dataset_path):
+        if not os.path.exists(dataset):
+            raise FileNotFoundError(f"Dataset {dataset} not found")
 
-            dataset_test = tf.data.TFRecordDataset([dataset])
-            tfrecord_shape = tools.model.get_shape_of_quadratic_image_tfrecord(dataset_test)
-            dataset_test = dataset_test.interleave(lambda x: tf.data.Dataset.from_tensors(
-                tools.model.parse_function(img_shape=tfrecord_shape, test=True)(x)),
+        dataset_test = tf.data.TFRecordDataset([dataset])
+        tfrecord_shape = tools.model.get_shape_of_quadratic_image_tfrecord(dataset_test)
+        dataset_test = dataset_test.interleave(lambda x: tf.data.Dataset.from_tensors(
+            tools.model.parse_function(img_shape=tfrecord_shape, test=True)(x)),
                                                    num_parallel_calls=tf.data.experimental.AUTOTUNE)
-            dataset_test = dataset_test.batch(batch_size).prefetch(tf.data.experimental.AUTOTUNE)
-            predictions = model.predict(dataset_test, verbose=1 if verbose else 0)
-            if threshold > 0:
-                predictions = (predictions > threshold).astype(float)
-            else:
-                predictions = predictions.astype(float)
-            if not tuple(model.outputs[0].shape[1:]) == tfrecord_shape:
+        dataset_test = dataset_test.batch(batch_size).prefetch(tf.data.experimental.AUTOTUNE)
+        predictions = model.predict(dataset_test, verbose=1 if verbose else 0)
+        if threshold > 0:
+            predictions = (predictions > threshold).astype(float)
+        else:
+            predictions = predictions.astype(float)
+        if not tuple(model.outputs[0].shape[1:]) == tfrecord_shape:
+            with tf.device("/cpu:0"):
                 predictions = np.array(tf.image.resize(predictions, tfrecord_shape[:-1]))
-            if threshold > 0:
-                predictions = np.ceil(predictions)
-            predictions = tools.data.npy_merge(predictions, (4176, 2048))
-            if not dataset_path_iterable:
-                return predictions
-            else:
-                predictions_list += (predictions,)
+        if threshold > 0:
+            predictions = np.ceil(predictions)
+        predictions = tools.data.npy_merge(predictions, (4176, 2048))
+        if not dataset_path_iterable:
+            return predictions
+        else:
+            predictions_list += (predictions,)
     return predictions_list
 
 
