@@ -44,7 +44,7 @@ def main(args):
         dataset_val = dataset_val.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
     if args.multiworker:
         batch_size = args.batch_size*mirrored_strategy.num_replicas_in_sync
-        dataset_train = dataset_train.repeat().shuffle(batch_size*args.steps_per_epoch*2).batch(batch_size).prefetch(10)
+        dataset_train = dataset_train.repeat().shuffle(batch_size*args.steps_per_epoch*5).batch(batch_size).prefetch(10)
         dataset_val = dataset_val.batch(batch_size).prefetch(10)
         options_train = tf.data.Options()
         options_train.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
