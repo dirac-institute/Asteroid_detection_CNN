@@ -19,10 +19,11 @@ def main(args):
                                                     verbose=True,
                                                     seed=args.seed,
                                                     maxlen=args.index_interval)
-    val_index = np.array(val_index)
-    val_index.sort()
-    with open(args.filename_index, 'wb') as f:
-        np.save(f, val_index)
+    if len(val_index) > 0:
+        val_index = np.array(val_index)
+        val_index.sort()
+        with open(args.filename_index, 'wb') as f:
+            np.save(f, val_index)
 
 
 def parse_arguments(args):
