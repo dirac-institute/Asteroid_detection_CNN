@@ -44,7 +44,7 @@ def main(args):
         dataset_val = dataset_val.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
     if args.multiworker:
         batch_size = args.batch_size*mirrored_strategy.num_replicas_in_sync
-        dataset_train = dataset_train.repeat().shuffle(1000).batch(batch_size).prefetch(10)
+        dataset_train = dataset_train.repeat().shuffle(batch_size*args.steps_per_epoch*5).batch(batch_size).prefetch(10)
         dataset_val = dataset_val.batch(batch_size).prefetch(10)
         options_train = tf.data.Options()
         options_train.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
@@ -62,7 +62,7 @@ def main(args):
         else:
             batch_size = args.batch_size*len(tf.config.list_physical_devices('GPU'))
         print("GPUS detected:", len(tf.config.list_physical_devices('GPU')))
-        dataset_train = dataset_train.repeat().shuffle(1000).batch(batch_size).prefetch(10)
+        dataset_train = dataset_train.repeat().shuffle(batch_size*args.steps_per_epoch*5).batch(batch_size).prefetch(10)
         dataset_val = dataset_val.batch(batch_size).prefetch(10)
 
     earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5 * args.decay_lr_patience,
