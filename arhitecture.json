@@ -1,5 +1,129 @@
 {
-  "0": {
+      "0": {
+    "downFilters": [
+      32,
+      32,
+      64,
+      128,
+      256,
+      512,
+      1024
+    ],
+    "downActivation": [
+      "relu",
+      "relu",
+      "sigmoid",
+      "relu",
+      "relu",
+      "sigmoid",
+      "relu"
+    ],
+    "downDropout": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "downMaxPool": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "upFilters": [
+      1024,
+      512,
+      256,
+      128,
+      64
+    ],
+    "upActivation": [
+      "relu",
+      "sigmoid",
+      "relu",
+      "relu",
+      "sigmoid"
+    ],
+    "upDropout": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+    "1": {
+    "downFilters": [
+      8,
+      16,
+      32,
+      64,
+      128,
+      256,
+      512
+    ],
+    "downActivation": [
+      "relu",
+      "relu",
+      "relu",
+      "relu",
+      "relu",
+      "relu",
+      "relu"
+    ],
+    "downDropout": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "downMaxPool": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "upFilters": [
+      1024,
+      512,
+      256,
+      128,
+      64
+    ],
+    "upActivation": [
+      "relu",
+      "relu",
+      "relu",
+      "relu",
+      "relu",
+      "relu",
+      "relu"
+    ],
+    "upDropout": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "2": {
     "downFilters": [
       2,
       4,
@@ -64,7 +188,7 @@
       0
     ]
   },
-  "1": {
+  "3": {
     "downFilters": [
       32,
       64,
@@ -129,7 +253,7 @@
       0
     ]
   },
-  "2": {
+  "4": {
     "downFilters": [
       25,
       55,
