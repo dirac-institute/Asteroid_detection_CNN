@@ -35,7 +35,7 @@ def create_NN_prediction(dataset_path, model_path="../DATA/Trained_model", thres
         tfrecord_shape = tools.model.get_shape_of_quadratic_image_tfrecord(dataset_test)
         dataset_test = dataset_test.interleave(lambda x: tf.data.Dataset.from_tensors(
             tools.model.parse_function(img_shape=tfrecord_shape, test=True)(x)),
-                                                   num_parallel_calls=tf.data.experimental.AUTOTUNE)
+                                               num_parallel_calls=tf.data.experimental.AUTOTUNE)
         dataset_test = dataset_test.batch(batch_size).prefetch(tf.data.experimental.AUTOTUNE)
         predictions = model.predict(dataset_test, verbose=1 if verbose else 0)
         if threshold > 0:
@@ -80,14 +80,14 @@ def one_image_hits(p, butler, ref, catalog_ref, output_coll, calexp_dimensions, 
 def compare_NN_predictions(p, repo, output_coll, val_index=None, multiprocess_size=10):
     from lsst.daf.butler import Butler
     butler = Butler(repo)
-    catalog_ref = set(butler.registry.queryDatasets("injected_postISRCCD_catalog",
-                                                     collections=output_coll,
-                                                     instrument='HSC',
-                                                    findFirst=True))
-    ref = set(butler.registry.queryDatasets("injected_calexp",
-                                             collections=output_coll,
-                                             instrument='HSC',
-                                             findFirst=True))
+    catalog_ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_postISRCCD_catalog",
+                                                                        collections=output_coll,
+                                                                        instrument='HSC',
+                                                                        findFirst=True))))
+    ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_calexp",
+                                                                collections=output_coll,
+                                                                instrument='HSC',
+                                                                findFirst=True))))
     calexp_dimensions = butler.get("injected_calexp.dimensions", dataId=ref[0].dataId, collections=output_coll)
     calexp_dimensions = (calexp_dimensions.y, calexp_dimensions.x)
     if val_index is None:
@@ -108,7 +108,7 @@ def compare_NN_predictions(p, repo, output_coll, val_index=None, multiprocess_si
 
 
 def NN_comparation_histogram_data(predictions, val_index_path, repo, output_coll,
-                                  column_name="trail_length", multiprocess_size=10):
+                                  column_name=None, multiprocess_size=10):
     if val_index_path is None:
         val_index = None
     else:
@@ -117,7 +117,10 @@ def NN_comparation_histogram_data(predictions, val_index_path, repo, output_coll
             val_index.sort()
     cat = compare_NN_predictions(predictions, repo, output_coll, val_index=val_index,
                                  multiprocess_size=multiprocess_size)
-    return cat[cat["detected"] == 1][column_name].to_numpy(), cat[column_name].to_numpy()
+    if column_name is None:
+        return cat[cat["detected"] == 1], cat
+    else:
+        return cat[cat["detected"] == 1][column_name].to_numpy(), cat[column_name].to_numpy()
 
 
 def one_LSST_stack_comparison(butler, output_coll, injection_catalog_id, source_catalog_id, calexp_id,
@@ -167,10 +170,13 @@ def LSST_stack_comparation_histogram_data(repo, output_coll, val_index_path=None
         val_index = np.load(f)
         val_index.sort()
     butler = Butler(repo)
-    injection_catalog_ids = set(
-        butler.registry.queryDatasets("injected_postISRCCD_catalog", collections=output_coll, instrument='HSC', findFirst=True))
-    source_catalog_ids = set(butler.registry.queryDatasets("injected_src", collections=output_coll, instrument='HSC', findFirst=True))
-    calexp_ids = set(butler.registry.queryDatasets("injected_calexp", collections=output_coll, instrument='HSC', findFirst=True))
+    injection_catalog_ids = np.unique(np.array(list(
+        butler.registry.queryDatasets("injected_postISRCCD_catalog", collections=output_coll, instrument='HSC',
+                                      findFirst=True))))
+    source_catalog_ids = np.unique(np.array(
+        list(butler.registry.queryDatasets("injected_src", collections=output_coll, instrument='HSC', findFirst=True))))
+    calexp_ids = np.unique(np.array(list(
+        butler.registry.queryDatasets("injected_calexp", collections=output_coll, instrument='HSC', findFirst=True))))
     calexp_dimensions = butler.get("injected_calexp.dimensions", dataId=calexp_ids[0].dataId, collections=output_coll)
     calexp_dimensions = (calexp_dimensions.y, calexp_dimensions.x)
     parameters = [(butler, output_coll,
