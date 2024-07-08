@@ -3,6 +3,7 @@ from astroML.crossmatch import crossmatch_angular
 import numpy as np
 import pandas as pd
 import multiprocessing
+import tensorflow as tf
 
 
 def create_nn_prediction(dataset_path, model_path="../DATA/Trained_model", threshold=0.5, batch_size=1024,
