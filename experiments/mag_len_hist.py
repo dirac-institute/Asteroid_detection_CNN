@@ -87,7 +87,7 @@ def main(args):
 
     if args.verbose:
         print("Model evaluating started", flush=True)
-    predictions = evals.eval_tools.create_NN_prediction(tf_dataset_paths,
+    predictions = evals.eval_tools.create_nn_prediction(tf_dataset_paths,
                                                         args.model_path,
                                                         threshold=args.threshold,
                                                         batch_size=args.batch_size,
