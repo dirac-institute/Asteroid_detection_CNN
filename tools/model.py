@@ -44,6 +44,13 @@ def get_shape_of_quadratic_image_tfrecord(raw_dataset):
         return int(np.sqrt(parsed_features["x"].shape[0])), int(np.sqrt(parsed_features["x"].shape[0])), 1
 
 
+def get_tfrecords_size(dataset):
+    size = 0
+    for i in dataset:
+        size += 1
+    return size
+
+
 def get_architecture_from_model(model):
     """
     Extracts the architecture of a model and returns it as a dictionary.

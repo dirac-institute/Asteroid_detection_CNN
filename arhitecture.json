@@ -3,16 +3,16 @@
     "downFilters": [
       32,
       32,
+      32,
       64,
       128,
       256,
-      512,
-      1024
+      512
     ],
     "downActivation": [
       "relu",
       "relu",
-      "sigmoid",
+      "relu",
       "relu",
       "relu",
       "sigmoid",
@@ -51,8 +51,6 @@
       "sigmoid"
     ],
     "upDropout": [
-      0,
-      0,
       0,
       0,
       0,

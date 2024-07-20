@@ -27,6 +27,7 @@ def main(args):
         args.model_destination += ".keras"
     dataset_train = tf.data.TFRecordDataset([args.train_dataset_path])
     tfrecord_shape = tools.model.get_shape_of_quadratic_image_tfrecord(dataset_train)
+    train_size = sum(1 for _ in dataset_train)
     dataset_train = dataset_train.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
     dataset_val = tf.data.TFRecordDataset([args.test_dataset_path])
     dataset_val = dataset_val.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
@@ -44,7 +45,11 @@ def main(args):
         dataset_val = dataset_val.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
     if args.multiworker:
         batch_size = args.batch_size*mirrored_strategy.num_replicas_in_sync
-        dataset_train = dataset_train.repeat().shuffle(batch_size*args.steps_per_epoch*5).batch(batch_size).prefetch(10)
+        if args.steps_per_epoch <= 0:
+            args.steps_per_epoch = train_size // batch_size
+            if args.verbose:
+                print("Setting steps_per_epoch to: ", args.steps_per_epoch)
+        dataset_train = dataset_train.repeat().shuffle(train_size//2).batch(batch_size).prefetch(10)
         dataset_val = dataset_val.batch(batch_size).prefetch(10)
         options_train = tf.data.Options()
         options_train.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
@@ -61,8 +66,12 @@ def main(args):
             batch_size = args.batch_size
         else:
             batch_size = args.batch_size*len(tf.config.list_physical_devices('GPU'))
+        if args.steps_per_epoch <= 0:
+            args.steps_per_epoch = train_size // batch_size
+            if args.verbose:
+                print("Setting steps_per_epoch to:", args.steps_per_epoch)
         print("GPUS detected:", len(tf.config.list_physical_devices('GPU')))
-        dataset_train = dataset_train.repeat().shuffle(batch_size*args.steps_per_epoch*5).batch(batch_size).prefetch(10)
+        dataset_train = dataset_train.repeat().shuffle(train_size//2).batch(batch_size).prefetch(10)
         dataset_val = dataset_val.batch(batch_size).prefetch(10)
 
     earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5 * args.decay_lr_patience,
@@ -120,7 +129,7 @@ def parse_arguments(args):
                         help='Path to test dataset.')
 
     parser.add_argument('--arhitecture', type=str,
-                        default="../DATA/arhitecture_tuned.json",
+                        default="../arhitecture.json",
                         help='Path to a JSON containing definition of an arhitecture.')
 
     parser.add_argument('--model_destination', type=str,
@@ -144,7 +153,7 @@ def parse_arguments(args):
                         help='Number of epochs.')
 
     parser.add_argument('--steps_per_epoch', type=int,
-                        default=100,
+                        default=0,
                         help='Number of epochs.')
 
     parser.add_argument('--alpha', type=float,
