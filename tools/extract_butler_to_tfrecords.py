@@ -1,3 +1,4 @@
+import sys
 sys.path.append("../")
 import evals
 import tools.data
@@ -5,7 +6,6 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import numpy as np
 import argparse
-import sys
 
 
 def main(args):
