@@ -6,7 +6,6 @@ import sys
 sys.path.append("../")
 import tools.data
 import evals
-from lsst.daf.butler import Butler
 
 
 def main(args):
