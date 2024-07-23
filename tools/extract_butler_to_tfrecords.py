@@ -1,3 +1,4 @@
+from lsst.daf.butler import Butler
 import sys
 sys.path.append("../")
 import evals
