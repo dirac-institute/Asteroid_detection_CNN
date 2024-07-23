@@ -1,12 +1,12 @@
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
-from lsst.daf.butler import Butler
 import numpy as np
 import argparse
 import sys
 sys.path.append("../")
 import tools.data
-import evals.eval_tools.recovered_sources as recovered_sources
+import evals
+from lsst.daf.butler import Butler
 
 
 def main(args):
@@ -25,7 +25,7 @@ def main(args):
         val_index.sort()
         with open(args.filename_index, 'wb') as f:
             np.save(f, val_index)
-        val_catalog = recovered_sources(args.repo, args.coll, val_index=val_index, n_parallel=args.cpu_count)
+        val_catalog = evals.eval_tools.recovered_sources(args.repo, args.coll, val_index=val_index, n_parallel=args.cpu_count)
         val_catalog.to_csv(args.filename_index[:-4] + ".csv")
 
 def parse_arguments(args):
