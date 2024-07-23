@@ -6,6 +6,7 @@ import argparse
 import sys
 sys.path.append("../")
 import tools.data
+import evals.eval_tools
 
 
 def main(args):
