@@ -146,13 +146,13 @@ def convert_butler_tfrecords(repo, output_coll, shape, filename_train, filename_
     from lsst.daf.butler import Butler
     butler = Butler(repo)
     catalog_ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_postISRCCD_catalog",
-                                                    collections=output_coll,
-                                                    instrument='HSC',
-                                                    findFirst=True))))
+                                                                        collections=output_coll,
+                                                                        instrument='HSC',
+                                                                        findFirst=True))))
     ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_calexp",
-                                            collections=output_coll,
-                                            instrument='HSC',
-                                            findFirst=True))))
+                                                                collections=output_coll,
+                                                                instrument='HSC',
+                                                                findFirst=True))))
     if maxlen is not None:
         ref = ref[maxlen[0]:maxlen[1]]
         catalog_ref = catalog_ref[maxlen[0]:maxlen[1]]
@@ -201,7 +201,7 @@ def convert_butler_tfrecords(repo, output_coll, shape, filename_train, filename_
                     if verbose:
                         print("\r", counter + c + 1, "/", len(ref), end="")
                 counter += difference
-    index = index+maxlen[0] if maxlen is not None else index
+    index = index + maxlen[0] if maxlen is not None else index
     return index
 
 
@@ -209,13 +209,13 @@ def convert_butler_numpy(repo, output_coll, shape=(512, 512), parallelize=True):
     from lsst.daf.butler import Butler
     butler = Butler(repo)
     catalog_ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_postISRCCD_catalog",
-                                                    collections=output_coll,
-                                                    instrument='HSC',
-                                                    findFirst=True))))
+                                                                        collections=output_coll,
+                                                                        instrument='HSC',
+                                                                        findFirst=True))))
     ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_calexp",
-                                            collections=output_coll,
-                                            instrument='HSC',
-                                            findFirst=True))))
+                                                                collections=output_coll,
+                                                                instrument='HSC',
+                                                                findFirst=True))))
     if parallelize:
         data_ref = [(ref[i], catalog_ref[i], butler, output_coll, shape) for i in range(len(ref))]
         pool = multiprocessing.Pool(os.cpu_count() - 1)
@@ -261,3 +261,22 @@ def convert_npy_tfrecords(inputs, labels, filename_train, filename_test):
                     writer_test.write(serialized)
                 else:
                     writer_train.write(serialized)
+
+
+def extract_injection_catalog_to_csv(repo, collection, filter_index=None):
+    from lsst.daf.butler import Butler
+    butler = Butler(repo)
+    list_catalog = []
+    postisrccd_catalog_ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_postISRCCD_catalog",
+                                                                                   collections=collection,
+                                                                                   instrument='HSC',
+                                                                                   findFirst=True))))
+    if filter_index is None:
+        filter_index = list(range(len(postisrccd_catalog_ref)))
+    for l, i in enumerate(filter_index):
+        injected_postisrccd_catalog = butler.get("injected_postISRCCD_catalog",
+                                                 dataId=postisrccd_catalog_ref[i].dataId,
+                                                 collections=collection).to_pandas()
+        list_catalog.append(injected_postisrccd_catalog)
+        print("\r", l + 1, "/", len(filter_index), "concatenated", end="")
+    return pd.concat(list_catalog).set_index("injection_id").sort_index()

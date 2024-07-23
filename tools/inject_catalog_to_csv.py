@@ -3,26 +3,12 @@ from lsst.daf.butler import Butler
 import numpy as np
 import pandas as pd
 import argparse
-
-
-def extract_injection_catalog_to_csv(repo, collection):
-    butler = Butler(repo)
-    list_catalog = []
-    postisrccd_catalog_ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_postISRCCD_catalog",
-                                                                                   collections=collection,
-                                                                                   instrument='HSC',
-                                                                                   findFirst=True))))
-    for i, catalog_ref in enumerate(postisrccd_catalog_ref):
-        injected_postisrccd_catalog = butler.get("injected_postISRCCD_catalog",
-                                             dataId=catalog_ref.dataId,
-                                             collections=collection).to_pandas()
-        list_catalog.append(injected_postisrccd_catalog)
-        print ("\r", i+1, "/", len(postisrccd_catalog_ref), "concatenated", end="")
-    return pd.concat(list_catalog).set_index("injection_id").sort_index()
+sys.path.append("../")
+import tools.data
 
 
 def main(args):
-    catalog_pandas = extract_injection_catalog_to_csv(args.repo_path, args.collection)
+    catalog_pandas = tools.data.extract_injection_catalog_to_csv(args.repo_path, args.collection)
     if args.output_csv[-4:] != ".csv":
         args.output_csv += ".csv"
     catalog_pandas.to_csv(args.output_csv)

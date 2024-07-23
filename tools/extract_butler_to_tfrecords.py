@@ -24,7 +24,8 @@ def main(args):
         val_index.sort()
         with open(args.filename_index, 'wb') as f:
             np.save(f, val_index)
-
+        val_catalog = evals.eval_tools.recovered_sources(args.repo, args.coll, val_index=val_index, n_parallel=args.cpu_count)
+        val_catalog.to_csv(args.filename_index[:-4] + ".csv")
 
 def parse_arguments(args):
     parser = argparse.ArgumentParser()
