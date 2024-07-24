@@ -153,5 +153,5 @@ def recovered_sources(repo, collection, nn_predictions=None, val_index=None, n_p
         for i, p in enumerate(parameters):
             results[i] = one_image_hits(*p)
             print("\r", i + 1, "/", len(parameters), end="")
-    results = pd.DataFrame(list(np.array(results).flatten())).set_index("injection_id").sort_index()
+    results = pd.DataFrame(list(np.concatenate(results).flatten())).set_index("injection_id").sort_index()
     return injection_catalog.merge(results)
