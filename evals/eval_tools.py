@@ -81,7 +81,7 @@ def one_image_hits(butler, injected_calexp_ref, postisrccd_catalog_ref,
                                           collections=output_coll)
         photocalib = butler.get("calexp.photoCalib",
                                 dataId=injected_calexp_ref.dataId,
-                                collections=collection)
+                                collections=output_coll)
         snr = np.array(injected_src_catalog["base_PsfFlux_instFlux"]) / np.array(
             injected_src_catalog["base_PsfFlux_instFluxErr"])
         magnitude = photocalib.instFluxToMagnitude(injected_src_catalog, 'base_PsfFlux')
