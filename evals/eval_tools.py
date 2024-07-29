@@ -79,7 +79,12 @@ def one_image_hits(butler, injected_calexp_ref, postisrccd_catalog_ref,
         injected_src_catalog = butler.get("injected_src",
                                           dataId=stack_source_catalog_id.dataId,
                                           collections=output_coll)
-
+        photocalib = butler.get("calexp.photoCalib",
+                                dataId=injected_calexp_ref.dataId,
+                                collections=collection)
+        snr = np.array(injected_src_catalog["base_PsfFlux_instFlux"]) / np.array(
+            injected_src_catalog["base_PsfFlux_instFluxErr"])
+        magnitude = photocalib.instFluxToMagnitude(injected_src_catalog, 'base_PsfFlux')
         sc = src_catalog.asAstropy().to_pandas()
         isc = injected_src_catalog.asAstropy().to_pandas()
         dist, ind = crossmatch_angular(isc[['coord_ra', 'coord_dec']].values,
@@ -89,8 +94,10 @@ def one_image_hits(butler, injected_calexp_ref, postisrccd_catalog_ref,
             np.array([injected_src_catalog["coord_ra"][np.isinf(dist)]]),
             np.array([injected_src_catalog["coord_dec"][np.isinf(dist)]]),
             degrees=False)
+        stack_detection_index = np.array(injected_src_catalog["id"][np.isinf(dist)]).flatten()
         stack_predictions = np.zeros(calexp_dimensions)
-        stack_predictions[stack_detection_origins[1].astype(int), stack_detection_origins[0].astype(int)] = 1
+        stack_predictions[
+            stack_detection_origins[1].astype(int), stack_detection_origins[0].astype(int)] = stack_detection_index
     else:
         stack_predictions = 0
 
@@ -115,11 +122,21 @@ def one_image_hits(butler, injected_calexp_ref, postisrccd_catalog_ref,
         if nn_predictions is not None:
             results[i]["NN_detected"] = int(((injected_mask == 1) & (nn_predictions == 1)).sum() > 0)
         if stack_source_catalog_id is not None:
-            results[i]["stack_detected"] = int((injected_mask * stack_predictions).sum() > 0)
+            if (injected_mask * stack_predictions).sum() > 0:
+                intersection_injection_stack = injected_mask * stack_predictions
+                stack_index = int(intersection_injection_stack[np.where(intersection_injection_stack != 0)][0])
+                results[i]["stack_detected"] = 1
+                results[i]["stack_magnitude"] = magnitude[isc["id"] == stack_index].flatten()[0]
+                results[i]["stack_snr"] = snr[isc["id"] == stack_index].flatten()[0]
+            else:
+                results[i]["stack_detected"] = 0
+                results[i]["stack_magnitude"] = None
+                results[i]["stack_snr"] = None
+
     return results
 
 
-def recovered_sources(repo, collection, nn_predictions=None, val_index=None, n_parallel=None):
+def recovered_sources(repo, collection, nn_predictions=None, val_index=None, n_parallel=1):
     from lsst.daf.butler import Butler
     butler = Butler(repo)
     postisrccd_catalog_ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_postISRCCD_catalog",
