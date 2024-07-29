@@ -58,7 +58,10 @@ def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, input_coll
     for k in range(n_inject):
         ra_pos = np.random.uniform(low=min_ra.asDegrees(), high=max_ra.asDegrees())
         dec_pos = np.random.uniform(low=min_dec.asDegrees(), high=max_dec.asDegrees())
-        inject_length = np.random.uniform(low=trail_length[0], high=trail_length[1])
+        if trail_length[0] == trail_length[1]:
+            inject_length = trail_length[0]
+        else:
+            inject_length = np.random.uniform(low=trail_length[0], high=trail_length[1])
         x = inject_length / (24 * theta_p)
         if mag[1] == 0:
             # calculating the upper limit magnitude based on the trail length and the maximum detectable limit
@@ -68,7 +71,10 @@ def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, input_coll
             # user defined magnitude limits
             upper_limit_mag = mag[1]
         # rolling dice for the magnitude then calculating the surface brightness
-        magnitude = np.random.uniform(low=mag[0], high=upper_limit_mag)
+        if mag[0] == mag[1]:
+            magnitude = mag[0]
+        else:
+            magnitude = np.random.uniform(low=mag[0], high=upper_limit_mag)
         surface_brightness = magnitude + 2.5 * np.log10(inject_length)
         psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
         # rolling dice for the surface brightness then calculating the magnitude
