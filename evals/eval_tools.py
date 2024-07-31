@@ -79,7 +79,7 @@ def one_image_hits(butler, injected_calexp_ref, postisrccd_catalog_ref,
         injected_src_catalog = butler.get("injected_src",
                                           dataId=stack_source_catalog_id.dataId,
                                           collections=output_coll)
-        photocalib = butler.get("calexp.photoCalib",
+        photocalib = butler.get("injected_calexp.photoCalib",
                                 dataId=injected_calexp_ref.dataId,
                                 collections=output_coll)
         snr = np.array(injected_src_catalog["base_PsfFlux_instFlux"]) / np.array(
@@ -116,9 +116,12 @@ def one_image_hits(butler, injected_calexp_ref, postisrccd_catalog_ref,
                       'trail_length': catalog_row['trail_length'],
                       'beta': catalog_row['beta'],
                       'surface_brightness': catalog_row['mag'],
+                      'detector': injected_calexp_ref.dataId["detector"],
+                      'visit': injected_calexp_ref.dataId["visit"],
+                      'band': injected_calexp_ref.dataId["band"],
                       'n': n,
-                      'x': round(injected_origin[0][i]),
-                      'y': round(injected_origin[1][i])}
+                      'x': round(injected_origin[1][i]),
+                      'y': round(injected_origin[0][i])}
         if nn_predictions is not None:
             results[i]["NN_detected"] = int(((injected_mask == 1) & (nn_predictions == 1)).sum() > 0)
         if stack_source_catalog_id is not None:
