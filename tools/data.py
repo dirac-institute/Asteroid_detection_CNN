@@ -4,6 +4,7 @@ import multiprocessing
 import cv2
 import os
 import time
+import pandas as pd
 
 if __name__ == "__main__":
     import model as model
