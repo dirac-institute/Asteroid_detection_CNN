@@ -172,7 +172,8 @@ def main(args):
     :return:
     """
     catalog = generate_catalog(args.repo, args.input_collection, args.number, args.trail_length, args.magnitude,
-                               args.beta, where=args.where, verbose=args.verbose, multiprocess_size=args.cpu_count)
+                               args.beta, source_type=args.source_type, where=args.where, verbose=args.verbose,
+                               multiprocess_size=args.cpu_count)
     write_catalog(catalog, args.repo, args.output_collection)
     return None
 
