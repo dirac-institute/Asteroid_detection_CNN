@@ -6,7 +6,7 @@ import multiprocessing
 import argparse
 
 
-def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, input_coll, dimensions, source_type):
+def generate_one_line(n_inject, butler, ref, input_coll, dimensions, raw_type, source_type, mag, trail_length, beta,):
     injection_catalog = Table(
         names=(
         'injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit', 'integrated_mag', 'PSF_mag',
@@ -15,17 +15,17 @@ def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, input_coll
         'int64', 'float64', 'float64', 'str', 'float64', 'float64', 'float64', 'int64', 'float64', 'float64', 'str'))
     injection_catalog.add_index('injection_id')
     raw = butler.get(
-        source_type + ".wcs",
+        raw_type + ".wcs",
         dataId=ref.dataId,
         collections=input_coll,
     )
     info = butler.get(
-        source_type + ".visitInfo",
+        raw_type + ".visitInfo",
         dataId=ref.dataId,
         collections=input_coll,
     )
     filter_name = butler.get(
-        source_type + ".filter",
+        raw_type + ".filter",
         dataId=ref.dataId,
         collections=input_coll,
     )
@@ -82,12 +82,12 @@ def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, input_coll
         # magnitude = surface_brightness - 2.5 * np.log10(inject_length)
         angle = np.random.uniform(low=beta[0], high=beta[1])
         visitid = info.id
-        injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, visitid,
+        injection_catalog.add_row([k, ra_pos, dec_pos, source_type, inject_length, surface_brightness, angle, visitid,
                                    magnitude, psf_magnitude, filter_name.bandLabel])
     return injection_catalog
 
 
-def generate_catalog(repo, input_coll, n_inject, trail_length, mag, beta, where="", verbose=True,
+def generate_catalog(repo, input_coll, n_inject, trail_length, mag, beta, source_type="Trail", where="", verbose=True,
                      multiprocess_size=None):
     """
     Create a catalog of trails to be injected in the input collection for the source injection. The catalog is saved in the
@@ -108,20 +108,20 @@ def generate_catalog(repo, input_coll, n_inject, trail_length, mag, beta, where=
     from lsst.daf.butler import Butler
     butler = Butler(repo)
     registry = butler.registry
-    source_type = "calexp"
+    raw_type = "calexp"
     if where == "":
-        query = set(registry.queryDatasets(source_type, collections=input_coll, instrument='HSC', findFirst=True))
+        query = set(registry.queryDatasets(raw_type, collections=input_coll, instrument='HSC', findFirst=True))
     else:
         query = set(
-            registry.queryDatasets(source_type, collections=input_coll, instrument='HSC', where=where, findFirst=True))
+            registry.queryDatasets(raw_type, collections=input_coll, instrument='HSC', where=where, findFirst=True))
     length = len(list(query))
     dimensions = butler.get(
-        source_type + ".dimensions",
+        raw_type + ".dimensions",
         dataId=list(query)[0].dataId,
         collections=input_coll,
     )
-    parameters = [(n_inject, trail_length, mag, beta, butler, ref,
-                   input_coll, dimensions, source_type,) for ref in query]
+    parameters = [(n_inject, butler, ref,
+                   input_coll, dimensions, raw_type, source_type, mag, trail_length, beta,) for ref in query]
     if verbose:
         print("Number of visits found: ", length)
     if multiprocess_size is None:
@@ -206,6 +206,9 @@ def parse_arguments(args):
     parser.add_argument('-b', '--beta', nargs=2, type=float,
                         default=[0.0, 180.0],
                         help='Lower and upper limit for the injected trails rotation angle.')
+    parser.add_argument('--source_type', type=str,
+                        default="Trail",
+                        help='Type of the source to inject')
     parser.add_argument('--where', type=str,
                         default="",
                         help='Filter the collection.')
