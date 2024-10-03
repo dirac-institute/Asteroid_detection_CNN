@@ -8,17 +8,48 @@ import json
 
 
 def main(args):
-    if args.multiworker:
-        slurm_resolver = tf.distribute.cluster_resolver.SlurmClusterResolver(port_base=8000)
-        communication = tf.distribute.experimental.CommunicationOptions(
-            implementation=tf.distribute.experimental.CommunicationImplementation.NCCL)
-        mirrored_strategy = tf.distribute.MultiWorkerMirroredStrategy(cluster_resolver=slurm_resolver,
-                                                                      communication_options=communication)
-        task_type, task_id = (mirrored_strategy.cluster_resolver.task_type,
-                              mirrored_strategy.cluster_resolver.task_id)
+    import tensorflow as tf
+    import sys, os
+
+    # Check for available GPUs
+    gpus = tf.config.list_physical_devices('GPU')
+
+    # If GPUs are detected
+    if gpus:
+        print(f"GPUs detected: {len(gpus)}")
+
+        # Multi-worker setup using GPUs
+        if args.multiworker:
+            slurm_resolver = tf.distribute.cluster_resolver.SlurmClusterResolver(port_base=8000)
+            communication = tf.distribute.experimental.CommunicationOptions(
+                implementation=tf.distribute.experimental.CommunicationImplementation.NCCL)
+            mirrored_strategy = tf.distribute.MultiWorkerMirroredStrategy(cluster_resolver=slurm_resolver,
+                                                                          communication_options=communication)
+            task_type, task_id = (mirrored_strategy.cluster_resolver.task_type,
+                                  mirrored_strategy.cluster_resolver.task_id)
+        # Single-worker setup using GPUs
+        else:
+            mirrored_strategy = tf.distribute.MirroredStrategy()
+            task_type, task_id = (None, None)
+
+    # If no GPUs are detected, fallback to CPU-only training
     else:
-        mirrored_strategy = tf.distribute.MirroredStrategy()
-        task_type, task_id = (None, None)
+        print("No GPUs detected. Using CPU.")
+
+        # Multi-worker setup using CPUs
+        if args.multiworker:
+            slurm_resolver = tf.distribute.cluster_resolver.SlurmClusterResolver(port_base=8000)
+            communication = tf.distribute.experimental.CommunicationOptions(
+                implementation=tf.distribute.experimental.CommunicationImplementation.RING)
+            mirrored_strategy = tf.distribute.MultiWorkerMirroredStrategy(cluster_resolver=slurm_resolver,
+                                                                          communication_options=communication)
+            task_type, task_id = (mirrored_strategy.cluster_resolver.task_type,
+                                  mirrored_strategy.cluster_resolver.task_id)
+        # Single-worker setup using CPU
+        else:
+            mirrored_strategy = tf.distribute.OneDeviceStrategy(device="/cpu:0")  # Force CPU strategy
+            task_type, task_id = (None, None)
+
     with open(args.arhitecture) as f:
         arhitecture = json.load(f)
     if "0" in arhitecture.keys():
@@ -44,12 +75,12 @@ def main(args):
         dataset_train = dataset_train.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
         dataset_val = dataset_val.map(tools.model.reshape_outputs(img_shape=tuple(model.outputs[0].shape[1:-1])))
     if args.multiworker:
-        batch_size = args.batch_size*mirrored_strategy.num_replicas_in_sync
+        batch_size = args.batch_size * mirrored_strategy.num_replicas_in_sync
         if args.steps_per_epoch <= 0:
             args.steps_per_epoch = train_size // batch_size
             if args.verbose:
                 print("Setting steps_per_epoch to: ", args.steps_per_epoch)
-        dataset_train = dataset_train.repeat().shuffle(train_size//2).batch(batch_size).prefetch(10)
+        dataset_train = dataset_train.repeat().shuffle(train_size // 2).batch(batch_size).prefetch(10)
         dataset_val = dataset_val.batch(batch_size).prefetch(10)
         options_train = tf.data.Options()
         options_train.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
@@ -65,13 +96,13 @@ def main(args):
         if len(tf.config.list_physical_devices('GPU')) == 0:
             batch_size = args.batch_size
         else:
-            batch_size = args.batch_size*len(tf.config.list_physical_devices('GPU'))
+            batch_size = args.batch_size * len(tf.config.list_physical_devices('GPU'))
         if args.steps_per_epoch <= 0:
             args.steps_per_epoch = train_size // batch_size
             if args.verbose:
                 print("Setting steps_per_epoch to:", args.steps_per_epoch)
         print("GPUS detected:", len(tf.config.list_physical_devices('GPU')))
-        dataset_train = dataset_train.repeat().shuffle(train_size//2).batch(batch_size).prefetch(10)
+        dataset_train = dataset_train.repeat().shuffle(train_size // 2).batch(batch_size).prefetch(10)
         dataset_val = dataset_val.batch(batch_size).prefetch(10)
 
     earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5 * args.decay_lr_patience,
@@ -93,7 +124,7 @@ def main(args):
                                                                     patience=2 * args.decay_lr_patience,
                                                                     cooldown=args.decay_lr_patience,
                                                                     verbose=0)
-        checkpoint_kb = tf.keras.callbacks.ModelCheckpoint(filepath="/tmp/model_"+str(task_id)+".keras",
+        checkpoint_kb = tf.keras.callbacks.ModelCheckpoint(filepath="/tmp/model_" + str(task_id) + ".keras",
                                                            save_weights_only=False,
                                                            monitor='val_f1_score', mode='max',
                                                            save_best_only=True,
