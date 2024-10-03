@@ -16,8 +16,6 @@ def main(args):
 
     # If GPUs are detected
     if gpus:
-        print(f"GPUs detected: {len(gpus)}")
-
         # Multi-worker setup using GPUs
         if args.multiworker:
             slurm_resolver = tf.distribute.cluster_resolver.SlurmClusterResolver(port_base=8000)
