@@ -16,6 +16,8 @@ def main(args):
 
     # If GPUs are detected
     if gpus:
+        print(f"GPUs detected: {len(gpus)}")
+
         # Multi-worker setup using GPUs
         if args.multiworker:
             slurm_resolver = tf.distribute.cluster_resolver.SlurmClusterResolver(port_base=8000)
@@ -57,9 +59,17 @@ def main(args):
     dataset_train = tf.data.TFRecordDataset([args.train_dataset_path])
     tfrecord_shape = tools.model.get_shape_of_quadratic_image_tfrecord(dataset_train)
     train_size = sum(1 for _ in dataset_train)
-    dataset_train = dataset_train.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
+    if not args.multiworker:
+        dataset_train = dataset_train.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False), num_parallel_calls=tf.data.AUTOTUNE)
+        #dataset_train = dataset_train.cache()
+    else:
+        dataset_train = dataset_train.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
     dataset_val = tf.data.TFRecordDataset([args.test_dataset_path])
-    dataset_val = dataset_val.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
+    if not args.multiworker:
+        dataset_val = dataset_val.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False), num_parallel_calls=tf.data.AUTOTUNE)
+        #dataset_val = dataset_val.cache()
+    else:
+        dataset_val = dataset_val.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
     with mirrored_strategy.scope():
         if os.path.isfile(args.model_destination):
             model = tf.keras.models.load_model(args.model_destination, compile=False)
@@ -99,9 +109,8 @@ def main(args):
             args.steps_per_epoch = train_size // batch_size
             if args.verbose:
                 print("Setting steps_per_epoch to:", args.steps_per_epoch)
-        print("GPUS detected:", len(tf.config.list_physical_devices('GPU')))
-        dataset_train = dataset_train.repeat().shuffle(train_size // 2).batch(batch_size).prefetch(10)
-        dataset_val = dataset_val.batch(batch_size).prefetch(10)
+        dataset_train = dataset_train.repeat().shuffle(train_size // 100).batch(batch_size).prefetch(tf.data.AUTOTUNE)
+        dataset_val = dataset_val.batch(batch_size).prefetch(tf.data.AUTOTUNE)
 
     earlystopping_kb = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5 * args.decay_lr_patience,
                                                         verbose=1,
