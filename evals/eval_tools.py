@@ -62,6 +62,82 @@ def get_injection_catalog(butler, collection):
     return pd.concat(injection_catalog).set_index("injection_id").sort_index()
 
 
+def get_one_image_mask(true_img, prediction_img, pixel_gap=15):
+    p_img = prediction_img != 0
+    t_img = true_img != 0
+    mask = np.zeros((t_img.shape))
+    tp = 0
+    fp = 0
+    fn = 0
+    visited = None
+    while p_img.sum() != 0:
+        roots = np.where(p_img != 0)
+        mask_p, visited = FDS(p_img, (roots[0][0], roots[1][0]), pixel_gap, visited_pixels=visited)
+        if np.any(mask_p * true_img != 0):
+            tp += 1
+            mask[mask_p != 0] = 1
+        else:
+            fp += 1
+            mask[mask_p != 0] = 2
+    visited = None
+    while t_img.sum() != 0:
+        roots = np.where(t_img != 0)
+        mask_t, visited = FDS(t_img, (roots[0][0], roots[1][0]), pixel_gap=1, visited_pixels=visited)
+        if not np.any(mask_t * prediction_img != 0):
+            fn += 1
+            mask[mask_t != 0] = 3
+    return tp, fp, fn, mask
+
+
+def get_mask(truths, predictions, multiprocess_size=None):
+    if multiprocess_size is None:
+        multiprocess_size = max(1, min(os.cpu_count() - 1, truths.shape[0]))
+    if multiprocess_size > 1:
+        parameters = [(truths[i], predictions[i]) for i in range(truths.shape[0])]
+        with multiprocessing.Pool(multiprocess_size) as pool:
+            results = pool.starmap(get_one_image_mask, parameters)
+    else:
+        results = [None] * truths.shape[0]
+        for i in range(truths.shape[0]):
+            results[i] = get_one_image_mask(truths[i], predictions[i])
+    masks = np.empty(truths.shape)
+    true_positive = np.empty(truths.shape[0])
+    false_positive = np.empty(truths.shape[0])
+    false_negative = np.empty(truths.shape[0])
+
+    for i, (tp, fp, fn, mask) in enumerate(results):
+        true_positive[i] = tp
+        false_positive[i] = fp
+        false_negative[i] = fn
+        masks[i, :, :] = mask
+    return true_positive, false_positive, false_negative, masks
+
+
+def FDS(img, roots, pixel_gap, visited_pixels=None):
+    if visited_pixels is None:
+        visited_pixels = np.zeros(img.shape, dtype=bool)
+    height, width = img.shape
+    todo = deque([(roots[0], roots[1])])
+    mask = np.zeros((height, width), dtype=bool)
+
+    while todo:
+        j, i = todo.pop()
+        if not visited_pixels[j, i] and img[j, i] != 0:
+            visited_pixels[j, i] = True
+            img[j, i] = False
+            mask[j, i] = True
+            j_min = max(j - pixel_gap, 0)
+            j_max = min(j + pixel_gap + 1, height)
+            i_min = max(i - pixel_gap, 0)
+            i_max = min(i + pixel_gap + 1, width)
+            for jj in range(j_min, j_max):
+                for ii in range(i_min, i_max):
+                    if not visited_pixels[jj, ii]:
+                        todo.append((jj, ii))
+
+    return mask, visited_pixels
+
+
 def one_image_hits(butler, injected_calexp_ref, postisrccd_catalog_ref,
                    output_coll, calexp_dimensions, n, stack_source_catalog_id=None,
                    nn_predictions=None):

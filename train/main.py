@@ -61,13 +61,13 @@ def main(args):
     train_size = sum(1 for _ in dataset_train)
     if not args.multiworker:
         dataset_train = dataset_train.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False), num_parallel_calls=tf.data.AUTOTUNE)
-        #dataset_train = dataset_train.cache()
+        dataset_train = dataset_train.cache()
     else:
         dataset_train = dataset_train.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
     dataset_val = tf.data.TFRecordDataset([args.test_dataset_path])
     if not args.multiworker:
         dataset_val = dataset_val.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False), num_parallel_calls=tf.data.AUTOTUNE)
-        #dataset_val = dataset_val.cache()
+        dataset_val = dataset_val.cache()
     else:
         dataset_val = dataset_val.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
     with mirrored_strategy.scope():

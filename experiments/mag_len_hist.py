@@ -91,7 +91,7 @@ def main(args):
                                                         args.model_path,
                                                         threshold=args.threshold,
                                                         batch_size=args.batch_size,
-                                                        verbose=False)
+                                                        verbose=True)
     if args.verbose:
         print("NN predictions created", flush=True)
     for i in range(len(collections)):
@@ -154,13 +154,13 @@ def parse_arguments(args):
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--model_path', type=str,
-                        default="../DATA/Trained_model_18796700.keras",
+                        default="../DATA/Trained_model_56735424.keras",
                         help='Path to the model.')
     parser.add_argument('--batch_size', type=int,
                         default=512,
                         help='Batch size for the evaluation.')
     parser.add_argument('--tf_dataset_path', type=str,
-                        default="../DATA/test1.tfrecord,../DATA/test2.tfrecord,../DATA/test3.tfrecord,../DATA/test4.tfrecord",
+                        default="../DATA/test_01.tfrecord,../DATA/test_02.tfrecord,../DATA/test_03.tfrecord,../DATA/test_04.tfrecord",
                         help='Comma-separated list of paths to the TFrecords files.')
     parser.add_argument('--output_path', type=str,
                         default="../RESULTS/",
