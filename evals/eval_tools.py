@@ -16,12 +16,12 @@ def create_nn_prediction(dataset_path, model_path="../DATA/Trained_model", thres
     else:
         dataset_path_iterable = True
     predictions_list = ()
-    if len(tf.config.list_physical_devices('GPU')) == 0:
+    if tf.config.list_physical_devices('GPU'):
+        mirrored_strategy = tf.distribute.MirroredStrategy()
+    else:
         if verbose:
             print("No GPU detected")
         mirrored_strategy = tf.distribute.get_strategy()
-    else:
-        mirrored_strategy = tf.distribute.MirroredStrategy()
     with mirrored_strategy.scope():
         model = tf.keras.models.load_model(model_path, compile=False, safe_mode=False)
     for i, dataset in enumerate(dataset_path):
@@ -61,6 +61,209 @@ def get_injection_catalog(butler, collection):
                                     dataId=i.dataId,
                                     collections=collection).to_pandas() for i in injection_catalog_ids]
     return pd.concat(injection_catalog).set_index("injection_id").sort_index()
+
+
+def recovered_sources(repo, collection, nn_predictions=None, val_index=None, n_parallel=1):
+    from lsst.daf.butler import Butler
+    butler = Butler(repo)
+    postisrccd_catalog_ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_postISRCCD_catalog",
+                                                                                   collections=collection,
+                                                                                   instrument='HSC',
+                                                                                   findFirst=True))))
+    injected_calexp_ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_calexp",
+                                                                                collections=collection,
+                                                                                instrument='HSC',
+                                                                                findFirst=True))))
+    source_catalog_ids = np.unique(np.array(list(butler.registry.queryDatasets("injected_src",
+                                                                               collections=collection,
+                                                                               instrument='HSC',
+                                                                               findFirst=True))))
+    calexp_dimensions = butler.get("injected_calexp.dimensions",
+                                   dataId=injected_calexp_ref[0].dataId,
+                                   collections=collection)
+    calexp_dimensions = (calexp_dimensions.y, calexp_dimensions.x)
+    injection_catalog = get_injection_catalog(butler, collection)
+    if val_index is None:
+        val_index = list(range(len(injected_calexp_ref)))
+    if nn_predictions is None:
+        nn_predictions = [None] * len(injected_calexp_ref)
+    parameters = [(butler, injected_calexp_ref[i], postisrccd_catalog_ref[i],
+                   collection, calexp_dimensions, i, source_catalog_ids[i], nn_predictions[i]) for i in val_index]
+    if n_parallel > 1:
+        with multiprocessing.Pool(n_parallel) as pool:
+            results = pool.starmap(one_image_hits, parameters)
+    else:
+        results = [None] * len(parameters)
+        for i, p in enumerate(parameters):
+            results[i] = one_image_hits(*p)
+            print("\r", i + 1, "/", len(parameters), end="")
+    results = pd.DataFrame(list(np.concatenate(results).flatten())).set_index("injection_id").sort_index()
+    return injection_catalog.merge(results)
+
+
+
+### OLD eval_tools
+
+def one_image_hits(p, butler, ref, catalog_ref, output_coll, calexp_dimensions, n):
+    injected_calexp = butler.get("injected_calexp.wcs",
+                                 dataId=ref.dataId,
+                                 collections=output_coll)
+    catalog = butler.get("injected_postISRCCD_catalog",
+                         dataId=catalog_ref.dataId,
+                         collections=output_coll)
+    list_cat = [None] * len(catalog)
+    for i, catalog_row in enumerate(catalog):
+        origin = injected_calexp.skyToPixelArray(np.array([catalog_row["ra"]]), np.array([catalog_row["dec"]]),
+                                                 degrees=True)
+        angle = catalog_row["beta"]
+        length = catalog_row["trail_length"]
+        mask = np.zeros(calexp_dimensions)
+        mask = tools.data.draw_one_line(mask, origin, angle, length, line_thickness=6)
+        list_cat[i] = {'injection_id': catalog_row['injection_id'], 'ra': catalog_row['ra'], 'dec': catalog_row['dec'],
+                       'trail_length': catalog_row['trail_length'], 'beta': catalog_row['beta'],
+                       'mag': catalog_row['mag'], 'PSF_mag' : catalog_row["PSF_mag"], 'integrated_mag': catalog_row["integrated_mag"],
+                       'n': n, 'x': round(origin[0][0]), 'y': round(origin[1][0]),
+                       'detected': int(((mask == 1) & (p == 1)).sum() > 0)}
+    return list_cat
+
+
+def compare_NN_predictions(p, repo, output_coll, val_index=None, multiprocess_size=10):
+    from lsst.daf.butler import Butler
+    butler = Butler(repo)
+    catalog_ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_postISRCCD_catalog",
+                                                     collections=output_coll,
+                                                     instrument='HSC',
+                                                    findFirst=True))))
+    ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_calexp",
+                                             collections=output_coll,
+                                             instrument='HSC',
+                                             findFirst=True))))
+    calexp_dimensions = butler.get("injected_calexp.dimensions", dataId=ref[0].dataId, collections=output_coll)
+    calexp_dimensions = (calexp_dimensions.y, calexp_dimensions.x)
+    if val_index is None:
+        val_index = list(range(len(catalog_ref)))
+    parameters = []
+    parameters += [(p[j], butler, ref[i], catalog_ref[i], output_coll, calexp_dimensions, i) for j, i in
+                   enumerate(val_index)]
+    if multiprocess_size is None:
+        multiprocess_size = max(1, min(os.cpu_count() - 1, len(parameters)))
+    if multiprocess_size > 1:
+        with multiprocessing.Pool(multiprocess_size) as pool:
+            list_cat = pool.starmap(one_image_hits, parameters)
+    else:
+        list_cat = [None] * len(parameters)
+        for i, p in enumerate(parameters):
+            list_cat[i] = one_image_hits(*p)
+    return pd.DataFrame(list(np.array(list_cat).flatten()))
+
+
+def NN_comparation_histogram_data(predictions, val_index_path, repo, output_coll,
+                                  column_name="trail_length", multiprocess_size=10):
+    if val_index_path is None:
+        val_index = None
+    else:
+        with open(val_index_path, 'rb') as f:
+            val_index = np.load(f)
+            val_index.sort()
+    cat = compare_NN_predictions(predictions, repo, output_coll, val_index=val_index,
+                                 multiprocess_size=multiprocess_size)
+    return cat[cat["detected"] == 1][column_name].to_numpy(), cat[column_name].to_numpy()
+
+
+def one_LSST_stack_comparison(butler, output_coll, injection_catalog_id, source_catalog_id, calexp_id,
+                              calexp_dimensions, column_name):
+    injection_catalog = butler.get("injected_postISRCCD_catalog",
+                                   dataId=injection_catalog_id.dataId,
+                                   collections=output_coll, )
+    original_source_catalog = butler.get("src",
+                                         dataId=source_catalog_id.dataId,
+                                         collections=output_coll, )
+    source_catalog = butler.get("injected_src",
+                                dataId=source_catalog_id.dataId,
+                                collections=output_coll, )
+    calexp = butler.get("injected_calexp.wcs",
+                        dataId=calexp_id.dataId,
+                        collections=output_coll)
+    sc = source_catalog.asAstropy().to_pandas()
+    osc = original_source_catalog.asAstropy().to_pandas()
+    dist, ind = crossmatch_angular(sc[['coord_ra', 'coord_dec']].values,
+                                   osc[['coord_ra', 'coord_dec']].values, 0.04 / 3600)
+    source_origin = calexp.skyToPixelArray(np.array([source_catalog["coord_ra"][np.isinf(dist)]]),
+                                           np.array([source_catalog["coord_dec"][np.isinf(dist)]]),
+                                           degrees=False)
+    injected_origin = calexp.skyToPixelArray(np.array([injection_catalog["ra"]]),
+                                             np.array([injection_catalog["dec"]]),
+                                             degrees=True)
+    angle = injection_catalog["beta"]
+    length = injection_catalog["trail_length"]
+    mask_source = np.zeros(calexp_dimensions)
+    mask_source[source_origin[1].astype(int), source_origin[0].astype(int)] = 1
+    matched_values = deque([])
+    for j in range(len(angle)):
+        mask_inject = tools.data.draw_one_line(np.zeros(calexp_dimensions),
+                                               (injected_origin[0][j], injected_origin[1][j]),
+                                               angle[j], length[j])
+        if (mask_inject * mask_source).sum() > 0:
+            matched_values.append(j)
+    if type(column_name) is str:
+        column_name = [column_name]
+    return injection_catalog[column_name].to_pandas().iloc[list(matched_values)]
+
+
+def LSST_stack_comparation_histogram_data(repo, output_coll, val_index_path=None,
+                                          column_name="trail_length", multiprocess_size=None):
+    from lsst.daf.butler import Butler
+    butler = Butler(repo)
+    injection_catalog_ids = np.unique(np.array(list(
+        butler.registry.queryDatasets("injected_postISRCCD_catalog", collections=output_coll, instrument='HSC', findFirst=True))))
+    source_catalog_ids = np.unique(np.array(list(butler.registry.queryDatasets("injected_src", collections=output_coll, instrument='HSC', findFirst=True))))
+    calexp_ids = np.unique(np.array(list(butler.registry.queryDatasets("injected_calexp", collections=output_coll, instrument='HSC', findFirst=True))))
+    calexp_dimensions = butler.get("injected_calexp.dimensions", dataId=calexp_ids[0].dataId, collections=output_coll)
+    calexp_dimensions = (calexp_dimensions.y, calexp_dimensions.x)
+    if val_index_path is not None:
+        with open(val_index_path, 'rb') as f:
+            val_index = np.load(f)
+            val_index.sort()
+    else:
+        val_index = np.arange(len(injection_catalog_ids))
+    parameters = [(butler, output_coll,
+                   injection_catalog_ids[i], source_catalog_ids[i],
+                   calexp_ids[i], calexp_dimensions, column_name) for i in val_index]
+    if multiprocess_size is None:
+        multiprocess_size = max(1, os.cpu_count() - 1)
+    if multiprocess_size > 1:
+        with multiprocessing.Pool(multiprocess_size) as pool:
+            list_cat = pool.starmap(one_LSST_stack_comparison, parameters)
+    else:
+        list_cat = [None] * len(parameters)
+        for i, p in enumerate(parameters):
+            list_cat[i] = one_LSST_stack_comparison(*p)
+    return pd.concat(list_cat, ignore_index=True).to_numpy().squeeze()
+
+
+def FDS(img, roots, pixel_gap, visited_pixels=None):
+    if visited_pixels is None:
+        visited_pixels = np.zeros(img.shape, dtype=bool)
+    height, width = img.shape
+    todo = deque([(roots[0], roots[1])])
+    mask = np.zeros((height, width), dtype=bool)
+
+    while todo:
+        j, i = todo.pop()
+        if not visited_pixels[j, i] and img[j, i] != 0:
+            visited_pixels[j, i] = True
+            img[j, i] = False
+            mask[j, i] = True
+            j_min = max(j - pixel_gap, 0)
+            j_max = min(j + pixel_gap + 1, height)
+            i_min = max(i - pixel_gap, 0)
+            i_max = min(i + pixel_gap + 1, width)
+            for jj in range(j_min, j_max):
+                for ii in range(i_min, i_max):
+                    if not visited_pixels[jj, ii]:
+                        todo.append((jj, ii))
+
+    return mask, visited_pixels
 
 
 def get_one_image_mask(true_img, prediction_img, pixel_gap=15):
@@ -111,144 +314,17 @@ def get_mask(truths, predictions, multiprocess_size=None):
         false_positive[i] = fp
         false_negative[i] = fn
         masks[i, :, :] = mask
+
     return true_positive, false_positive, false_negative, masks
 
 
-def FDS(img, roots, pixel_gap, visited_pixels=None):
-    if visited_pixels is None:
-        visited_pixels = np.zeros(img.shape, dtype=bool)
-    height, width = img.shape
-    todo = deque([(roots[0], roots[1])])
-    mask = np.zeros((height, width), dtype=bool)
-
-    while todo:
-        j, i = todo.pop()
-        if not visited_pixels[j, i] and img[j, i] != 0:
-            visited_pixels[j, i] = True
-            img[j, i] = False
-            mask[j, i] = True
-            j_min = max(j - pixel_gap, 0)
-            j_max = min(j + pixel_gap + 1, height)
-            i_min = max(i - pixel_gap, 0)
-            i_max = min(i + pixel_gap + 1, width)
-            for jj in range(j_min, j_max):
-                for ii in range(i_min, i_max):
-                    if not visited_pixels[jj, ii]:
-                        todo.append((jj, ii))
-
-    return mask, visited_pixels
+def f1_score(tp, fp, fn):
+    return tp / (tp + 0.5 * (fp + fn))
 
 
-def one_image_hits(butler, injected_calexp_ref, postisrccd_catalog_ref,
-                   output_coll, calexp_dimensions, n, stack_source_catalog_id=None,
-                   nn_predictions=None):
-    injected_calexp_wcs = butler.get("injected_calexp.wcs",
-                                     dataId=injected_calexp_ref.dataId,
-                                     collections=output_coll)
-    injected_postisrccd_catalog = butler.get("injected_postISRCCD_catalog",
-                                             dataId=postisrccd_catalog_ref.dataId,
-                                             collections=output_coll)
-    results = [None] * len(injected_postisrccd_catalog)
-    if stack_source_catalog_id is not None:
-        src_catalog = butler.get("src",
-                                 dataId=stack_source_catalog_id.dataId,
-                                 collections=output_coll)
-        injected_src_catalog = butler.get("injected_src",
-                                          dataId=stack_source_catalog_id.dataId,
-                                          collections=output_coll)
-        photocalib = butler.get("injected_calexp.photoCalib",
-                                dataId=injected_calexp_ref.dataId,
-                                collections=output_coll)
-        snr = np.array(injected_src_catalog["base_PsfFlux_instFlux"]) / np.array(
-            injected_src_catalog["base_PsfFlux_instFluxErr"])
-        magnitude = photocalib.instFluxToMagnitude(injected_src_catalog, 'base_PsfFlux')
-        sc = src_catalog.asAstropy().to_pandas()
-        isc = injected_src_catalog.asAstropy().to_pandas()
-        dist, ind = crossmatch_angular(isc[['coord_ra', 'coord_dec']].values,
-                                       sc[['coord_ra', 'coord_dec']].values, 0.04 / 3600)
-
-        stack_detection_origins = injected_calexp_wcs.skyToPixelArray(
-            np.array([injected_src_catalog["coord_ra"][np.isinf(dist)]]),
-            np.array([injected_src_catalog["coord_dec"][np.isinf(dist)]]),
-            degrees=False)
-        stack_detection_index = np.array(injected_src_catalog["id"][np.isinf(dist)]).flatten()
-        stack_predictions = np.zeros(calexp_dimensions)
-        stack_predictions[
-            stack_detection_origins[1].astype(int), stack_detection_origins[0].astype(int)] = stack_detection_index
-    else:
-        stack_predictions = 0
-
-    injected_origin = injected_calexp_wcs.skyToPixelArray(np.array([injected_postisrccd_catalog["ra"]]),
-                                                          np.array([injected_postisrccd_catalog["dec"]]),
-                                                          degrees=True)
-    injected_angle = injected_postisrccd_catalog["beta"]
-    injected_length = injected_postisrccd_catalog["trail_length"]
-    for i, catalog_row in enumerate(injected_postisrccd_catalog):
-        injected_mask = tools.data.draw_one_line(np.zeros(calexp_dimensions),
-                                                 (injected_origin[0][i], injected_origin[1][i]),
-                                                 injected_angle[i], injected_length[i])
-        results[i] = {'injection_id': catalog_row['injection_id'],
-                      'ra': catalog_row['ra'],
-                      'dec': catalog_row['dec'],
-                      'trail_length': catalog_row['trail_length'],
-                      'beta': catalog_row['beta'],
-                      'surface_brightness': catalog_row['mag'],
-                      'detector': injected_calexp_ref.dataId["detector"],
-                      'visit': injected_calexp_ref.dataId["visit"],
-                      'band': injected_calexp_ref.dataId["band"],
-                      'n': n,
-                      'x': round(injected_origin[1][i]),
-                      'y': round(injected_origin[0][i])}
-        if nn_predictions is not None:
-            results[i]["NN_detected"] = int(((injected_mask == 1) & (nn_predictions == 1)).sum() > 0)
-        if stack_source_catalog_id is not None:
-            if (injected_mask * stack_predictions).sum() > 0:
-                intersection_injection_stack = injected_mask * stack_predictions
-                stack_index = int(intersection_injection_stack[np.where(intersection_injection_stack != 0)][0])
-                results[i]["stack_detected"] = 1
-                results[i]["stack_magnitude"] = magnitude[isc["id"] == stack_index].flatten()[0]
-                results[i]["stack_snr"] = snr[isc["id"] == stack_index].flatten()[0]
-            else:
-                results[i]["stack_detected"] = 0
-                results[i]["stack_magnitude"] = None
-                results[i]["stack_snr"] = None
-
-    return results
+def precision(tp, fp, fn):
+    return tp / (tp + fp)
 
 
-def recovered_sources(repo, collection, nn_predictions=None, val_index=None, n_parallel=1):
-    from lsst.daf.butler import Butler
-    butler = Butler(repo)
-    postisrccd_catalog_ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_postISRCCD_catalog",
-                                                                                   collections=collection,
-                                                                                   instrument='HSC',
-                                                                                   findFirst=True))))
-    injected_calexp_ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_calexp",
-                                                                                collections=collection,
-                                                                                instrument='HSC',
-                                                                                findFirst=True))))
-    source_catalog_ids = np.unique(np.array(list(butler.registry.queryDatasets("injected_src",
-                                                                               collections=collection,
-                                                                               instrument='HSC',
-                                                                               findFirst=True))))
-    calexp_dimensions = butler.get("injected_calexp.dimensions",
-                                   dataId=injected_calexp_ref[0].dataId,
-                                   collections=collection)
-    calexp_dimensions = (calexp_dimensions.y, calexp_dimensions.x)
-    injection_catalog = get_injection_catalog(butler, collection)
-    if val_index is None:
-        val_index = list(range(len(injected_calexp_ref)))
-    if nn_predictions is None:
-        nn_predictions = [None] * len(injected_calexp_ref)
-    parameters = [(butler, injected_calexp_ref[i], postisrccd_catalog_ref[i],
-                   collection, calexp_dimensions, i, source_catalog_ids[i], nn_predictions[i]) for i in val_index]
-    if n_parallel > 1:
-        with multiprocessing.Pool(n_parallel) as pool:
-            results = pool.starmap(one_image_hits, parameters)
-    else:
-        results = [None] * len(parameters)
-        for i, p in enumerate(parameters):
-            results[i] = one_image_hits(*p)
-            print("\r", i + 1, "/", len(parameters), end="")
-    results = pd.DataFrame(list(np.concatenate(results).flatten())).set_index("injection_id").sort_index()
-    return injection_catalog.merge(results)
+def recall(tp, fp, fn):
+    return tp / (tp + fn)

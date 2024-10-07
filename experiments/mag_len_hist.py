@@ -22,14 +22,14 @@ def get_magnitude_bin(repo, output_coll):
         injection_catalog = butler.get("injected_postISRCCD_catalog",
                                        dataId=injection_catalog_id.dataId,
                                        collections=output_coll, )
-        min_mag = min(min_mag, injection_catalog["mag"].min())
-        max_mag = max(max_mag, injection_catalog["mag"].max())
+        min_mag = min(min_mag, injection_catalog["PSF_mag"].min())
+        max_mag = max(max_mag, injection_catalog["PSF_mag"].max())
     return min_mag, max_mag
 
 
 def plot_trail_histogram(NN_data, LSST_data, true_data=None):
     fig, ax = plt.subplots()
-    bins = np.arange(4, 74, 5)
+    bins = np.arange(6, 65, 5)
     if true_data is not None:
         ax.hist(true_data, bins=bins, histtype="step", label="True asteroids")
     ax.hist(NN_data, bins=bins, histtype="step", label="NN detected asteroids")
@@ -42,12 +42,12 @@ def plot_trail_histogram(NN_data, LSST_data, true_data=None):
 
 def plot_magnitude_histogram(NN_data, LSST_data, true_data=None):
     fig, ax = plt.subplots()
-    bins = np.arange(20, 25.5, 0.5)
+    bins = np.arange(19, 27.0, 0.5)
     if true_data is not None:
         ax.hist(true_data, bins=bins, histtype="step", label="True asteroids")
     ax.hist(NN_data, bins=bins, histtype="step", label="NN detected asteroids")
     ax.hist(LSST_data, bins=bins, histtype="step", label="LSST stack detected asteroids")
-    ax.set_xlabel("Magnitude")
+    ax.set_xlabel("PSF Magnitude")
     ax.set_ylabel("Count")
     ax.legend()
     return fig
@@ -106,7 +106,7 @@ def main(args):
                                                                             args.val_index_path,
                                                                             args.repo_path,
                                                                             collections[i],
-                                                                            column_name=["mag", "trail_length"],
+                                                                            column_name=["PSF_mag", "trail_length"],
                                                                             multiprocess_size=args.cpu_count)
         NN_detected_asteroids_m = NN_detected_asteroids[:, 0]
         NN_detected_asteroids_t = NN_detected_asteroids[:, 1]
@@ -118,7 +118,7 @@ def main(args):
                                                                                                collections[i],
                                                                                                args.val_index_path,
                                                                                                multiprocess_size=args.cpu_count,
-                                                                                               column_name=["mag",
+                                                                                               column_name=["PSF_mag",
                                                                                                             "trail_length"])
         LSST_stack_detected_asteroids_m = LSST_stack_detected_asteroids[:, 0]
         LSST_stack_detected_asteroids_t = LSST_stack_detected_asteroids[:, 1]
@@ -166,10 +166,10 @@ def parse_arguments(args):
                         default="../RESULTS/",
                         help='Path to the output folder.')
     parser.add_argument('--repo_path', type=str,
-                        default="../rc2_subset/SMALL_HSC/",
+                        default="/epyc/ssd/users/kmrakovc/DATA/rc2_subset/SMALL_HSC/",
                         help='Path to the Butler repo.')
     parser.add_argument('--collection', type=str,
-                        default="u/kmrakovc/single_frame_injection_01,u/kmrakovc/single_frame_injection_02,u/kmrakovc/single_frame_injection_03,u/kmrakovc/single_frame_injection_04",
+                        default="u/kmrakovc/runs/single_frame_injection_01,u/kmrakovc/runs/single_frame_injection_02,u/kmrakovc/runs/single_frame_injection_03,u/kmrakovc/runs/single_frame_injection_04",
                         help='Comma-separated list of collection names in the Butler repo.')
     parser.add_argument('--val_index_path', type=str,
                         default="",
