@@ -236,6 +236,7 @@ def unet_model(input_size, arhitecture, kernel_size=3, multi_input=True):
     """
     inputs = tf.keras.layers.Input(input_size, name="input")
     layer = tf.keras.layers.BatchNormalization(name="input_normalisation")(inputs)
+    #layer = inputs
     skip_connections = []
     arhitecture["downMaxPool"][len(arhitecture["downFilters"])-1] = False
     # Encoder

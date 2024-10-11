@@ -61,13 +61,13 @@ def main(args):
     train_size = sum(1 for _ in dataset_train)
     if not args.multiworker:
         dataset_train = dataset_train.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False), num_parallel_calls=tf.data.AUTOTUNE)
-        dataset_train = dataset_train.cache()
+        #dataset_train = dataset_train.cache()
     else:
         dataset_train = dataset_train.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
     dataset_val = tf.data.TFRecordDataset([args.test_dataset_path])
     if not args.multiworker:
         dataset_val = dataset_val.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False), num_parallel_calls=tf.data.AUTOTUNE)
-        dataset_val = dataset_val.cache()
+        #dataset_val = dataset_val.cache()
     else:
         dataset_val = dataset_val.map(tools.model.parse_function(img_shape=tfrecord_shape, test=False))
     with mirrored_strategy.scope():
@@ -123,7 +123,7 @@ def main(args):
                                                                     verbose=1)
         checkpoint_kb = tf.keras.callbacks.ModelCheckpoint(filepath=args.model_destination, save_weights_only=False,
                                                            monitor='val_f1_score', mode='max', save_best_only=True,
-                                                           initial_value_threshold=0.51)
+                                                           initial_value_threshold=0.1)
         kb = [terminateonnan_kb, reducelronplateau_kb, checkpoint_kb]
     else:
         terminateonnan_kb = tf.keras.callbacks.TerminateOnNaN()
@@ -135,7 +135,7 @@ def main(args):
                                                            save_weights_only=False,
                                                            monitor='val_f1_score', mode='max',
                                                            save_best_only=True,
-                                                           initial_value_threshold=0.51)
+                                                           initial_value_threshold=0.1)
         kb = [terminateonnan_kb, reducelronplateau_kb, checkpoint_kb]
     if (task_type == 'worker' and task_id == 0) or task_type is None:
         if args.verbose:
