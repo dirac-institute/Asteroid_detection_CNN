@@ -22,8 +22,8 @@ def get_magnitude_bin(repo, output_coll):
         injection_catalog = butler.get("injected_postISRCCD_catalog",
                                        dataId=injection_catalog_id.dataId,
                                        collections=output_coll, )
-        min_mag = min(min_mag, injection_catalog["PSF_mag"].min())
-        max_mag = max(max_mag, injection_catalog["PSF_mag"].max())
+        min_mag = min(min_mag, injection_catalog["integrated_mag"].min())
+        max_mag = max(max_mag, injection_catalog["integrated_mag"].max())
     return min_mag, max_mag
 
 
@@ -47,7 +47,7 @@ def plot_magnitude_histogram(NN_data, LSST_data, true_data=None):
         ax.hist(true_data, bins=bins, histtype="step", label="True asteroids")
     ax.hist(NN_data, bins=bins, histtype="step", label="NN detected asteroids")
     ax.hist(LSST_data, bins=bins, histtype="step", label="LSST stack detected asteroids")
-    ax.set_xlabel("PSF Magnitude")
+    ax.set_xlabel("Integrated Magnitude")
     ax.set_ylabel("Count")
     ax.legend()
     return fig
@@ -106,7 +106,7 @@ def main(args):
                                                                             args.val_index_path,
                                                                             args.repo_path,
                                                                             collections[i],
-                                                                            column_name=["PSF_mag", "trail_length"],
+                                                                            column_name=["integrated_mag", "trail_length"],
                                                                             multiprocess_size=args.cpu_count)
         NN_detected_asteroids_m = NN_detected_asteroids[:, 0]
         NN_detected_asteroids_t = NN_detected_asteroids[:, 1]
@@ -118,7 +118,7 @@ def main(args):
                                                                                                collections[i],
                                                                                                args.val_index_path,
                                                                                                multiprocess_size=args.cpu_count,
-                                                                                               column_name=["PSF_mag",
+                                                                                               column_name=["integrated_mag",
                                                                                                             "trail_length"])
         LSST_stack_detected_asteroids_m = LSST_stack_detected_asteroids[:, 0]
         LSST_stack_detected_asteroids_t = LSST_stack_detected_asteroids[:, 1]
