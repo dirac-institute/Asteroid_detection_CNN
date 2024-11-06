@@ -114,10 +114,10 @@ def create_prediction_table(args):
 def check_if_prediction_exist(args):
     collections = args.collection.split(',')
     tf_dataset_paths = args.tf_dataset_path.split(',')
-    model_name = args.model_path.split("_")[-1].split(".")[0]
+    #model_name = args.model_path.split("_")[-1].split(".")[0]
     for i in range(len(collections)):
         dataset_name = tf_dataset_paths[i].split("/")[-1].split(".")[0]
-        output_path = args.output_path + model_name + "/" + dataset_name
+        output_path = args.output_path + dataset_name
         if not os.path.exists(output_path + "_prediction_table.csv"):
             return False
     return True
@@ -164,7 +164,7 @@ def main(args):
 def parse_arguments(args):
     parser = argparse.ArgumentParser()
     parser.add_argument('--predict', action=argparse.BooleanOptionalAction,
-                        default=True,
+                        default=False,
                         help='If set, the model will be used to make predictions. Otherwise, the predictions will be loaded from the output folder.')
     parser.add_argument('--model_path', type=str,
                         default="../DATA/Trained_model_56735424.keras",
@@ -206,3 +206,4 @@ def parse_arguments(args):
 if __name__ == "__main__":
     args = parse_arguments(sys.argv[1:])
     main(args)
+    #print (check_if_prediction_exist(args))
