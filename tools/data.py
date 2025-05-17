@@ -4,7 +4,6 @@ import multiprocessing
 import cv2
 import os
 import time
-import pandas as pd
 
 if __name__ == "__main__":
     import model as model
@@ -142,17 +141,17 @@ def one_iteration(i, exp_ref, cat_ref, butler, output_coll, shape):
 
 
 def convert_butler_tfrecords(repo, output_coll, shape, filename_train, filename_test="", train_split=0.25,
-                             batch_size=None,
+                             batch_size=None, instrument="LSSTComCam",
                              verbose=True, seed=42, maxlen=None):
     from lsst.daf.butler import Butler
     butler = Butler(repo)
     catalog_ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_postISRCCD_catalog",
                                                                         collections=output_coll,
-                                                                        instrument='HSC',
+                                                                        instrument=instrument,
                                                                         findFirst=True))))
     ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_calexp",
                                                                 collections=output_coll,
-                                                                instrument='HSC',
+                                                                instrument=instrument,
                                                                 findFirst=True))))
     if maxlen is not None:
         ref = ref[maxlen[0]:maxlen[1]]
@@ -206,16 +205,16 @@ def convert_butler_tfrecords(repo, output_coll, shape, filename_train, filename_
     return index
 
 
-def convert_butler_numpy(repo, output_coll, shape=(512, 512), parallelize=True):
+def convert_butler_numpy(repo, output_coll, shape=(512, 512), parallelize=True, instrument="LSSTComCam"):
     from lsst.daf.butler import Butler
     butler = Butler(repo)
     catalog_ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_postISRCCD_catalog",
                                                                         collections=output_coll,
-                                                                        instrument='HSC',
+                                                                        instrument=instrument,
                                                                         findFirst=True))))
     ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_calexp",
                                                                 collections=output_coll,
-                                                                instrument='HSC',
+                                                                instrument=instrument,
                                                                 findFirst=True))))
     if parallelize:
         data_ref = [(ref[i], catalog_ref[i], butler, output_coll, shape) for i in range(len(ref))]
@@ -264,13 +263,13 @@ def convert_npy_tfrecords(inputs, labels, filename_train, filename_test):
                     writer_train.write(serialized)
 
 
-def extract_injection_catalog_to_csv(repo, collection, filter_index=None):
+def extract_injection_catalog_to_csv(repo, collection, filter_index=None, instrument="LSSTComCam"):
     from lsst.daf.butler import Butler
     butler = Butler(repo)
     list_catalog = []
     postisrccd_catalog_ref = np.unique(np.array(list(butler.registry.queryDatasets("injected_postISRCCD_catalog",
                                                                                    collections=collection,
-                                                                                   instrument='HSC',
+                                                                                   instrument=instrument,
                                                                                    findFirst=True))))
     if filter_index is None:
         filter_index = list(range(len(postisrccd_catalog_ref)))

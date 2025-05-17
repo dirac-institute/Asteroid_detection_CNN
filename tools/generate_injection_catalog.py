@@ -6,7 +6,7 @@ import multiprocessing
 import argparse
 
 
-def generate_one_line(n_inject, butler, ref, input_coll, dimensions, raw_type, source_type, mag, trail_length, beta,):
+def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, input_coll, dimensions, source_type):
     injection_catalog = Table(
         names=(
         'injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit', 'integrated_mag', 'PSF_mag',
@@ -15,17 +15,17 @@ def generate_one_line(n_inject, butler, ref, input_coll, dimensions, raw_type, s
         'int64', 'float64', 'float64', 'str', 'float64', 'float64', 'float64', 'int64', 'float64', 'float64', 'str'))
     injection_catalog.add_index('injection_id')
     raw = butler.get(
-        raw_type + ".wcs",
+        source_type + ".wcs",
         dataId=ref.dataId,
         collections=input_coll,
     )
     info = butler.get(
-        raw_type + ".visitInfo",
+        source_type + ".visitInfo",
         dataId=ref.dataId,
         collections=input_coll,
     )
     filter_name = butler.get(
-        raw_type + ".filter",
+        source_type + ".filter",
         dataId=ref.dataId,
         collections=input_coll,
     )
@@ -58,10 +58,7 @@ def generate_one_line(n_inject, butler, ref, input_coll, dimensions, raw_type, s
     for k in range(n_inject):
         ra_pos = np.random.uniform(low=min_ra.asDegrees(), high=max_ra.asDegrees())
         dec_pos = np.random.uniform(low=min_dec.asDegrees(), high=max_dec.asDegrees())
-        if trail_length[0] == trail_length[1]:
-            inject_length = trail_length[0]
-        else:
-            inject_length = np.random.uniform(low=trail_length[0], high=trail_length[1])
+        inject_length = np.random.uniform(low=trail_length[0], high=trail_length[1])
         x = inject_length / (24 * theta_p)
         if mag[1] == 0:
             # calculating the upper limit magnitude based on the trail length and the maximum detectable limit
@@ -71,10 +68,7 @@ def generate_one_line(n_inject, butler, ref, input_coll, dimensions, raw_type, s
             # user defined magnitude limits
             upper_limit_mag = mag[1]
         # rolling dice for the magnitude then calculating the surface brightness
-        if mag[0] == mag[1]:
-            magnitude = mag[0]
-        else:
-            magnitude = np.random.uniform(low=mag[0], high=upper_limit_mag)
+        magnitude = np.random.uniform(low=mag[0], high=upper_limit_mag)
         surface_brightness = magnitude + 2.5 * np.log10(inject_length)
         psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
         # rolling dice for the surface brightness then calculating the magnitude
@@ -82,12 +76,12 @@ def generate_one_line(n_inject, butler, ref, input_coll, dimensions, raw_type, s
         # magnitude = surface_brightness - 2.5 * np.log10(inject_length)
         angle = np.random.uniform(low=beta[0], high=beta[1])
         visitid = info.id
-        injection_catalog.add_row([k, ra_pos, dec_pos, source_type, inject_length, surface_brightness, angle, visitid,
-                                   magnitude, psf_magnitude, filter_name.bandLabel])
+        injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, visitid,
+                                   magnitude, psf_magnitude, str(filter_name.bandLabel)])
     return injection_catalog
 
 
-def generate_catalog(repo, input_coll, n_inject, trail_length, mag, beta, source_type="Trail", where="", verbose=True,
+def generate_catalog(repo, input_coll, n_inject, trail_length, mag, beta, where="", verbose=True,
                      multiprocess_size=None):
     """
     Create a catalog of trails to be injected in the input collection for the source injection. The catalog is saved in the
@@ -108,20 +102,20 @@ def generate_catalog(repo, input_coll, n_inject, trail_length, mag, beta, source
     from lsst.daf.butler import Butler
     butler = Butler(repo)
     registry = butler.registry
-    raw_type = "calexp"
+    source_type = "calexp"
     if where == "":
-        query = set(registry.queryDatasets(raw_type, collections=input_coll, instrument='HSC', findFirst=True))
+        query = set(registry.queryDatasets(source_type, collections=input_coll, instrument='LSSTComCam', findFirst=True))
     else:
         query = set(
-            registry.queryDatasets(raw_type, collections=input_coll, instrument='HSC', where=where, findFirst=True))
+            registry.queryDatasets(source_type, collections=input_coll, instrument='LSSTComCam', where=where, findFirst=True))
     length = len(list(query))
     dimensions = butler.get(
-        raw_type + ".dimensions",
+        source_type + ".dimensions",
         dataId=list(query)[0].dataId,
         collections=input_coll,
     )
-    parameters = [(n_inject, butler, ref,
-                   input_coll, dimensions, raw_type, source_type, mag, trail_length, beta,) for ref in query]
+    parameters = [(n_inject, trail_length, mag, beta, butler, ref,
+                   input_coll, dimensions, source_type,) for ref in query]
     if verbose:
         print("Number of visits found: ", length)
     if multiprocess_size is None:
@@ -158,7 +152,7 @@ def write_catalog(catalog, repo, output_coll):
         _ = ingest_injection_catalog(
             writeable_butler=writeable_butler,
             table=catalog[catalog['physical_filter'] == bands],
-            band=bands,
+            band=str(bands),
             output_collection=output_coll)
     return None
 
@@ -172,8 +166,7 @@ def main(args):
     :return:
     """
     catalog = generate_catalog(args.repo, args.input_collection, args.number, args.trail_length, args.magnitude,
-                               args.beta, source_type=args.source_type, where=args.where, verbose=args.verbose,
-                               multiprocess_size=args.cpu_count)
+                               args.beta, where=args.where, verbose=args.verbose, multiprocess_size=args.cpu_count)
     write_catalog(catalog, args.repo, args.output_collection)
     return None
 
@@ -207,9 +200,6 @@ def parse_arguments(args):
     parser.add_argument('-b', '--beta', nargs=2, type=float,
                         default=[0.0, 180.0],
                         help='Lower and upper limit for the injected trails rotation angle.')
-    parser.add_argument('--source_type', type=str,
-                        default="Trail",
-                        help='Type of the source to inject')
     parser.add_argument('--where', type=str,
                         default="",
                         help='Filter the collection.')
