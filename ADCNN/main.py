@@ -3,10 +3,19 @@ from config import Config
 from utils import set_seed, split_indices
 from data.h5tiles import H5TiledDataset, SubsetDS, panels_with_positives, WithTransform
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
+from dist_utils import init_distributed, is_main_process
 from models.unet_res_se import UNetResSEASPP
 from train import Trainer
+import argparse
+
 
 def run(cfg: Config):
+    is_dist, rank, local_rank, world_size = init_distributed()
+    # right after: is_dist, rank, local_rank, world_size = init_distributed()
+    import builtins
+    if not is_main_process():
+        builtins.print = lambda *a, **k: None
     set_seed(cfg.train.seed)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -20,10 +29,22 @@ def run(cfg: Config):
     sub_tr = rng.choice(np.intersect1d(idx_tr, pos_panels), size=min(200, len(pos_panels)), replace=False)
     sub_va = np.random.default_rng(cfg.train.seed+1).choice(np.intersect1d(idx_va, pos_panels), size=min(80, len(pos_panels)), replace=False)
 
-    train_loader = DataLoader(SubsetDS(ds_full, idx_tr), batch_size=cfg.loader.batch_size, shuffle=True,
-                              num_workers=cfg.loader.num_workers, pin_memory=(device.type=='cuda'))
-    val_loader   = DataLoader(SubsetDS(ds_full, idx_va), batch_size=cfg.loader.batch_size, shuffle=False,
-                              num_workers=cfg.loader.num_workers, pin_memory=(device.type=='cuda'))
+    train_ds = SubsetDS(ds_full, idx_tr)
+    val_ds = SubsetDS(ds_full, idx_va)
+
+    train_sampler = DistributedSampler(train_ds, num_replicas=world_size, rank=rank, shuffle=True) if is_dist else None
+    val_sampler = DistributedSampler(val_ds, num_replicas=world_size, rank=rank, shuffle=False) if is_dist else None
+
+    train_loader = DataLoader(
+        train_ds, batch_size=cfg.loader.batch_size, shuffle=(train_sampler is None),
+        sampler=train_sampler, num_workers=cfg.loader.num_workers,
+        pin_memory=cfg.loader.pin_memory, persistent_workers=True, prefetch_factor=2,
+    )
+    val_loader = DataLoader(
+        val_ds, batch_size=cfg.loader.batch_size, shuffle=False,
+        sampler=val_sampler, num_workers=cfg.loader.num_workers,
+        pin_memory=cfg.loader.pin_memory, persistent_workers=True, prefetch_factor=2,
+    )
 
     # model
     model = UNetResSEASPP(in_ch=1, out_ch=1).to(device)
@@ -46,8 +67,22 @@ def run(cfg: Config):
         thr_pos_rate_early=cfg.train.thr_pos_rate_early, thr_pos_rate_late=cfg.train.thr_pos_rate_late,
         save_best_to=cfg.train.save_best_to,
     )
-    print("Final threshold:", thr)
-    print("Summary:", summary)
+    if is_main_process():
+        print("Final threshold:", thr)
+        print("Summary:", summary)
+
+def cli():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--train_h5", type=str, default=None)
+    ap.add_argument("--batch", type=int, default=None)
+    ap.add_argument("--epochs", type=int, default=None)
+    args = ap.parse_args()
+    return args
 
 if __name__ == "__main__":
-    run(Config())
+    args = cli()
+    cfg = Config()
+    if args.train_h5: cfg.data.train_h5 = args.train_h5
+    if args.batch: cfg.loader.batch_size = args.batch
+    if args.epochs: cfg.train.max_epochs = args.epochs
+    run(cfg)

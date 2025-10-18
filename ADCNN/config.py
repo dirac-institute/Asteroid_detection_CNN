@@ -18,17 +18,17 @@ class LoaderConfig:
 @dataclass
 class TrainConfig:
     seed: int = 1337
-    warmup_epochs:   int   = 1
+    warmup_epochs:   int   = 5
     warmup_batches:  int   = 800
     warmup_lr:       float = 2e-4
     warmup_pos_weight: float = 40.0
 
-    head_epochs:   int   = 2
+    head_epochs:   int   = 10
     head_batches:  int   = 2000
     head_lr:       float = 3e-5
     head_pos_weight: float = 5.0
 
-    tail_epochs:   int   = 2
+    tail_epochs:   int   = 6
     tail_batches:  int   = 2500
     tail_lr:       float = 1.5e-4
     tail_pos_weight: float = 2.0
@@ -42,7 +42,7 @@ class TrainConfig:
     thr_pos_rate_early: tuple[float, float] = (0.03, 0.10)
     thr_pos_rate_late:  tuple[float, float] = (0.08, 0.12)
 
-    save_best_to: str = "ckpt_best.pt"
+    save_best_to: str = "../checkpoints/ckpt_best.pt"
     init_head_prior: float = 0.70
 
 @dataclass

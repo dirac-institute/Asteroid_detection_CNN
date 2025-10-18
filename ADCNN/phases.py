@@ -47,8 +47,6 @@ def apply_phase(model, ep: int) -> list[str]:
     else:
         for p in model.parameters(): p.requires_grad = True
         groups = ["<FULL>"]
-    ntrain = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"[phase] ep={ep} | trainable params={ntrain:,} | groups={groups}")
     return groups
 
 def make_opt_sched(model, ep: int, base_lrs, weight_decay: float):
@@ -59,3 +57,4 @@ def make_opt_sched(model, ep: int, base_lrs, weight_decay: float):
                            lr=base_lr, weight_decay=weight_decay)
     sched = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(opt, T_0=6, T_mult=2, eta_min=base_lr/10)
     return opt, sched
+
