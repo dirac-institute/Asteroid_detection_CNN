@@ -3,6 +3,7 @@ from config import Config
 from utils import set_seed, split_indices
 from data.h5tiles import H5TiledDataset, SubsetDS, panels_with_positives, WithTransform
 from torch.utils.data import DataLoader
+import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 from dist_utils import init_distributed, is_main_process
 from models.unet_res_se import UNetResSEASPP
@@ -86,3 +87,5 @@ if __name__ == "__main__":
     if args.batch: cfg.loader.batch_size = args.batch
     if args.epochs: cfg.train.max_epochs = args.epochs
     run(cfg)
+    if dist.is_available() and dist.is_initialized():
+        dist.destroy_process_group()

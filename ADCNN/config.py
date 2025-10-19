@@ -12,7 +12,7 @@ class DataConfig:
 @dataclass
 class LoaderConfig:
     batch_size: int = 64
-    num_workers: int = 10
+    num_workers: int = 2
     pin_memory: bool = True
 
 @dataclass

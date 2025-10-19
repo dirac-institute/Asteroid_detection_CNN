@@ -1,13 +1,24 @@
 import os, torch, torch.distributed as dist
 from datetime import timedelta
 
+
 def init_distributed(backend: str = "nccl", timeout_sec: int = 1800):
-    """Initialize torch.distributed if RUNNING in multi-GPU."""
-    if dist.is_available() and (int(os.environ.get("WORLD_SIZE", "1")) > 1):
-        # torchrun sets these env vars; SLURM + srun can too (via --export)
+    """
+    Safe to call multiple times. Returns (is_dist, rank, local_rank, world_size).
+    """
+    # If already initialized, just return current ranks
+    if dist.is_available() and dist.is_initialized():
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+        local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+        torch.cuda.set_device(local_rank)
+        return True, rank, local_rank, world_size
+
+    # Not initialized yet: check env from torchrun / SLURM
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    if world_size > 1:
         rank = int(os.environ["RANK"])
         local_rank = int(os.environ["LOCAL_RANK"])
-        world_size = int(os.environ["WORLD_SIZE"])
         dist.init_process_group(
             backend=backend,
             init_method=os.environ.get("INIT_METHOD", "env://"),
@@ -15,6 +26,8 @@ def init_distributed(backend: str = "nccl", timeout_sec: int = 1800):
         )
         torch.cuda.set_device(local_rank)
         return True, rank, local_rank, world_size
+
+    # Single-process fallback
     return False, 0, 0, 1
 
 def is_main_process() -> bool:
