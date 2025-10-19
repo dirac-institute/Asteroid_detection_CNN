@@ -27,7 +27,7 @@ python3 -c "import torch; print('Torch:', torch.__version__, '| GPUs:', torch.cu
 # ---[ Recommended env for NCCL/DDP ]---
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 export NCCL_DEBUG=warn
-export NCCL_ASYNC_ERROR_HANDLING=1
+export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export CUDA_LAUNCH_BLOCKING=0
 # If your cluster uses specific IB/ethernet interface names, uncomment & set:
 # export NCCL_SOCKET_IFNAME=bond0,eth0,eno1
