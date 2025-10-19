@@ -1,5 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=ADCNN         # Job name
+#SBATCH --account kipac:kipac
+#SBATCH --partition ada
 #SBATCH --nodes=1                # One node
 #SBATCH --gres=gpu:4             # 4 GPUs on the node
 #SBATCH --ntasks-per-node=4      # One task per GPU (DDP)
