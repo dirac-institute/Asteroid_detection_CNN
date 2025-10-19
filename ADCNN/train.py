@@ -66,7 +66,8 @@ class Trainer:
 
         model.to(self.device)
         if is_dist:
-            model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=False)
+            model = DDP(model, device_ids=[local_rank], output_device=local_rank,
+                        find_unused_parameters=True, gradient_as_bucket_view=True)
 
         # Always refer to the underlying module for attribute access (head/u3/u4/aspp) & state_dict
         raw_model = model.module if isinstance(model, DDP) else model
