@@ -12,6 +12,15 @@
 set -euo pipefail
 
 mkdir -p /sdf/home/m/mrakovci/logs
+# === Activate Conda environment ===
+source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
+conda activate asteroid_cnn
+
+echo "=== Environment info ==="
+echo "Hostname: $(hostname)"
+echo "CUDA devices: $CUDA_VISIBLE_DEVICES"
+which python3
+python3 -c "import torch; print('Torch:', torch.__version__, '| GPUs:', torch.cuda.device_count())"
 
 # ---[ Recommended env for NCCL/DDP ]---
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
