@@ -7,7 +7,6 @@
 #SBATCH --mem=20G                # Total RAM for the node (adjust)
 #SBATCH --time=5-00:00:00          # Max runtime
 #SBATCH --output=/sdf/home/m/mrakovci/logs/%x_%j.out  # STDOUT
-#SBATCH --error= /sdf/home/m/mrakovci/logs/%x_%j.err   # STDERR
 
 set -euo pipefail
 
