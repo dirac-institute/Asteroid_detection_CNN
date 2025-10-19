@@ -37,8 +37,6 @@ export CUDA_LAUNCH_BLOCKING=0
 PROJECT_DIR="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/ADCNN"
 DATA_DIR="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/DATA"
 
-mkdir -p "$OUT_DIR"
-
 # ---[ Torchrun launch ]---
 # Single node; torchrun handles rank/world-size envs automatically here.
 # Use $SLURM_GPUS_ON_NODE if your site sets it; fallback to 4.
