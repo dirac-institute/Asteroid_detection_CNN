@@ -2,7 +2,7 @@
 import torch, torch.distributed as dist
 import torch.nn.functional as F
 from typing import Tuple, Dict
-from dist_utils import broadcast_scalar_float
+from ADCNN.utils.dist_utils import broadcast_scalar_float
 
 def resize_masks_to(logits, masks):
     H, W = logits.shape[-2:]

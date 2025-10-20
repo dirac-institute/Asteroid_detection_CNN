@@ -1,11 +1,11 @@
 import torch, numpy as np
 from config import Config
-from utils import set_seed, split_indices
-from data.h5tiles import H5TiledDataset, SubsetDS, panels_with_positives, WithTransform
+from utils.utils import set_seed, split_indices
+from data.h5tiles import H5TiledDataset, SubsetDS, panels_with_positives
 from torch.utils.data import DataLoader
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
-from dist_utils import init_distributed, is_main_process
+from ADCNN.utils.dist_utils import init_distributed, is_main_process
 from models.unet_res_se import UNetResSEASPP
 from train import Trainer
 import argparse
@@ -13,7 +13,6 @@ import argparse
 
 def run(cfg: Config):
     is_dist, rank, local_rank, world_size = init_distributed()
-    # right after: is_dist, rank, local_rank, world_size = init_distributed()
     import builtins
     if not is_main_process():
         builtins.print = lambda *a, **k: None

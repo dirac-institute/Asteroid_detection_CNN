@@ -18,6 +18,26 @@ mkdir -p /sdf/home/m/mrakovci/logs
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
 
+# 1) Probe GPUs on this node
+JSON=$(python gpu_healthcheck.py || true)
+HEALTHY=$(python - <<'PY'
+import os, json, sys
+j=json.loads(os.environ['JSON'])
+print(",".join(map(str, j.get("healthy", []))))
+PY
+)
+
+if [[ -z "${HEALTHY}" ]]; then
+  echo "[launcher] No healthy GPUs detected on this node. Failing fast."
+  exit 1
+fi
+
+NGPU=$(( $(awk -F',' '{print NF}' <<< "${HEALTHY}") ))
+echo "[launcher] Healthy GPUs: ${HEALTHY}  (count=${NGPU})"
+
+# 2) Mask to only healthy GPUs for this process
+export CUDA_VISIBLE_DEVICES="${HEALTHY}"
+
 echo "=== Environment info ==="
 echo "Hostname: $(hostname)"
 echo "CUDA devices: $CUDA_VISIBLE_DEVICES"
