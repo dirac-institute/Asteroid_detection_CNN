@@ -3,7 +3,7 @@ import torch.distributed as dist
 from torch import amp
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
-from ADCNN.utils.dist_utils import init_distributed, is_main_process
+from utils.dist_utils import init_distributed, is_main_process
 from losses import blended_loss, make_loss_for_epoch, BCEIoUEdge
 from thresholds import resize_masks_to, pick_thr_with_floor
 from metrics import roc_auc_ddp

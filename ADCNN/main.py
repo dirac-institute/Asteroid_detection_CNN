@@ -5,7 +5,7 @@ from data.h5tiles import H5TiledDataset, SubsetDS, panels_with_positives
 from torch.utils.data import DataLoader
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
-from ADCNN.utils.dist_utils import init_distributed, is_main_process
+from utils.dist_utils import init_distributed, is_main_process
 from models.unet_res_se import UNetResSEASPP
 from train import Trainer
 import argparse
