@@ -18,29 +18,31 @@ mkdir -p /sdf/home/m/mrakovci/logs
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
 
-# ---[ Project paths (edit these) ]---
+# ---[ Project paths]---
 PROJECT_DIR="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/ADCNN"
 DATA_DIR="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/DATA"
 cd "$PROJECT_DIR"
 
-# 1) Probe GPUs on this node
-JSON=$(python3 utils/gpu_healthcheck.py || true)
-HEALTHY=$(python3 - <<'PY'
-import os, json, sys
-j=json.loads(os.environ['JSON'])
-print(",".join(map(str, j.get("healthy", []))))
-PY
-)
+#Probe GPUs on this node
+# 1) Probe GPUs on this node (returns JSON: {"healthy":[...],"bad":{...}})
+JSON="$(python utils/gpu_healthcheck.py || true)"
+
+# 2) Extract healthy indices from JSON using a tiny Python one-liner
+HEALTHY="$(python -c 'import sys,json; j=json.loads(sys.stdin.read()); print(",".join(map(str, j.get("healthy", []))))' <<< "$JSON")"
 
 if [[ -z "${HEALTHY}" ]]; then
-  echo "[launcher] No healthy GPUs detected on this node. Failing fast."
+  echo "[launcher] No healthy GPUs detected on this node."
+  echo "[launcher] Healthcheck JSON: $JSON"
   exit 1
 fi
 
-NGPU=$(( $(awk -F',' '{print NF}' <<< "${HEALTHY}") ))
+# Count how many
+IFS=',' read -r -a _arr <<< "$HEALTHY"
+NGPU="${#_arr[@]}"
+
 echo "[launcher] Healthy GPUs: ${HEALTHY}  (count=${NGPU})"
 
-# 2) Mask to only healthy GPUs for this process
+# 3) Mask to only healthy GPUs
 export CUDA_VISIBLE_DEVICES="${HEALTHY}"
 
 echo "=== Environment info ==="
@@ -54,14 +56,8 @@ export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 export NCCL_DEBUG=warn
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export CUDA_LAUNCH_BLOCKING=0
-# If your cluster uses specific IB/ethernet interface names, uncomment & set:
-# export NCCL_SOCKET_IFNAME=bond0,eth0,eno1
-# export NCCL_IB_HCA=mlx5
-
 
 # ---[ Torchrun launch ]---
-
-# Example args — replace with your actual flags/configs
 torchrun \
   --standalone \
   --nnodes=1 \
