@@ -18,6 +18,11 @@ mkdir -p /sdf/home/m/mrakovci/logs
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
 
+# ---[ Project paths (edit these) ]---
+PROJECT_DIR="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/ADCNN"
+DATA_DIR="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/DATA"
+cd "$PROJECT_DIR"
+
 # 1) Probe GPUs on this node
 JSON=$(python3 utils/gpu_healthcheck.py || true)
 HEALTHY=$(python3 - <<'PY'
@@ -53,22 +58,14 @@ export CUDA_LAUNCH_BLOCKING=0
 # export NCCL_SOCKET_IFNAME=bond0,eth0,eno1
 # export NCCL_IB_HCA=mlx5
 
-# ---[ Project paths (edit these) ]---
-PROJECT_DIR="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/ADCNN"
-DATA_DIR="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/DATA"
 
 # ---[ Torchrun launch ]---
-# Single node; torchrun handles rank/world-size envs automatically here.
-# Use $SLURM_GPUS_ON_NODE if your site sets it; fallback to 4.
-NP=${SLURM_GPUS_ON_NODE:-4}
-
-cd "$PROJECT_DIR"
 
 # Example args — replace with your actual flags/configs
 torchrun \
   --standalone \
   --nnodes=1 \
-  --nproc_per_node="${NP}" \
+  --nproc_per_node="${NGPU}" \
   main.py \
   --train_h5 "${DATA_DIR}/train_chunked.h5" \
   --epochs 50 \
