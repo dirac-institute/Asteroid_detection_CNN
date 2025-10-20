@@ -19,8 +19,8 @@ source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
 
 # 1) Probe GPUs on this node
-JSON=$(python gpu_healthcheck.py || true)
-HEALTHY=$(python - <<'PY'
+JSON=$(python3 ./utils/gpu_healthcheck.py || true)
+HEALTHY=$(python3 - <<'PY'
 import os, json, sys
 j=json.loads(os.environ['JSON'])
 print(",".join(map(str, j.get("healthy", []))))
