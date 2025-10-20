@@ -7,7 +7,7 @@
 #SBATCH --gres=gpu:4             # 4 GPUs on the node
 #SBATCH --ntasks-per-node=4      # One task per GPU (DDP)
 #SBATCH --cpus-per-task=8        # CPU threads per task (tune to your cluster)
-#SBATCH --mem=20G                # Total RAM for the node (adjust)
+#SBATCH --mem=60G                # Total RAM for the node (adjust)
 #SBATCH --time=5-00:00:00          # Max runtime
 #SBATCH --output=/sdf/home/m/mrakovci/logs/%x_%j.out  # STDOUT
 
