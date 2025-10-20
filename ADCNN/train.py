@@ -227,9 +227,9 @@ class Trainer:
                 auc = roc_auc_ddp(model, val_loader, n_bins=256, max_batches=quick_eval_val_batches)
                 if is_main_process():
                     print(f"[VAL ep{ep}] AUC {auc:.3f} P {val_stats['P']:.3f} R {val_stats['R']:.3f} F {val_stats['F']:.3f} | thr={metric_thr:.3f} | pos_rate≈{aux['pos_rate']:.3f}")
-                if val_stats['F'] > best["F"]:
+                if auc > best["auc"]:
                     best = {"F": val_stats['F'], "state": copy.deepcopy(raw_model.state_dict()),
-                            "thr": metric_thr, "ep": ep, "P": val_stats["P"], "R": val_stats["R"]}
+                            "thr": metric_thr, "ep": ep, "P": val_stats["P"], "R": val_stats["R"], "auc": auc, "loss": train_loss}
                     if is_main_process() and save_best_to:
                         torch.save({"state": best["state"], "thr": best["thr"], "ep": best["ep"],
                                     "P": best["P"], "R": best["R"], "F": best["F"]}, save_best_to)
