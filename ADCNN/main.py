@@ -65,7 +65,7 @@ def run(cfg: Config):
         base_lrs=cfg.train.base_lrs, weight_decay=cfg.train.weight_decay,
         thr_beta=cfg.train.thr_beta,
         thr_pos_rate_early=cfg.train.thr_pos_rate_early, thr_pos_rate_late=cfg.train.thr_pos_rate_late,
-        save_best_to=cfg.train.save_best_to,
+        save_best_to=cfg.train.save_best_to, save_last_to=cfg.train.save_last_to
     )
     if is_main_process():
         print("Final threshold:", thr)

@@ -55,7 +55,7 @@ class Trainer:
                          max_epochs=60, val_every=3, base_lrs=(3e-4,2e-4,1e-4), weight_decay=1e-4,
                          # thr
                          thr_beta=1.0, thr_pos_rate_early=(0.03,0.10), thr_pos_rate_late=(0.08,0.12),
-                         save_best_to="ckpt_best.pt",
+                         save_best_to="ckpt_best.pt", save_last_to="ckpt_last.pt",
                          quick_eval_train_batches=6, quick_eval_val_batches=12):
 
         is_dist, rank, local_rank, world_size = init_distributed()
@@ -185,7 +185,7 @@ class Trainer:
                 f"[tail-probe] loss≈{loss_sum/seen:.4f}", "[quick_prob_stats] train @ thr0:", {k:round(v,3) for k,v in stats.items()})
 
         # -------- Long training --------
-        best = {"F": -1.0, "state": None, "thr": thr0, "ep": 0}
+        best = {"F": -1.0, "state": None, "thr": thr0, "ep": 0.0, "auc": 0.0, "loss": 0.0}
         metric_thr = thr0
 
         for ep in range(1, max_epochs+1):
@@ -233,6 +233,9 @@ class Trainer:
                     if is_main_process() and save_best_to:
                         torch.save({"state": best["state"], "thr": best["thr"], "ep": best["ep"],
                                     "P": best["P"], "R": best["R"], "F": best["F"]}, save_best_to)
+            if is_main_process() and save_last_to:
+                torch.save({"state": best["state"], "thr": best["thr"], "ep": best["ep"],
+                            "P": best["P"], "R": best["R"], "F": best["F"]}, save_last_to)
 
         if best["state"] is not None:
             raw_model.load_state_dict(best["state"], strict=True)

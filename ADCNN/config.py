@@ -43,6 +43,7 @@ class TrainConfig:
     thr_pos_rate_late:  tuple[float, float] = (0.08, 0.12)
 
     save_best_to: str = "../checkpoints/ckpt_best.pt"
+    save_last_to: str = "../checkpoints/ckpt_last.pt"
     init_head_prior: float = 0.70
 
 @dataclass
