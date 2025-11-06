@@ -296,22 +296,22 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
 
 
 # Example run
-if __name__ == "__main__":
-    where = "instrument='LSSTComCam' AND skymap='lsst_cells_v1' AND day_obs>=20241101 AND day_obs<=20241127 AND exposure.observation_type='science' AND band in ('u','g','r','i','z','y') AND (exposure not in (2024110600163, 2024110800318, 2024111200185, 2024111400039, 2024111500225, 2024111500226, 2024111500239, 2024111500240, 2024111500242, 2024111500288, 2024111500289, 2024111800077, 2024111800078, 2024112300230, 2024112400094, 2024112400225, 2024112600327))"
+#if __name__ == "__main__":
+#    where = "instrument='LSSTComCam' AND skymap='lsst_cells_v1' AND day_obs>=20241101 AND day_obs<=20241127 AND exposure.observation_type='science' AND band in ('u','g','r','i','z','y') AND (exposure not in (2024110600163, 2024110800318, 2024111200185, 2024111400039, 2024111500225, 2024111500226, 2024111500239, 2024111500240, 2024111500242, 2024111500288, 2024111500289, 2024111800077, 2024111800078, 2024112300230, 2024112400094, 2024112400225, 2024112600327))"
 
-    run_parallel_injection(
-        repo="/repo/main",
-        coll="LSSTComCam/runs/DRP/DP1/w_2025_03/DM-48478",
-        save_path="./",
-        number=20,
-        trail_length=[6, 60],
-        magnitude=[19, 24],
-        beta=[0, 180],
-        parallel=10,
-        where=where,
-        random_subset=850,
-        train_test_split=0.94117
-    )
+#    run_parallel_injection(
+#        repo="/repo/main",
+#        coll="LSSTComCam/runs/DRP/DP1/w_2025_03/DM-48478",
+#        save_path="./",
+#        number=20,
+#        trail_length=[6, 60],
+#        magnitude=[19, 24],
+#        beta=[0, 180],
+#        parallel=10,
+#        where=where,
+#        random_subset=850,
+#        train_test_split=0.94117
+#    )
 
 
 def main():
