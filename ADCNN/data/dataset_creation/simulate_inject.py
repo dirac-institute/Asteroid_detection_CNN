@@ -1,8 +1,7 @@
 from __future__ import annotations
 import argparse
-from pathlib import Path
 
-from common import ensure_dir  # and anything else you need
+from common import ensure_dir
 from common import draw_one_line
 
 from astroML.crossmatch import crossmatch_angular
@@ -18,9 +17,6 @@ import h5py
 import concurrent.futures
 from multiprocessing import Lock, Semaphore, Manager
 from astropy.io import ascii
-import gc
-import psutil
-import tracemalloc
 import os
 from multiprocessing import Value, Lock
 import logging
@@ -90,7 +86,7 @@ def stack_hits_by_footprints(
     truth_id_mask,
     injection_catalog,
     overlap_frac=0.02,
-    overlap_minpix=10,
+    overlap_minpix=100,
 ):
     H, W = int(dimensions.y), int(dimensions.x)
     N = len(injection_catalog)
@@ -126,11 +122,12 @@ def stack_hits_by_footprints(
         for y, x in pts:
             th[y - y0, x - x0] = True
 
-        required = max(overlap_minpix, int(overlap_frac * truth_count))
         best_ov, best_idx, best_fp = 0, None, None
 
         for idx in range(len(post_src)):
             fp = post_src[idx].getFootprint()
+            n_pix_footprint = fp.getArea()
+            required = max(overlap_minpix, int(overlap_frac * n_pix_footprint))
             bb = fp.getBBox()
             if bb.getEndX() < x0 or bb.getBeginX() > x1 or bb.getEndY() < y0 or bb.getBeginY() > y1:
                 continue
@@ -166,6 +163,20 @@ def stack_hits_by_footprints(
 
     return injection_catalog, matched_fp_masks
 
+def crossmatch_catalogs (pre, post):
+    # Crossmatch POST vs PRE on-sky (inputs in radians, radius in radians)
+    #    post-only detections -> "new" sources likely caused by injections
+    if len(pre) > 0 and len(post) > 0:
+        # arrays of [ra, dec] in radians
+        P = post.asAstropy().to_pandas()[["coord_ra", "coord_dec"]].values
+        R = pre.asAstropy().to_pandas()[["coord_ra", "coord_dec"]].values
+        max_sep = np.deg2rad(0.40 / 3600.0)  # 0.40 arcsec -> radians
+        dist, ind = crossmatch_angular(P, R, max_sep)
+        is_new = np.isinf(dist)  # no match in PRE → likely injected
+        new_post = post[is_new].copy()
+    else:
+        new_post = post.copy()
+    return new_post
 
 def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, debug=False):
     try:
@@ -180,13 +191,13 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             psf_width = injected_calexp.psf.getLocalKernel(Point2D(row["x"], row["y"])).getWidth()
             mask = draw_one_line(mask, [row["x"], row["y"]], row["beta"], row["trail_length"], true_value=i + 1,
                                  line_thickness=int(psf_width/2))
-        injection_catalog, matched_fp_mask = stack_hits_by_footprints(post_src=post_injection_Src,
+        injection_catalog, matched_fp_mask = stack_hits_by_footprints(post_src=crossmatch_catalogs (pre_injection_Src, post_injection_Src),
                                                                        calexp_pre=calexp,
                                                                        dimensions=dimensions,
                                                                        truth_id_mask=mask,
                                                                        injection_catalog=injection_catalog,
-                                                                       overlap_minpix=5,
-                                                                       overlap_frac=0.02,)
+                                                                       overlap_minpix=10,
+                                                                       overlap_frac=0.5,)
 
         if not debug:
             return injected_calexp.image.array.astype("float32"), mask.astype("bool"), injection_catalog
@@ -226,7 +237,7 @@ def worker(args):
 
 
 def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitude, beta, where, parallel=4,
-                           random_subset=0, train_test_split=0, chunks=None):
+                           random_subset=0, train_test_split=0, chunks=None, test_only=False):
     butler = Butler(repo, collections=coll)
     h5train_path = os.path.join(save_path, "train.h5")
     h5test_path = os.path.join(save_path, "test.h5")
@@ -261,13 +272,15 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             csvpath = os.path.join(save_path, "test.csv")
             count = count_test
             count_test += 1
-        else:
+            tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
+                          "preliminary_visit_image"])
+        elif not test_only:
             h5path = h5train_path
             csvpath = os.path.join(save_path, "train.csv")
             count = count_train
             count_train += 1
-        tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
-                      "preliminary_visit_image"])
+            tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
+                          "preliminary_visit_image"])
     if parallel > 1:
         with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as executor:
             list(executor.map(worker, tasks))
@@ -320,7 +333,9 @@ def main():
         random_subset=args.random_subset,
         train_test_split=args.train_test_split,
         chunks=args.chunks,
+        test_only=True
     )
 
 if __name__ == "__main__":
     main()
+
