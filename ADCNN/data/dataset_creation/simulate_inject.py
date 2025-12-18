@@ -1,7 +1,8 @@
 from __future__ import annotations
 import argparse
+from pathlib import Path
 
-from common import ensure_dir
+from common import ensure_dir  # and anything else you need
 from common import draw_one_line
 
 from astroML.crossmatch import crossmatch_angular
@@ -17,6 +18,9 @@ import h5py
 import concurrent.futures
 from multiprocessing import Lock, Semaphore, Manager
 from astropy.io import ascii
+import gc
+import psutil
+import tracemalloc
 import os
 from multiprocessing import Value, Lock
 import logging
@@ -46,7 +50,8 @@ def inject(postISRCCD, injection_catalog):
     return inject_res.output_exposure
 
 
-def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, dimensions, source_type):
+def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, dimensions, source_type, seed):
+    rng = np.random.default_rng(seed)
     injection_catalog = Table(
         names=('injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit', 'detector',
                'integrated_mag', 'PSF_mag', 'physical_filter', 'x', 'y'),
@@ -62,18 +67,18 @@ def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, dimensions
     theta_p = fwhm[filter_name.bandLabel] * pixelScale
     a, b = 0.67, 1.16
     for k in range(n_inject):
-        x_pos = np.random.uniform(1, dimensions.x - 1)
-        y_pos = np.random.uniform(1, dimensions.y - 1)
+        x_pos = rng.uniform(1, dimensions.x - 1)
+        y_pos = rng.uniform(1, dimensions.y - 1)
         sky_pos = raw.pixelToSky(x_pos, y_pos)
         ra_pos = sky_pos.getRa().asDegrees()
         dec_pos = sky_pos.getDec().asDegrees()
-        inject_length = np.random.uniform(*trail_length)
+        inject_length = rng.uniform(*trail_length)
         x = inject_length / (24 * theta_p)
         upper_limit_mag = psf_depth - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x)) if mag[1] == 0 else mag[1]
-        magnitude = np.random.uniform(mag[0], upper_limit_mag)
+        magnitude = rng.uniform(mag[0], upper_limit_mag)
         surface_brightness = magnitude + 2.5 * np.log10(inject_length)
         psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
-        angle = np.random.uniform(*beta)
+        angle = rng.uniform(*beta)
         injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, info.id,
                                    int(ref.dataId["detector"]), magnitude, psf_magnitude, str(filter_name.bandLabel),
                                    x_pos, y_pos])
@@ -178,11 +183,13 @@ def crossmatch_catalogs (pre, post):
         new_post = post.copy()
     return new_post
 
-def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, debug=False):
+def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=123, debug=False):
     try:
+        if seed is None:
+            seed = np.random.randint(0,10000)
         butler = Butler(repo, collections=coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
-        injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, butler, ref, dimensions, source_type)
+        injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, butler, ref, dimensions, source_type, seed)
         calexp = butler.get("preliminary_visit_image", dataId=ref.dataId)
         pre_injection_Src = butler.get("single_visit_star_footprints", dataId=ref.dataId)
         injected_calexp, post_injection_Src = characterizeCalibrate(inject(calexp, injection_catalog))
@@ -219,8 +226,9 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
 
 
 def worker(args):
-    idx, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta, source_type = args
-    res = one_detector_injection(number, trail_length, magnitude, beta, repo, coll, dims, source_type, dataId)
+    idx, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta, source_type, global_seed = args
+    seed = (int(global_seed) * 1_000_003 + int(dataId["visit"]) * 1_003 + int(dataId["detector"])) & 0xFFFFFFFF
+    res = one_detector_injection(number, trail_length, magnitude, beta, repo, coll, dims, source_type, dataId, seed)
     with counter_lock:
         completed_counter.value += 1
         print(f"[{completed_counter.value}/{total_tasks}] done", flush=True)
@@ -237,7 +245,7 @@ def worker(args):
 
 
 def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitude, beta, where, parallel=4,
-                           random_subset=0, train_test_split=0, chunks=None, test_only=False):
+                           random_subset=0, train_test_split=0, seed=123, chunks=None, test_only=False):
     butler = Butler(repo, collections=coll)
     h5train_path = os.path.join(save_path, "train.h5")
     h5test_path = os.path.join(save_path, "test.h5")
@@ -245,22 +253,24 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
     refs = list(set(butler.registry.queryDatasets("preliminary_visit_image", where=where, instrument="LSSTComCam", findFirst=True)))
     refs = sorted(refs, key=lambda r: str(r.dataId["visit"]*1000+r.dataId["detector"]))
     if random_subset > 0:
-        refs = list(np.random.choice(refs, random_subset, replace=False))
+        rng_subset = np.random.default_rng(seed)
+        refs = list(rng_subset.choice(refs, random_subset, replace=False))
     global total_tasks
     total_tasks = len(refs)  # Needed for progress display
-
-    test_index = np.random.choice(np.arange(len(refs)), int((1 - train_test_split) * len(refs)),
+    rng_split = np.random.default_rng(seed + 1)
+    test_index = rng_split.choice(np.arange(len(refs)), int((1 - train_test_split) * len(refs)),
                                   replace=False) if 0 < train_test_split < 1 else []
     dims = butler.get("preliminary_visit_image.dimensions", dataId=refs[0].dataId)
     if chunks is not None:
         chunks = (1, min(int(chunks), dims.y), min(int(chunks), dims.x))
-    with h5py.File(h5train_path, "w") as f:
-        f.create_dataset("images", shape=(len(refs) - len(test_index), dims.y, dims.x), dtype="float32", chunks=chunks)
-        f.create_dataset("masks", shape=(len(refs) - len(test_index), dims.y, dims.x), dtype="bool", chunks=chunks)
+    if not test_only:
+        with h5py.File(h5train_path, "w") as f:
+            f.create_dataset("images", shape=(len(refs) - len(test_index), dims.y, dims.x), dtype="float32", chunks=chunks)
+            f.create_dataset("masks", shape=(len(refs) - len(test_index), dims.y, dims.x), dtype="bool", chunks=chunks)
     if len(test_index) > 0:
         with h5py.File(h5test_path, "w") as f:
-            f.create_dataset("images", shape=(len(test_index), dims.y, dims.x), dtype="float32")
-            f.create_dataset("masks", shape=(len(test_index), dims.y, dims.x), dtype="bool")
+            f.create_dataset("images", shape=(len(test_index), dims.y, dims.x), dtype="float32", chunks=chunks)
+            f.create_dataset("masks", shape=(len(test_index), dims.y, dims.x), dtype="bool", chunks=chunks)
     manager = Manager()
     lock = manager.Lock()
     count_train = 0
@@ -273,14 +283,14 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             count = count_test
             count_test += 1
             tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
-                          "preliminary_visit_image"])
+                          "preliminary_visit_image", seed])
         elif not test_only:
             h5path = h5train_path
             csvpath = os.path.join(save_path, "train.csv")
             count = count_train
             count_train += 1
             tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
-                          "preliminary_visit_image"])
+                          "preliminary_visit_image", seed])
     if parallel > 1:
         with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as executor:
             list(executor.map(worker, tasks))
@@ -288,11 +298,12 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
         for task in tasks:
             worker(task)
 
-def set_global_seed(seed: int):
-    import os, random, numpy as np
-    os.environ["PYTHONHASHSEED"] = str(seed)
-    random.seed(seed)
-    np.random.seed(seed)
+def rng_for_task(seed: int, dataId: dict) -> np.random.Generator:
+    # stable across runs
+    s = (int(seed) * 1_000_003
+         + int(dataId["visit"]) * 1_003
+         + int(dataId["detector"])) & 0xFFFFFFFF
+    return np.random.default_rng(s)
     
 def main():
     ap = argparse.ArgumentParser("Build a SIMULATED (injected) dataset")
@@ -316,7 +327,6 @@ def main():
     args = ap.parse_args()
 
     ensure_dir(args.save_path)
-    set_global_seed(args.seed)
     logger = logging.getLogger("lsst")
     logger.setLevel(logging.ERROR)
     # call into your pasted function
@@ -333,9 +343,9 @@ def main():
         random_subset=args.random_subset,
         train_test_split=args.train_test_split,
         chunks=args.chunks,
-        test_only=True
+        test_only=False,
+        seed=args.seed
     )
 
 if __name__ == "__main__":
     main()
-
