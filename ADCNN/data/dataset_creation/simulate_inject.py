@@ -2,7 +2,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from common import ensure_dir, suppress_stdout  # and anything else you need
+from common import ensure_dir  # and anything else you need
 from common import draw_one_line
 
 from astroML.crossmatch import crossmatch_angular
@@ -22,49 +22,25 @@ import gc
 import psutil
 import tracemalloc
 import os
-from contextlib import contextmanager, redirect_stdout, redirect_stderr
 from multiprocessing import Value, Lock
+import logging
 
 completed_counter = Value('i', 0)
 counter_lock = Lock()
 
 
-@contextmanager
-def suppress_stdout():
-    with open(os.devnull, 'w') as devnull:
-        with redirect_stdout(devnull), redirect_stderr(devnull):
-            yield
-
-
-def mem(label=""):
-    gc.collect()
-    print(f"\n=== {label} ===")
-    print(f"Resident memory: {(psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2):.1f} MB")
-    top_stats = tracemalloc.take_snapshot().statistics('lineno')
-    print("[Top alloc lines]")
-    for stat in top_stats[:5]:
-        print(stat)
-
-def characterizeCalibrate(postISRCCD, verbose=False):
+def characterizeCalibrate(postISRCCD):
     char_config = CharacterizeImageTask.ConfigClass()
     char_config.doApCorr = True
     char_config.doDeblend = True
     char_task = CharacterizeImageTask(config=char_config)
-    if verbose:
-        char_result = char_task.run(postISRCCD)
-    else:
-        with suppress_stdout():
-            char_result = char_task.run(postISRCCD)
+    char_result = char_task.run(postISRCCD)
+    
     calib_config = CalibrateTask.ConfigClass()
     calib_config.doAstrometry = False
     calib_config.doPhotoCal = False
     calib_task = CalibrateTask(config=calib_config, icSourceSchema=char_result.sourceCat.schema)
-    if verbose:
-        calib_result = calib_task.run(postISRCCD, background=char_result.background, icSourceCat=char_result.sourceCat)
-    else:
-        with suppress_stdout():
-            calib_result = calib_task.run(postISRCCD, background=char_result.background,
-                                          icSourceCat=char_result.sourceCat)
+    calib_result = calib_task.run(postISRCCD, background=char_result.background, icSourceCat=char_result.sourceCat)
     return calib_result.outputExposure, calib_result.sourceCat
 
 
@@ -107,123 +83,125 @@ def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, dimensions
                                    x_pos, y_pos])
     return injection_catalog
 
+def stack_hits_by_footprints(
+    post_src,
+    calexp_pre,
+    dimensions,
+    truth_id_mask,
+    injection_catalog,
+    overlap_frac=0.02,
+    overlap_minpix=10,
+):
+    H, W = int(dimensions.y), int(dimensions.x)
+    N = len(injection_catalog)
 
-def stack_hits(pre_injection_Src, post_injection_Src, calexp, dimensions, mask, injection_catalog):
-    """
-    Label injected sources that were detected by the LSST pipeline ("stack").
-    Strategy:
-      - Crossmatch post-injection sources to pre-injection sources by sky coords (radians), radius ~ 0.04".
-      - New-only detections = rows in post that do NOT match pre.
-      - Convert those new detections to pixel coords; rasterize into a mask with compact IDs 1..K.
-      - Overlap with injected ground-truth mask (values 1..N) to mark which injections were detected.
-    Outputs columns on injection_catalog: stack_detection (bool), stack_mag, stack_mag_err.
-    """
-    # Compute PSF mags for POST catalog (injected scene)
-    mags = calexp.photoCalib.instFluxToMagnitude(post_injection_Src, 'base_PsfFlux')  # (N,2)
-    post = post_injection_Src.asAstropy().to_pandas()
-    post["magnitude"] = mags[:, 0]
-    post["magnitude_err"] = mags[:, 1]
+    det_flag = np.zeros(N, bool)
+    det_mag = np.full(N, np.nan)
+    det_magerr = np.full(N, np.nan)
+    matched_fp_masks = [np.zeros((H, W), bool) for _ in range(N)]
 
-    # Keep primary
-    post = post[post.get("parent", 0) == 0].copy()
-    pre = pre_injection_Src.asAstropy().to_pandas()
-    pre = pre[pre.get("parent", 0) == 0].copy()
+    mags = calexp_pre.photoCalib.instFluxToMagnitude(post_src, "base_PsfFlux")
 
-    # Drop obvious bad fluxes
-    if "base_PsfFlux_flag" in post.columns:
-        post = post[post["base_PsfFlux_flag"] == False].copy()
+    ys, xs = np.nonzero(truth_id_mask)
+    ids = truth_id_mask[ys, xs] - 1
 
-    # Crossmatch POST vs PRE on-sky (inputs in radians, radius in radians)
-    #    post-only detections -> "new" sources likely caused by injections
-    if len(pre) > 0 and len(post) > 0:
-        # arrays of [ra, dec] in radians
-        P = post[["coord_ra", "coord_dec"]].values
-        R = pre[["coord_ra", "coord_dec"]].values
-        max_sep = np.deg2rad(0.04 / 3600.0)  # 0.04 arcsec -> radians
-        dist, ind = crossmatch_angular(P, R, max_sep)
-        is_new = np.isinf(dist)  # no match in PRE → likely injected
-        new_post = post[is_new].copy()
-    else:
-        new_post = post.copy()
+    pix_by_id = [[] for _ in range(N)]
+    for y, x, i in zip(ys, xs, ids):
+        if 0 <= i < N:
+            pix_by_id[i].append((y, x))
 
-    if len(new_post) == 0:
-        # Initialize output columns to "not detected"
-        injection_catalog["stack_detection"] = False
-        injection_catalog["stack_mag"] = np.nan
-        injection_catalog["stack_mag_err"] = np.nan
-        return injection_catalog
+    for inj_id in range(N):
+        if not pix_by_id[inj_id]:
+            continue
 
-    # coords → pixels (radians if degrees=False)
-    ra_rad = new_post["coord_ra"].to_numpy()
-    dec_rad = new_post["coord_dec"].to_numpy()
-    xx, yy = calexp.wcs.skyToPixelArray(ra_rad, dec_rad, degrees=False)
+        pts = pix_by_id[inj_id]
+        yy = np.array([p[0] for p in pts])
+        xx = np.array([p[1] for p in pts])
 
-    # image width/height as plain Python ints
-    H = int(getattr(dimensions, "y", dimensions[0]))
-    W = int(getattr(dimensions, "x", dimensions[1]))
+        y0, y1 = yy.min(), yy.max()
+        x0, x1 = xx.min(), xx.max()
+        truth_count = len(pts)
 
-    # round, clip, flatten → 1D index arrays with native index dtype
-    x_pix = np.rint(xx).astype(np.intp, copy=False)
-    y_pix = np.rint(yy).astype(np.intp, copy=False)
-    x_pix = np.clip(x_pix, 0, W - 1).ravel()
-    y_pix = np.clip(y_pix, 0, H - 1).ravel()
+        th = np.zeros((y1 - y0 + 1, x1 - x0 + 1), bool)
+        for y, x in pts:
+            th[y - y0, x - x0] = True
 
-    # K as a real Python int (avoid 0-D/array scalars)
-    K = int(x_pix.shape[0])
+        required = max(overlap_minpix, int(overlap_frac * truth_count))
+        best_ov, best_idx, best_fp = 0, None, None
 
-    stack_mask = np.zeros((H, W), dtype=np.int32)
-    compact_ids = np.arange(1, K + 1, dtype=np.int32)
+        for idx in range(len(post_src)):
+            fp = post_src[idx].getFootprint()
+            bb = fp.getBBox()
+            if bb.getEndX() < x0 or bb.getBeginX() > x1 or bb.getEndY() < y0 or bb.getBeginY() > y1:
+                continue
 
-    # write with tuple indexing; x/y are 1D np.intp → no deprecation
-    stack_mask[(y_pix, x_pix)] = compact_ids
+            fm = np.zeros_like(th)
+            ov = 0
+            for span in fp.spans:
+                y = span.getY()
+                if y < y0 or y > y1:
+                    continue
+                sx0 = max(span.getX0(), x0)
+                sx1 = min(span.getX1(), x1)
+                if sx0 <= sx1:
+                    fm[y - y0, sx0 - x0 : sx1 - x0 + 1] = True
+                    ov = int((fm & th).sum())
+                    if ov >= required:
+                        break
 
-    # Overlap with injected GT mask (values 1..N, where N == len(injection_catalog))
-    # mask != 0 means which injected object id is present (id = mask-1)
-    hits = (mask != 0) & (stack_mask != 0)
-    if not hits.any():
-        injection_catalog["stack_detection"] = False
-        injection_catalog["stack_mag"] = np.nan
-        injection_catalog["stack_mag_err"] = np.nan
-        return injection_catalog
+            if ov > best_ov:
+                best_ov, best_idx, best_fp = ov, idx, fm
+                if ov >= required:
+                    break
 
-    inj_ids = mask[hits].astype(np.int64) - 1  # 0-based indices into injection_catalog
-    stk_ids = stack_mask[hits].astype(np.int64) - 1  # 0-based indices into new_post rows (COMPACT)
+        if best_idx is not None and best_ov >= required:
+            det_flag[inj_id] = True
+            det_mag[inj_id] = mags[best_idx, 0]
+            det_magerr[inj_id] = mags[best_idx, 1]
+            matched_fp_masks[inj_id][y0:y1+1, x0:x1+1] |= best_fp
 
-    # Build lookup arrays for magnitudes aligned with the COMPACT order
-    new_post_reset = new_post.reset_index(drop=True)  # 0..K-1
-    mag_lookup = new_post_reset["magnitude"].to_numpy()
-    magerr_lookup = new_post_reset["magnitude_err"].to_numpy()
+    injection_catalog["stack_detection"] = det_flag
+    injection_catalog["stack_mag"] = det_mag
+    injection_catalog["stack_mag_err"] = det_magerr
 
-    # Initialize output columns and fill where hits happen
-    if "stack_detection" not in injection_catalog.colnames:
-        injection_catalog["stack_detection"] = False
-        injection_catalog["stack_mag"] = np.nan
-        injection_catalog["stack_mag_err"] = np.nan
-
-    # Set flags/mags for all overlaps
-    injection_catalog["stack_detection"][inj_ids] = True
-    injection_catalog["stack_mag"][inj_ids] = mag_lookup[stk_ids]
-    injection_catalog["stack_mag_err"][inj_ids] = magerr_lookup[stk_ids]
-
-    return injection_catalog
+    return injection_catalog, matched_fp_masks
 
 
-def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId):
+def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, debug=False):
     try:
         butler = Butler(repo, collections=coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
         injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, butler, ref, dimensions, source_type)
-        calexp = butler.get("calexp", dataId=ref.dataId)
-        pre_injection_Src = butler.get("src", dataId=ref.dataId)
+        calexp = butler.get("preliminary_visit_image", dataId=ref.dataId)
+        pre_injection_Src = butler.get("single_visit_star_footprints", dataId=ref.dataId)
         injected_calexp, post_injection_Src = characterizeCalibrate(inject(calexp, injection_catalog))
         mask = np.zeros((dimensions.y, dimensions.x), dtype=int)
         for i, row in enumerate(injection_catalog):
             psf_width = injected_calexp.psf.getLocalKernel(Point2D(row["x"], row["y"])).getWidth()
             mask = draw_one_line(mask, [row["x"], row["y"]], row["beta"], row["trail_length"], true_value=i + 1,
-                                 line_thickness=psf_width)
-        injection_catalog = stack_hits(pre_injection_Src, post_injection_Src, calexp, dimensions, mask,
-                                       injection_catalog)
-        return injected_calexp.image.array.astype("float32"), mask.astype("bool"), injection_catalog
+                                 line_thickness=int(psf_width/2))
+        injection_catalog, matched_fp_mask = stack_hits_by_footprints(post_src=post_injection_Src,
+                                                                       calexp_pre=calexp,
+                                                                       dimensions=dimensions,
+                                                                       truth_id_mask=mask,
+                                                                       injection_catalog=injection_catalog,
+                                                                       overlap_minpix=5,
+                                                                       overlap_frac=0.02,)
+
+        if not debug:
+            return injected_calexp.image.array.astype("float32"), mask.astype("bool"), injection_catalog
+        else:
+            det_mask = None
+            m = injected_calexp.mask
+            if "DETECTED" in m.getMaskPlaneDict():
+                det_bit = m.getPlaneBitMask("DETECTED")
+                det_mask = (m.array & det_bit) != 0
+            det_neg_mask = None
+            if "DETECTED_NEGATIVE" in m.getMaskPlaneDict():
+                detn_bit = m.getPlaneBitMask("DETECTED_NEGATIVE")
+                det_neg_mask = (m.array & detn_bit) != 0
+            matched_fp_masks = np.any(np.stack(matched_fp_mask, axis=-1), axis=-1)
+            return injected_calexp.image.array.astype("float32"), mask.astype("bool"), injection_catalog, det_mask, matched_fp_masks
     except Exception as e:
         print(f"[WARNING] Skipping {ref_dataId} due to failure: {e}")
         return None
@@ -248,12 +226,13 @@ def worker(args):
 
 
 def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitude, beta, where, parallel=4,
-                           random_subset=0, train_test_split=0):
+                           random_subset=0, train_test_split=0, chunks=None):
     butler = Butler(repo, collections=coll)
     h5train_path = os.path.join(save_path, "train.h5")
     h5test_path = os.path.join(save_path, "test.h5")
 
-    refs = list(set(butler.registry.queryDatasets("calexp", where=where, instrument="LSSTComCam", findFirst=True)))
+    refs = list(set(butler.registry.queryDatasets("preliminary_visit_image", where=where, instrument="LSSTComCam", findFirst=True)))
+    refs = sorted(refs, key=lambda r: str(r.dataId["visit"]*1000+r.dataId["detector"]))
     if random_subset > 0:
         refs = list(np.random.choice(refs, random_subset, replace=False))
     global total_tasks
@@ -261,10 +240,12 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
 
     test_index = np.random.choice(np.arange(len(refs)), int((1 - train_test_split) * len(refs)),
                                   replace=False) if 0 < train_test_split < 1 else []
-    dims = butler.get("calexp.dimensions", dataId=refs[0].dataId)
+    dims = butler.get("preliminary_visit_image.dimensions", dataId=refs[0].dataId)
+    if chunks is not None:
+        chunks = (1, min(int(chunks), dims.y), min(int(chunks), dims.x))
     with h5py.File(h5train_path, "w") as f:
-        f.create_dataset("images", shape=(len(refs) - len(test_index), dims.y, dims.x), dtype="float32")
-        f.create_dataset("masks", shape=(len(refs) - len(test_index), dims.y, dims.x), dtype="bool")
+        f.create_dataset("images", shape=(len(refs) - len(test_index), dims.y, dims.x), dtype="float32", chunks=chunks)
+        f.create_dataset("masks", shape=(len(refs) - len(test_index), dims.y, dims.x), dtype="bool", chunks=chunks)
     if len(test_index) > 0:
         with h5py.File(h5test_path, "w") as f:
             f.create_dataset("images", shape=(len(test_index), dims.y, dims.x), dtype="float32")
@@ -286,7 +267,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             count = count_train
             count_train += 1
         tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
-                      "calexp"])
+                      "preliminary_visit_image"])
     if parallel > 1:
         with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as executor:
             list(executor.map(worker, tasks))
@@ -294,34 +275,20 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
         for task in tasks:
             worker(task)
 
-
-# Example run
-#if __name__ == "__main__":
-#    where = "instrument='LSSTComCam' AND skymap='lsst_cells_v1' AND day_obs>=20241101 AND day_obs<=20241127 AND exposure.observation_type='science' AND band in ('u','g','r','i','z','y') AND (exposure not in (2024110600163, 2024110800318, 2024111200185, 2024111400039, 2024111500225, 2024111500226, 2024111500239, 2024111500240, 2024111500242, 2024111500288, 2024111500289, 2024111800077, 2024111800078, 2024112300230, 2024112400094, 2024112400225, 2024112600327))"
-
-#    run_parallel_injection(
-#        repo="/repo/main",
-#        coll="LSSTComCam/runs/DRP/DP1/w_2025_03/DM-48478",
-#        save_path="./",
-#        number=20,
-#        trail_length=[6, 60],
-#        magnitude=[19, 24],
-#        beta=[0, 180],
-#        parallel=10,
-#        where=where,
-#        random_subset=850,
-#        train_test_split=0.94117
-#    )
-
-
+def set_global_seed(seed: int):
+    import os, random, numpy as np
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    
 def main():
     ap = argparse.ArgumentParser("Build a SIMULATED (injected) dataset")
-    ap.add_argument("--repo", required=True)
-    ap.add_argument("--collections", required=True)
-    ap.add_argument("--save-path", required=True)
+    ap.add_argument("--repo", type=str, default="/repo/main")
+    ap.add_argument("--collections", type=str, default="LSSTComCam/runs/DRP/DP1/w_2025_17/DM-50530")
+    ap.add_argument("--save-path", default="../../../DATA/")
     ap.add_argument("--where", default="")
-    ap.add_argument("--parallel", type=int, default=8)
-    ap.add_argument("--random-subset", type=int, default=0)
+    ap.add_argument("--parallel", type=int, default=4)
+    ap.add_argument("--random-subset", type=int, default=10)
     ap.add_argument("--train-test-split", type=float, default=0.1)
     ap.add_argument("--trail-length-min", type=float, default=6)
     ap.add_argument("--trail-length-max", type=float, default=60)
@@ -330,10 +297,15 @@ def main():
     ap.add_argument("--beta-min", type=float, default=0)
     ap.add_argument("--beta-max", type=float, default=180)
     ap.add_argument("--number", type=int, default=20)
+    ap.add_argument("--seed", type=int, default=123)
+    ap.add_argument("--chunks", type=int, default=None,
+    help="HDF5 chunk size (square). Example: 128 -> chunks=(1,128,128). None = contiguous")
     args = ap.parse_args()
 
     ensure_dir(args.save_path)
-
+    set_global_seed(args.seed)
+    logger = logging.getLogger("lsst")
+    logger.setLevel(logging.ERROR)
     # call into your pasted function
     run_parallel_injection(
         repo=args.repo,
@@ -346,7 +318,8 @@ def main():
         parallel=args.parallel,
         where=args.where,
         random_subset=args.random_subset,
-        train_test_split=args.train_test_split
+        train_test_split=args.train_test_split,
+        chunks=args.chunks,
     )
 
 if __name__ == "__main__":

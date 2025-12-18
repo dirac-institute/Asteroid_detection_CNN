@@ -2,7 +2,6 @@ from __future__ import annotations
 import math
 import numpy as np
 from pathlib import Path
-from contextlib import contextmanager
 from typing import Tuple
 import cv2
 
@@ -12,16 +11,6 @@ import lsst.geom as geom
 # ---------- small utils ----------
 def ensure_dir(p: str | Path):
     Path(p).mkdir(parents=True, exist_ok=True)
-
-@contextmanager
-def suppress_stdout():
-    import sys, io
-    old = sys.stdout
-    try:
-        sys.stdout = io.StringIO()
-        yield
-    finally:
-        sys.stdout = old
 
 # ---------- sky-motion geometry ----------
 def vsky_and_pa(ra_rate_cosdec_deg_day: float, dec_rate_deg_day: float) -> Tuple[float, float]:
