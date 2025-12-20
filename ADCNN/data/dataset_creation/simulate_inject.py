@@ -18,9 +18,6 @@ import h5py
 import concurrent.futures
 from multiprocessing import Lock, Semaphore, Manager
 from astropy.io import ascii
-import gc
-import psutil
-import tracemalloc
 import os
 from multiprocessing import Value, Lock
 import logging

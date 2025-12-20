@@ -149,8 +149,8 @@ def _choose_mag_field(df):
 
 def plot_detect_hist(cat, field, bins=12, title=None):
     nn_det = cat[cat["nn_detected"]]
-    stk_det = cat[cat["stack_detected"]]
-    cum_det = cat[cat["nn_detected"] | cat["stack_detected"]]
+    stk_det = cat[cat["stack_detection"]]
+    cum_det = cat[cat["nn_detected"] | cat["stack_detection"]]
     vals = cat[field].to_numpy(); vals = vals[np.isfinite(vals)]
     edges = np.histogram_bin_edges(vals, bins=bins)
     fig, ax = plt.subplots(figsize=(6.5,4.5))
