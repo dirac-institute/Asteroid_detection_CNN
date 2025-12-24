@@ -42,6 +42,14 @@ class Trainer:
     def __init__(self, device=None):
         self.device = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+    def _set_loader_epoch(self, loader, epoch: int):
+        if hasattr(loader, "sampler") and isinstance(loader.sampler, DistributedSampler):
+            loader.sampler.set_epoch(epoch)
+            return
+        if hasattr(loader, "batch_sampler") and hasattr(loader.batch_sampler, "set_epoch"):
+            loader.batch_sampler.set_epoch(epoch)
+            return
+
     def train_full_probe(self, model, train_loader, val_loader, *,
                          seed=1337,
                          init_head_prior=0.70,
@@ -83,8 +91,9 @@ class Trainer:
         posw = torch.tensor(warmup_pos_weight, device=self.device)
         opt = torch.optim.Adam(raw_model.parameters(), lr=warmup_lr, weight_decay=0.0)
         for ep in range(1, warmup_epochs+1):
-            if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, DistributedSampler):
-                train_loader.sampler.set_epoch(ep)
+            #if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, DistributedSampler):
+            #    train_loader.sampler.set_epoch(ep)
+            self._set_loader_epoch(train_loader, ep)
             model.train(); seen=0; loss_sum=0.0
             for b,(xb,yb) in enumerate(train_loader, 1):
                 xb,yb = xb.to(self.device), yb.to(self.device)
@@ -126,8 +135,9 @@ class Trainer:
             [p for p in raw_model.parameters() if p.requires_grad], lr=head_lr, weight_decay=0.0
         )
         for ep in range(1, head_epochs+1):
-            if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, DistributedSampler):
-                train_loader.sampler.set_epoch(10_000 + ep)
+            #if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, DistributedSampler):
+            #    train_loader.sampler.set_epoch(10_000 + ep)
+            self._set_loader_epoch(train_loader, warmup_epochs+1 + ep)
             model.train(); seen=0; loss_sum=0.0
             for b,(xb,yb) in enumerate(train_loader, 1):
                 xb,yb = xb.to(self.device), yb.to(self.device)
@@ -160,8 +170,9 @@ class Trainer:
             [p for p in raw_model.parameters() if p.requires_grad], lr=tail_lr, weight_decay=1e-4
         )
         for ep in range(1, tail_epochs+1):
-            if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, DistributedSampler):
-                train_loader.sampler.set_epoch(20_000 + ep)
+            #if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, DistributedSampler):
+            #    train_loader.sampler.set_epoch(20_000 + ep)
+            self._set_loader_epoch(train_loader, warmup_epochs+1 + head_epochs+1 + ep)
             model.train(); seen=0; loss_sum=0.0
             for b,(xb,yb) in enumerate(train_loader, 1):
                 xb,yb = xb.to(self.device), yb.to(self.device)
@@ -189,8 +200,9 @@ class Trainer:
         metric_thr = thr0
 
         for ep in range(1, max_epochs+1):
-            if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, DistributedSampler):
-                train_loader.sampler.set_epoch(30_000 + ep)
+            #if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, DistributedSampler):
+            #    train_loader.sampler.set_epoch(30_000 + ep)
+            self._set_loader_epoch(train_loader, warmup_epochs+1 + head_epochs+1 + tail_epochs + 1 + ep)
             _ = apply_phase(raw_model, ep)
             core, aftl, w = make_loss_for_epoch(ep, self.device)
             opt, sched = make_opt_sched(raw_model, ep, base_lrs, weight_decay)
@@ -215,8 +227,9 @@ class Trainer:
                     f"| pos≈{tr_stats['pos_mean']:.3f} neg≈{tr_stats['neg_mean']:.3f} | {time.time()-t0:.1f}s")
 
             if ep % val_every == 0 or ep <= 3:
-                if hasattr(val_loader, "sampler") and isinstance(val_loader.sampler, DistributedSampler):
-                    val_loader.sampler.set_epoch(40_000 + ep)
+                #if hasattr(val_loader, "sampler") and isinstance(val_loader.sampler, DistributedSampler):
+                #    val_loader.sampler.set_epoch(40_000 + ep)
+                self._set_loader_epoch(val_loader, warmup_epochs+1 + head_epochs+1 + tail_epochs + 1 + max_epochs + 1 + ep)
                 pr_min, pr_max = (thr_pos_rate_early if ep < 26 else thr_pos_rate_late)
                 thr, (VP,VR,VF), aux = pick_thr_with_floor(
                     model, val_loader, max_batches=120, n_bins=256, beta=thr_beta,
