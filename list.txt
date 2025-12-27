@@ -1,0 +1,43 @@
+HIGH PRIORITY
+
+Idea 1 — Two-stage detection: geometry + score
+Keep NN output as continuous probability map p(y,x). Use a low pixel threshold t_low only to define connectivity: binary = (p >= t_low). Run connected-component labeling with pixel_gap to obtain candidate regions. For each candidate, compute a score from original probabilities: e.g. max(p) or mean(top-k p). An injected trail is detected if: (a) a candidate overlaps the truth mask, and (b) its score >= score_thr. t_low controls geometry/connectivity, score_thr controls detection confidence.
+
+MEDIUM PRIORITY
+
+Idea 2 — Candidate-level aggregation instead of pixel-level aggregation
+After candidate extraction, compute multiple features per candidate: max(p), top-k mean(p), percentile(p), pixel count / length, elongation (PCA eigenvalue ratio), bounding box aspect ratio, line-fit residuals or orientation stability. Train a simple second-stage classifier (logistic regression or small MLP) using candidate features only. Use the classifier output as the candidate score for thresholding.
+
+Idea 3 — Curriculum training biased to LSST-missed injections +
+Precompute a boolean label per injected object or crop: lsst_detected in {0,1}. Early training: sample from the full dataset normally. Late training: progressively bias sampling toward lsst_detected = 0 samples. Evaluation remains on an unbiased test set, with separate tracking of LSST-missed and NN-only detections.
+
+Idea 4 — Oversampling LSST-missed examples
+Use the same lsst_detected label. Increase sampling probability of LSST-missed samples throughout training. Keep a controlled fraction of LSST-detected samples to avoid over-specialization.
+
+Idea 5 — Loss biased toward LSST-missed examples
+Weight the loss contribution per sample using lsst_detected: higher weight for LSST-missed, lower for LSST-detected. Optionally apply this weighting only in later epochs.
+
+Idea 6 — Line coherence bias (loss or auxiliary head)
+Encourage elongated, coherent trail-like predictions.
+Loss-based option: penalize isolated activations and compact blobs, encourage connectivity and elongation.
+Auxiliary-head option: add a head predicting local trail orientation or direction, trained from injection geometry or skeletonized truth masks.
+
+Idea 7 — Two-phase loss schedule (BCE → Focal Tversky)
+Phase 1: train with BCE (optionally BCE+Dice) for stability.
+Phase 2: gradually blend in Focal Tversky: L = (1 - λ) * L_BCE + λ * L_FocalTversky, ramp λ from 0 to 1 over selected epochs. Optionally reduce learning rate at start of Phase 2.
+
+Idea 8 — Explicit calibration of probability scale (post-training)
+Perform calibration on a validation set. Prefer candidate-level calibration: extract candidates, label them as true/false. Fit Platt scaling or isotonic regression to map raw candidate scores
+to calibrated scores. Use calibrated scores for setting score_thr consistently.
+
+Idea 9 — Postprocessing with LSD or Hough transform
+Apply classical line detection (e.g. Hough Transform, LSD) to U-Net output to extract and validate linear streak candidates. May increase robustness and interpretability of detections.
+
+LOW PRIORITY
+
+Idea 10 — Soft / distance-weighted ground truth
+Replace binary trail masks with soft targets peaked on the trail core. Construct targets using distance-to-centerline or PSF-like convolution. Train the network to regress these soft targets. Requires regenerating training targets.
+
+Idea 11 — Multi-scale supervision
+Add a coarse, lower-resolution output head in addition to the fine mask. Apply loss to both fine and coarse outputs:
+L = L_fine + μ * L_coarse. Optionally fuse outputs at inference or keep coarse head for training only.
