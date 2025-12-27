@@ -22,6 +22,7 @@ conda activate asteroid_cnn
 # --- Project paths ---
 PROJ="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"
 EXPDIR="${PROJ}/experiments"
+DATA_DIR="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/DATA"
 cd "${EXPDIR}"
 
 # --- Use SLURM-provided GPU allocation (robust parsing) ---

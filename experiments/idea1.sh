@@ -20,6 +20,7 @@ conda activate asteroid_cnn
 
 PROJ="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"
 EXPDIR="${PROJ}/experiments"
+DATA_DIR="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/DATA"
 cd "${EXPDIR}"
 
 GPU_LIST_RAW="${SLURM_STEP_GPUS:-${SLURM_JOB_GPUS:-${CUDA_VISIBLE_DEVICES:-}}}"
