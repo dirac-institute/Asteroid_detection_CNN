@@ -587,20 +587,19 @@ def parse_args():
 
     ap.add_argument("--tile", type=int, default=128)
     ap.add_argument("--seed", type=int, default=1337)
+    ap.add_argument("--val-frac", type=float, default=0.1)
 
     ap.add_argument("--batch-size", type=int, default=64)
     ap.add_argument("--num-workers", type=int, default=4)
+    ap.add_argument("--pin-memory", action="store_true", default=False)
 
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--weight-decay", type=float, default=1e-4)
     ap.add_argument("--pos-weight", type=float, default=8.0)
     ap.add_argument("--grad-clip", type=float, default=1.0)
 
-    ap.add_argument("--warmup-epochs", type=int, default=1)
-    ap.add_argument("--warmup-batches", type=int, default=800)
     ap.add_argument("--max-epochs", type=int, default=30)
-    ap.add_argument("--val-every", type=int, default=3)
-    ap.add_argument("--long-batches", type=int, default=0)
+    ap.add_argument("--val-every", type=int, default=None, help="If None: evaluate only at end (epochs).")
 
     ap.add_argument("--margin-pix", type=float, default=8.0)
     ap.add_argument("--min-pos-pix", type=int, default=1)
@@ -611,14 +610,20 @@ def parse_args():
     ap.add_argument("--ramp-end-epoch", type=int, default=30)
     ap.add_argument("--sigmoid-k", type=float, default=8.0)
 
-    ap.add_argument("--save-best-to", type=str, default="ckpt_best_idea2.pt")
-    ap.add_argument("--save-last-to", type=str, default="ckpt_last_idea2.pt")
+    ap.add_argument("--save-dir", type=str, default="../checkpoints/Experiments")
+    ap.add_argument("--tag", type=str, default="idea2")
+    ap.add_argument("--verbose", type=int, default=2)
     return ap.parse_args()
 
 
 def main():
     args = parse_args()
-
+    # output
+    save_dir = Path(args.save_dir).resolve()
+    (save_dir / "Best").mkdir(parents=True, exist_ok=True)
+    (save_dir / "Last").mkdir(parents=True, exist_ok=True)
+    best_path = str(save_dir / "Best" / f"{args.tag}.pt")
+    last_path = str(save_dir / "Last" / f"{args.tag}.pt")
     cfg = Cfg(
         repo_root=args.repo_root,
         train_h5=args.train_h5,
@@ -628,15 +633,8 @@ def main():
         seed=args.seed,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
-        lr=args.lr,
-        weight_decay=args.weight_decay,
-        pos_weight=args.pos_weight,
-        grad_clip=args.grad_clip,
-        warmup_epochs=args.warmup_epochs,
-        warmup_batches=args.warmup_batches,
         max_epochs=args.max_epochs,
         val_every=args.val_every,
-        long_batches=args.long_batches,
         margin_pix=args.margin_pix,
         min_pos_pix=args.min_pos_pix,
         hard_pos_boost=args.hard_pos_boost,
@@ -644,8 +642,8 @@ def main():
         ramp_start_epoch=args.ramp_start_epoch,
         ramp_end_epoch=args.ramp_end_epoch,
         sigmoid_k=args.sigmoid_k,
-        save_best_to=args.save_best_to,
-        save_last_to=args.save_last_to,
+        save_best_to=best_path,
+        save_last_to=last_path,
     )
 
     add_repo_to_syspath(cfg.repo_root)
