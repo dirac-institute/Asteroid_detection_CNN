@@ -1,11 +1,8 @@
 import os, torch, torch.distributed as dist
 from datetime import timedelta
 
-
+"""
 def init_distributed(backend: str = "nccl", timeout_sec: int = 1800):
-    """
-    Safe to call multiple times. Returns (is_dist, rank, local_rank, world_size).
-    """
     # If already initialized, just return current ranks
     if dist.is_available() and dist.is_initialized():
         rank = dist.get_rank()
@@ -28,7 +25,25 @@ def init_distributed(backend: str = "nccl", timeout_sec: int = 1800):
         return True, rank, local_rank, world_size
 
     # Single-process fallback
+    return False, 0, 0, 1"""
+
+def init_distributed():
+    if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
+        rank = int(os.environ["RANK"])
+        world_size = int(os.environ["WORLD_SIZE"])
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+
+        # ---- add this block ----
+        if torch.cuda.is_available():
+            torch.cuda.set_device(local_rank)
+        # (optional but helpful for debugging)
+        # print(f"[rank {rank}] cuda avail={torch.cuda.is_available()} count={torch.cuda.device_count()} local_rank={local_rank}", flush=True)
+
+        dist.init_process_group(backend="nccl", init_method="env://")
+        return True, rank, local_rank, world_size
+
     return False, 0, 0, 1
+
 
 def is_main_process() -> bool:
     return (not dist.is_available()) or (not dist.is_initialized()) or dist.get_rank() == 0
