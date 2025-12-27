@@ -4,9 +4,9 @@
 #SBATCH --account kipac:kipac
 #SBATCH --partition ada
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:4
-#SBATCH --ntasks-per-node=4
-#SBATCH --cpus-per-task=8
+#SBATCH --gres=gpu:2
+#SBATCH --ntasks-per-node=2
+#SBATCH --cpus-per-task=4
 #SBATCH --mem=60G
 #SBATCH --time=5-00:00:00
 #SBATCH --output=/sdf/home/m/mrakovci/logs/%x.out
