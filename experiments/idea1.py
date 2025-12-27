@@ -242,7 +242,7 @@ def parse_args():
     p.add_argument("--num-workers", type=int, default=0)
     p.add_argument("--pin-memory", action="store_true", default=False)
 
-    p.add_argument("--epochs", type=int, default=20)
+    p.add_argument("--max-epochs", type=int, default=20)
     p.add_argument("--val-every", type=int, default=None)
 
     p.add_argument("--margin", type=float, default=30.0, help="BBox margin in pixels")
@@ -314,8 +314,8 @@ def main():
 
     # schedule boundaries: ramp only across long training
     cfg = Config()
-    cfg.train.max_epochs = args.epochs
-    cfg.train.val_every = args.val_every if args.val_every is not None else args.epochs
+    cfg.train.max_epochs = args.max_epochs
+    cfg.train.val_every = args.val_every if args.val_every is not None else args.max_epochs
 
     e_start = cfg.train.warmup_epochs + cfg.train.head_epochs + cfg.train.tail_epochs
     e_end   = e_start + cfg.train.max_epochs

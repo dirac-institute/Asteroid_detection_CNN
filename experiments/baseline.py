@@ -114,6 +114,8 @@ def parse_args():
     p.add_argument("--repo-root", type=str, default="../", help="Repo root that contains ADCNN/")
     p.add_argument("--train-h5", type=str, default="/home/karlo/train.h5")
     p.add_argument("--test-h5",  type=str, default="../DATA/test.h5")
+    p.add_argument("--train-csv", type=str, default="../DATA/train.csv")
+
     p.add_argument("--tile", type=int, default=128)
     p.add_argument("--seed", type=int, default=1337)
     p.add_argument("--val-frac", type=float, default=0.1)
@@ -122,7 +124,7 @@ def parse_args():
     p.add_argument("--num-workers", type=int, default=0)
     p.add_argument("--pin-memory", action="store_true", default=False)
 
-    p.add_argument("--epochs", type=int, default=10)
+    p.add_argument("--max-epochs", type=int, default=10)
     p.add_argument("--val-every", type=int, default=None, help="If None: evaluate only at end (epochs).")
 
     p.add_argument("--save-dir", type=str, default="../checkpoints/Experiments")
@@ -158,8 +160,8 @@ def main():
 
     # Config
     cfg = Config()
-    cfg.train.max_epochs = args.epochs
-    cfg.train.val_every = args.val_every if args.val_every is not None else args.epochs
+    cfg.train.max_epochs = args.max_epochs
+    cfg.train.val_every = args.val_every if args.val_every is not None else args.max_epochs
 
     # Output
     save_dir = Path(args.save_dir).resolve()
