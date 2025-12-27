@@ -25,26 +25,9 @@ DATA_DIR="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/DATA"
 cd "$PROJECT_DIR"
 
 # ---[ GPU healthcheck + mask ]---
-JSON="$(python utils/gpu_healthcheck.py || true)"
-HEALTHY="$(python -c 'import sys,json; j=json.loads(sys.stdin.read()); print(",".join(map(str, j.get("healthy", []))))' <<< "$JSON")"
-
-if [[ -z "${HEALTHY}" ]]; then
-  echo "[launcher] No healthy GPUs detected."
-  echo "[launcher] Healthcheck JSON: $JSON"
-  exit 1
-fi
-
-IFS=',' read -r -a _arr <<< "$HEALTHY"
-NGPU="${#_arr[@]}"
-export CUDA_VISIBLE_DEVICES="${HEALTHY}"
-
-echo "[launcher] Healthy GPUs: ${CUDA_VISIBLE_DEVICES} (count=${NGPU})"
-
-echo "=== Environment info ==="
-echo "Hostname: $(hostname)"
-echo "CUDA devices: $CUDA_VISIBLE_DEVICES"
-which python3
-python3 -c "import torch; print('Torch:', torch.__version__, '| GPUs:', torch.cuda.device_count())"
+export CUDA_VISIBLE_DEVICES="${SLURM_JOB_GPUS}"
+NGPU=$(python -c "import os; print(len(os.environ['CUDA_VISIBLE_DEVICES'].split(',')))")
+echo "[launcher] Using SLURM_JOB_GPUS=${SLURM_JOB_GPUS}  (count=${NGPU})"
 
 # ---[ NCCL/DDP env ]---
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
