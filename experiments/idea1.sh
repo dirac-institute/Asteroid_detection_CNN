@@ -9,7 +9,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=20G
 #SBATCH --time=5-00:00:00
-#SBATCH --output=/sdf/home/m/mrakovci/logs/%x_%j.out
+#SBATCH --output=/sdf/home/m/mrakovci/logs/%x.out
 
 set -euo pipefail
 
