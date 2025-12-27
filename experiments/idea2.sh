@@ -12,7 +12,6 @@
 #SBATCH --output=/sdf/home/m/mrakovci/logs/%x.out
 
 set -euo pipefail
-
 mkdir -p /sdf/home/m/mrakovci/logs
 
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
@@ -23,29 +22,38 @@ EXPDIR="${PROJ}/experiments"
 DATA_DIR="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/DATA"
 cd "${EXPDIR}"
 
-GPU_LIST_RAW="${SLURM_STEP_GPUS:-${SLURM_JOB_GPUS:-${CUDA_VISIBLE_DEVICES:-}}}"
-GPU_LIST="$(echo "${GPU_LIST_RAW}" | tr ',' '\n' | sed -E 's/[^0-9]//g' | awk 'NF' | paste -sd, -)"
+echo "[launcher] Host: $(hostname)"
+echo "[launcher] SLURM_JOB_GPUS=${SLURM_JOB_GPUS:-<unset>}"
+echo "[launcher] SLURM_STEP_GPUS=${SLURM_STEP_GPUS:-<unset>}"
+echo "[launcher] CUDA_VISIBLE_DEVICES(before)=${CUDA_VISIBLE_DEVICES:-<unset>}"
 
-if [[ -z "${GPU_LIST}" ]]; then
-  echo "[launcher] ERROR: No GPUs visible from SLURM vars."
-  echo "SLURM_STEP_GPUS=${SLURM_STEP_GPUS:-<unset>}"
-  echo "SLURM_JOB_GPUS=${SLURM_JOB_GPUS:-<unset>}"
-  echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>}"
-  exit 1
+# IMPORTANT:
+# On SDF, SLURM typically sets CUDA_VISIBLE_DEVICES correctly for the job (local 0..N-1).
+# If it is not set, force a sane default for a 2-GPU job.
+if [[ -z "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+  export CUDA_VISIBLE_DEVICES="0,1"
 fi
 
-export CUDA_VISIBLE_DEVICES="${GPU_LIST}"
-NGPU="$(echo "${CUDA_VISIBLE_DEVICES}" | awk -F',' '{print NF}')"
+echo "[launcher] CUDA_VISIBLE_DEVICES(after)=${CUDA_VISIBLE_DEVICES}"
 
-echo "[launcher] Using GPUs: CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES} (count=${NGPU})"
-echo "[launcher] Host: $(hostname)"
-python -c "import torch; print('torch', torch.__version__, 'cuda_avail', torch.cuda.is_available(), 'n', torch.cuda.device_count())"
+# Sanity
+python - <<'PY'
+import torch, os
+print("torch", torch.__version__)
+print("CUDA_VISIBLE_DEVICES", os.environ.get("CUDA_VISIBLE_DEVICES"))
+print("cuda_avail", torch.cuda.is_available(), "n", torch.cuda.device_count())
+if torch.cuda.is_available():
+    for i in range(torch.cuda.device_count()):
+        print(i, torch.cuda.get_device_name(i))
+PY
 
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 export NCCL_DEBUG=warn
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 
-torchrun --standalone --nnodes=1 --nproc_per_node="${NGPU}" idea2.py \
+# Run with 2 processes (one per GPU visible to the job)
+torchrun --standalone --nnodes=1 --nproc_per_node=2 \
+  idea2.py \
   --repo-root "/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN" \
   --train-h5 "${DATA_DIR}/train.h5" \
   --train-csv "${DATA_DIR}/train.csv" \
