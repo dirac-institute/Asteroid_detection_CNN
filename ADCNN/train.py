@@ -60,11 +60,12 @@ class Trainer:
                          # tail
                          tail_epochs=2, tail_batches=2500, tail_lr=1.5e-4, tail_pos_weight=2.0,
                          # long
-                         max_epochs=60, val_every=3, base_lrs=(3e-4,2e-4,1e-4), weight_decay=1e-4,
+                         max_epochs=60, long_batches=0, val_every=3, base_lrs=(3e-4,2e-4,1e-4), weight_decay=1e-4,
                          # thr
                          thr_beta=1.0, thr_pos_rate_early=(0.03,0.10), thr_pos_rate_late=(0.08,0.12),
                          save_best_to="ckpt_best.pt", save_last_to="ckpt_last.pt",
-                         quick_eval_train_batches=6, quick_eval_val_batches=12):
+                         quick_eval_train_batches=6, quick_eval_val_batches=12,
+                         verbose = 3):
 
         is_dist, rank, local_rank, world_size = init_distributed()
         self.amp = True
@@ -96,6 +97,8 @@ class Trainer:
             self._set_loader_epoch(train_loader, ep)
             model.train(); seen=0; loss_sum=0.0
             for b,(xb,yb) in enumerate(train_loader, 1):
+                if verbose>=3 and is_main_process():
+                    print (f"\rWarmup EP{ep} BATCH {b}", end='')
                 xb,yb = xb.to(self.device), yb.to(self.device)
                 with amp.autocast('cuda', enabled=self.amp):
                     logits = model(xb)
@@ -109,7 +112,7 @@ class Trainer:
                 loss_sum += float(loss.item())*xb.size(0); seen += xb.size(0)
                 if b>=warmup_batches: break
             stats = _pix_eval(model, train_loader, thr=0.2, max_batches=quick_eval_train_batches)
-            if is_main_process():
+            if verbose >=2 and is_main_process():
                 print(f"[WARMUP] ep{ep} loss {loss_sum/seen:.4f} | F1 {stats['F']:.3f} P {stats['P']:.3f} R {stats['R']:.3f}")
 
         thr0, *_ = pick_thr_with_floor(
@@ -120,7 +123,7 @@ class Trainer:
         )
         val_stats = _pix_eval(model, val_loader, thr=float(thr0), max_batches=quick_eval_val_batches)
         auc = roc_auc_ddp(model, val_loader, n_bins=256, max_batches=quick_eval_val_batches)
-        if is_main_process():
+        if is_main_process() and verbose >=2:
             print(
                 f"[WARMUP VALIDATION] AUC {auc:.3f} P {val_stats['P']:.3f} R {val_stats['R']:.3f} F {val_stats['F']:.3f} | thr={float(thr0):.3f}")
 
@@ -140,6 +143,8 @@ class Trainer:
             self._set_loader_epoch(train_loader, warmup_epochs+1 + ep)
             model.train(); seen=0; loss_sum=0.0
             for b,(xb,yb) in enumerate(train_loader, 1):
+                if verbose>=3 and is_main_process():
+                    print (f"\rHead-only training batch {b}", end='')
                 xb,yb = xb.to(self.device), yb.to(self.device)
                 with amp.autocast('cuda', enabled=self.amp):
                     logits = model(xb)
@@ -154,7 +159,7 @@ class Trainer:
                 loss_sum += float(loss.item())*xb.size(0); seen += xb.size(0)
                 if b>=head_batches: break
             stats = _pix_eval(model, train_loader, thr=thr0, max_batches=quick_eval_train_batches)
-            if is_main_process():
+            if is_main_process() and verbose >=2:
                 print(f"[HEAD] ep{ep} loss {loss_sum/seen:.4f} | F1 {stats['F']:.3f} P {stats['P']:.3f} R {stats['R']:.3f}")
 
         # -------- Tail probe (gentle) --------
@@ -175,6 +180,8 @@ class Trainer:
             self._set_loader_epoch(train_loader, warmup_epochs+1 + head_epochs+1 + ep)
             model.train(); seen=0; loss_sum=0.0
             for b,(xb,yb) in enumerate(train_loader, 1):
+                if verbose>=3 and is_main_process():
+                    print(f"\r[TAIL] ep{ep} batch {b}", end='', flush=True)
                 xb,yb = xb.to(self.device), yb.to(self.device)
                 with amp.autocast('cuda', enabled=self.amp):
                     logits = model(xb)
@@ -190,7 +197,7 @@ class Trainer:
         stats = _pix_eval(model, train_loader, thr=thr0, max_batches=quick_eval_train_batches)
         val_stats = _pix_eval(model, val_loader, thr=float(thr0), max_batches=quick_eval_val_batches)
         auc = roc_auc_ddp(model, val_loader, n_bins=256, max_batches=quick_eval_val_batches)
-        if is_main_process():
+        if is_main_process() and verbose >=2:
             print(
                 f"[TAIL PROBE VALIDATION] AUC {auc:.3f} P {val_stats['P']:.3f} R {val_stats['R']:.3f} F {val_stats['F']:.3f} | thr={float(thr0):.3f}",
                 f"[tail-probe] loss≈{loss_sum/seen:.4f}", "[quick_prob_stats] train @ thr0:", {k:round(v,3) for k,v in stats.items()})
@@ -208,6 +215,8 @@ class Trainer:
             opt, sched = make_opt_sched(raw_model, ep, base_lrs, weight_decay)
             model.train(); seen=0; loss_sum=0.0; t0=time.time()
             for i,(xb,yb) in enumerate(train_loader, 1):
+                if is_main_process() and verbose>=3:
+                    print (f"\r Epoch {ep} / {max_epochs}, Batch {i}", end='')
                 xb,yb = xb.to(self.device), yb.to(self.device)
                 with amp.autocast('cuda', enabled=self.amp):
                     logits = model(xb)
@@ -220,13 +229,15 @@ class Trainer:
                 scaler.step(opt); scaler.update()
                 sched.step(i)
                 loss_sum += float(loss.item())*xb.size(0); seen += xb.size(0)
+                if (long_batches>0) and (i >= long_batches):
+                    break
             train_loss = loss_sum/seen
             tr_stats = _pix_eval(model, train_loader, thr=metric_thr, max_batches=quick_eval_train_batches)
-            if is_main_process():
+            if is_main_process() and verbose >=2:
                 print(f"[EP{ep:02d}] loss {train_loss:.4f} | train P {tr_stats['P']:.3f} R {tr_stats['R']:.3f} F {tr_stats['F']:.3f} "
                     f"| pos≈{tr_stats['pos_mean']:.3f} neg≈{tr_stats['neg_mean']:.3f} | {time.time()-t0:.1f}s")
 
-            if ep % val_every == 0 or ep <= 3:
+            if ep % val_every == 0 or ep <= 1:
                 #if hasattr(val_loader, "sampler") and isinstance(val_loader.sampler, DistributedSampler):
                 #    val_loader.sampler.set_epoch(40_000 + ep)
                 self._set_loader_epoch(val_loader, warmup_epochs+1 + head_epochs+1 + tail_epochs + 1 + max_epochs + 1 + ep)
@@ -238,7 +249,7 @@ class Trainer:
                 metric_thr = float(thr)
                 val_stats = _pix_eval(model, val_loader, thr=metric_thr, max_batches=quick_eval_val_batches)
                 auc = roc_auc_ddp(model, val_loader, n_bins=256, max_batches=quick_eval_val_batches)
-                if is_main_process():
+                if is_main_process() and verbose >=1:
                     print(f"[VAL ep{ep}] AUC {auc:.3f} P {val_stats['P']:.3f} R {val_stats['R']:.3f} F {val_stats['F']:.3f} | thr={metric_thr:.3f} | pos_rate≈{aux['pos_rate']:.3f}")
                 if auc > best["auc"]:
                     best = {"F": val_stats['F'], "state": copy.deepcopy(raw_model.state_dict()),
@@ -254,7 +265,7 @@ class Trainer:
             raw_model.load_state_dict(best["state"], strict=True)
         summary = {"best_F": float(best["F"]), "best_P": float(best.get("P", 0.0)), "best_R": float(best.get("R", 0.0)),
                    "best_ep": int(best["ep"]), "final_thr": float(best["thr"])}
-        if is_main_process():
+        if is_main_process() and verbose >=1:
             print("=== DONE ===")
             print("Best summary:", summary)
         trained_model = raw_model
