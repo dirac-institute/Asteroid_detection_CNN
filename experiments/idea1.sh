@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=ADCNN_IDEA1
+#SBATCH --job-name=AC_I1
 #SBATCH --mail-type=END,FAIL,REQUEUE
 #SBATCH --account kipac:kipac
 #SBATCH --partition ada
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --ntasks-per-node=4
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=60G
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=20G
 #SBATCH --time=5-00:00:00
 #SBATCH --output=/sdf/home/m/mrakovci/logs/%x_%j.out
 
