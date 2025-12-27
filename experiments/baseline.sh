@@ -49,4 +49,14 @@ export NCCL_DEBUG=warn
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 
 # --- Run ---
-torchrun --standalone --nnodes=1 --nproc_per_node="${NGPU}" baseline.py
+torchrun --standalone --nnodes=1 --nproc_per_node="${NGPU}"   baseline.py \
+  --repo-root "/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN" \
+  --train-h5 "${DATA_DIR}/train.h5" \
+  --train-csv "${DATA_DIR}/train.csv" \
+  --test-h5  "${DATA_DIR}/test.h5" \
+  --tile 128 \
+  --batch-size 256 \
+  --num-workers "${SLURM_CPUS_PER_TASK:-8}" \
+  --seed 1337 \
+  --max-epochs 50 \
+  --val-every 3
