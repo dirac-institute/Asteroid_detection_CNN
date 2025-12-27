@@ -59,9 +59,9 @@ torchrun \
   --nproc_per_node="${NGPU}" \
   idea2.py \
   --repo-root "/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN" \
-  --train-h5 "${DATA_DIR}/train_chunked.h5" \
+  --train-h5 "${DATA_DIR}/train.h5" \
   --train-csv "${DATA_DIR}/train.csv" \
-  --test-h5  "${DATA_DIR}/test_chunked.h5" \
+  --test-h5  "${DATA_DIR}/test.h5" \
   --tile 128 \
   --batch-size 256 \
   --num-workers "${SLURM_CPUS_PER_TASK:-8}" \
