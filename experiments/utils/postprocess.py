@@ -1,5 +1,8 @@
 
 
+def two_threshold_prediction (predictions, t_low):
+    
+
 def two_stage_objectwise_confusion (catalog, predictions, t_low, threshold, pixel_gap=10, psf_width=40, score_method="max"):
     true_positive = 0
     false_negative = 0
