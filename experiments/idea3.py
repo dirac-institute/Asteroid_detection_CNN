@@ -730,7 +730,7 @@ def main():
         # keep baseline-style training budget (from Config defaults)
         seed=int(args.seed),
         init_head_prior=cfg.train.init_head_prior,
-        warmup_epochs=1,#cfg.train.warmup_epochs,
+        warmup_epochs=cfg.train.warmup_epochs,
         warmup_batches=cfg.train.warmup_batches,
         warmup_lr=cfg.train.warmup_lr,
         warmup_pos_weight=cfg.train.warmup_pos_weight,
