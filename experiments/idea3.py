@@ -322,7 +322,8 @@ class Trainer:
         is_dist, rank, local_rank, world_size = self.init_distributed()
         raw_model = model
         if is_dist:
-            model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=False)
+            model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True,
+                        gradient_as_bucket_view=True)
 
         # ---------- Warmup ----------
         raw_model.train()
