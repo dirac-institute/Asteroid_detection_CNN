@@ -404,8 +404,9 @@ class Trainer:
                 if b >= head_batches:
                     break
 
+            stats = pix_eval(model, resize_masks_to, train_loader, thr=float(thr0),
+                             max_batches=quick_eval_train_batches)
             if self.is_main_process() and verbose >= 2:
-                stats = pix_eval(model, resize_masks_to, train_loader, thr=float(thr0), max_batches=quick_eval_train_batches)
                 print(f"[HEAD] ep{ep} loss {loss_sum / max(seen, 1):.4f} | F1 {stats['F']:.3f}")
 
         # ---------- Tail probe ----------
@@ -456,8 +457,8 @@ class Trainer:
             )
             metric_thr = float(metric_thr)
 
+            val_stats = pix_eval(model, resize_masks_to, val_loader, thr=metric_thr, max_batches=quick_eval_val_batches)
             if self.is_main_process() and verbose >= 2:
-                val_stats = pix_eval(model, resize_masks_to, val_loader, thr=metric_thr, max_batches=quick_eval_val_batches)
                 print(f"[TAIL] ep{ep} loss {loss_sum / max(seen,1):.4f} | val F1 {val_stats['F']:.3f} | thr={metric_thr:.3f} | pos_rate≈{aux['pos_rate']:.3f}")
 
         # ---------- Long training (Idea3 loss schedule) ----------
