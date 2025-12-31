@@ -405,7 +405,7 @@ class Trainer:
                     break
 
             if self.is_main_process() and verbose >= 2:
-                stats = pix_eval(model, import_project()[12], train_loader, thr=float(thr0), max_batches=quick_eval_train_batches)
+                stats = pix_eval(model, resize_masks_to, train_loader, thr=float(thr0), max_batches=quick_eval_train_batches)
                 print(f"[HEAD] ep{ep} loss {loss_sum / max(seen, 1):.4f} | F1 {stats['F']:.3f}")
 
         # ---------- Tail probe ----------
@@ -730,7 +730,7 @@ def main():
         # keep baseline-style training budget (from Config defaults)
         seed=int(args.seed),
         init_head_prior=cfg.train.init_head_prior,
-        warmup_epochs=cfg.train.warmup_epochs,
+        warmup_epochs=1,#cfg.train.warmup_epochs,
         warmup_batches=cfg.train.warmup_batches,
         warmup_lr=cfg.train.warmup_lr,
         warmup_pos_weight=cfg.train.warmup_pos_weight,
