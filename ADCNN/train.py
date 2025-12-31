@@ -111,16 +111,10 @@ class Trainer:
                 scaler.step(opt); scaler.update()
                 loss_sum += float(loss.item())*xb.size(0); seen += xb.size(0)
                 if b>=warmup_batches: break
-            stats = _pix_eval(model, train_loader, thr=0.2, max_batches=quick_eval_train_batches)
+            stats = _pix_eval(model, train_loader, thr=0.5, max_batches=quick_eval_train_batches)
             if verbose >=2 and is_main_process():
                 print(f"[WARMUP] ep{ep} loss {loss_sum/seen:.4f} | F1 {stats['F']:.3f} P {stats['P']:.3f} R {stats['R']:.3f}")
-
-        thr0, *_ = pick_thr_with_floor(
-            model, val_loader, max_batches=200, n_bins=256,
-            beta=2.0,
-            min_pos_rate=thr_pos_rate_early[0],
-            max_pos_rate=thr_pos_rate_early[1],
-        )
+        thr0 = 0.5
         val_stats = _pix_eval(model, val_loader, thr=float(thr0), max_batches=quick_eval_val_batches)
         auc = roc_auc_ddp(model, val_loader, n_bins=256, max_batches=quick_eval_val_batches)
         if is_main_process() and verbose >=2:
@@ -200,7 +194,7 @@ class Trainer:
         if is_main_process() and verbose >=2:
             print(
                 f"[TAIL PROBE VALIDATION] AUC {auc:.3f} P {val_stats['P']:.3f} R {val_stats['R']:.3f} F {val_stats['F']:.3f} | thr={float(thr0):.3f}",
-                f"[tail-probe] loss≈{loss_sum/seen:.4f}", "[quick_prob_stats] train @ thr0:", {k:round(v,3) for k,v in stats.items()})
+                f"[tail-probe] loss≈{loss_sum/seen:.4f}", "[quick_prob_stats] train @ thr:", {k:round(v,3) for k,v in stats.items()})
 
         # -------- Long training --------
         best = {"F": -1.0, "state": None, "thr": thr0, "ep": 0.0, "auc": 0.0, "loss": 0.0}
@@ -242,15 +236,10 @@ class Trainer:
                 #    val_loader.sampler.set_epoch(40_000 + ep)
                 self._set_loader_epoch(val_loader, warmup_epochs+1 + head_epochs+1 + tail_epochs + 1 + max_epochs + 1 + ep)
                 pr_min, pr_max = (thr_pos_rate_early if ep < 26 else thr_pos_rate_late)
-                thr, (VP,VR,VF), aux = pick_thr_with_floor(
-                    model, val_loader, max_batches=120, n_bins=256, beta=thr_beta,
-                    min_pos_rate=pr_min, max_pos_rate=pr_max
-                )
-                metric_thr = float(thr)
                 val_stats = _pix_eval(model, val_loader, thr=metric_thr, max_batches=quick_eval_val_batches)
                 auc = roc_auc_ddp(model, val_loader, n_bins=256, max_batches=quick_eval_val_batches)
                 if is_main_process() and verbose >=1:
-                    print(f"[VAL ep{ep}] AUC {auc:.3f} P {val_stats['P']:.3f} R {val_stats['R']:.3f} F {val_stats['F']:.3f} | thr={metric_thr:.3f} | pos_rate≈{aux['pos_rate']:.3f}")
+                    print(f"[VAL ep{ep}] AUC {auc:.3f} P {val_stats['P']:.3f} R {val_stats['R']:.3f} F {val_stats['F']:.3f} | thr={metric_thr:.3f}")
                 if auc > best["auc"]:
                     best = {"F": val_stats['F'], "state": copy.deepcopy(raw_model.state_dict()),
                             "thr": metric_thr, "ep": ep, "P": val_stats["P"], "R": val_stats["R"], "auc": auc, "loss": train_loss}
