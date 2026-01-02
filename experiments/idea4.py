@@ -33,6 +33,19 @@ from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
 
 
+def init_distributed_once(init_fn):
+    def _wrapped():
+        if dist.is_available() and dist.is_initialized():
+            import os
+            rank = dist.get_rank()
+            world_size = dist.get_world_size()
+            local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+            return True, rank, local_rank, world_size
+        return init_fn()
+    return _wrapped
+
+
+
 # -------------------------
 # Path setup (repo imports)
 # -------------------------
@@ -622,6 +635,11 @@ def main():
         make_opt_sched,
         maybe_init_head_bias_to_prior,
     ) = import_project()
+
+    init_distributed = init_distributed_once(init_distributed)
+
+    # init exactly once here so samplers can be created
+    is_dist, rank, local_rank, world_size = init_distributed()
 
     cfg = Config()
     set_seed(int(args.seed))
