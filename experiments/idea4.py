@@ -147,15 +147,14 @@ def neighbor_support_penalty(p: torch.Tensor, margin: float = 0.20, eps: float =
 
 
 def sobel_perimeter(p: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
-    """
-    Soft perimeter proxy via Sobel gradient magnitude.
-    """
-    gx = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], device=p.device, dtype=p.dtype).view(1, 1, 3, 3)
-    gy = torch.tensor([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], device=p.device, dtype=p.dtype).view(1, 1, 3, 3)
+    p = p.float()
+    gx = torch.tensor([[-1,0,1],[-2,0,2],[-1,0,1]], device=p.device, dtype=torch.float32).view(1,1,3,3)
+    gy = torch.tensor([[-1,-2,-1],[0,0,0],[1,2,1]], device=p.device, dtype=torch.float32).view(1,1,3,3)
     dx = F.conv2d(p, gx, padding=1)
     dy = F.conv2d(p, gy, padding=1)
-    g = torch.sqrt(dx * dx + dy * dy + eps)
-    return g.mean()
+    g2 = dx*dx + dy*dy
+    return torch.sqrt(g2 + eps).mean()
+
 
 
 def elongation_ratio_penalty(p: torch.Tensor, eps: float = 1e-6, min_mass: float = 50.0) -> torch.Tensor:
@@ -188,7 +187,9 @@ def elongation_ratio_penalty(p: torch.Tensor, eps: float = 1e-6, min_mass: float
 
     # eigenvalues of 2x2 covariance:
     tr = cxx + cyy
-    det = cxx * cyy - cxy * cxy
+    cxx = torch.clamp(cxx, min=0.0)
+    cyy = torch.clamp(cyy, min=0.0)
+    det = torch.clamp(cxx * cyy - cxy * cxy, min=0.0)
     disc = torch.sqrt(torch.clamp(tr * tr - 4.0 * det, min=0.0) + eps)
     lam1 = 0.5 * (tr + disc)  # major
     lam2 = 0.5 * (tr - disc)  # minor
@@ -199,13 +200,9 @@ def elongation_ratio_penalty(p: torch.Tensor, eps: float = 1e-6, min_mass: float
 
 
 def thinness_penalty(p: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
-    """
-    Penalize compactness using area/perimeter.
-    - compact blob: high area, relatively low perimeter -> larger area/perimeter (bad)
-    - thin trail: lower area, relatively higher perimeter -> smaller area/perimeter (good)
-    """
-    area = p.mean()
-    per = sobel_perimeter(p, eps=eps)
+    area = p.sum()
+    per = sobel_perimeter(p, eps=eps) * p.numel()  # convert mean->sum proxy
+    per = torch.clamp(per, min=1.0)
     return area / (per + eps)
 
 
@@ -494,30 +491,31 @@ class Trainer:
                 with amp.autocast("cuda", enabled=self.amp):
                     logits = model(xb)
                     yb_r = resize_masks_to(logits, yb)
+                    loss_bce = F.binary_cross_entropy_with_logits(logits, yb_r)
+                    #loss_bce = bce_with_logits_posw(logits, yb_r, pos_weight=float(head_pos_weight))
 
-                    # base pixel loss
-                    loss_bce = bce_with_logits_posw(logits, yb_r, pos_weight=float(head_pos_weight))
+                # ---- shape reg in fp32 (no autocast) ----
+                p = torch.sigmoid(logits.float())
+                p = p.clamp(1e-4, 1.0 - 1e-4)  # avoid exact 0/1
 
-                    # shape regularizer on p
-                    p = torch.sigmoid(logits)
+                if reg_only_if_pos:
+                    pos_counts = (yb_r > 0.5).sum(dim=(1, 2, 3))
+                    keep = (pos_counts >= int(min_pos_pix)).float().view(-1, 1, 1, 1)
+                    p_reg = p * keep
+                else:
+                    p_reg = p
 
-                    # optionally apply reg only on tiles with positives
-                    if reg_only_if_pos:
-                        pos_counts = (yb_r > 0.5).sum(dim=(1, 2, 3))  # (B,)
-                        keep = (pos_counts >= int(min_pos_pix)).float().view(-1, 1, 1, 1)
-                        p_reg = p * keep
-                    else:
-                        p_reg = p
+                reg, aux = trail_shape_regularizer(
+                    p_reg,
+                    w_iso=float(w_iso),
+                    w_ecc=float(w_ecc),
+                    w_thin=float(w_thin),
+                    iso_margin=float(iso_margin),
+                    ecc_min_mass=float(ecc_min_mass),
+                )
 
-                    reg, aux = trail_shape_regularizer(
-                        p_reg,
-                        w_iso=float(w_iso),
-                        w_ecc=float(w_ecc),
-                        w_thin=float(w_thin),
-                        iso_margin=float(iso_margin),
-                        ecc_min_mass=float(ecc_min_mass),
-                    )
-                    loss = loss_bce + float(shape_weight) * reg
+                shape_w = float(shape_weight) * min(1.0, ep / 5.0)  # 5-epoch ramp
+                loss = loss_bce + shape_w * reg.to(loss_bce.dtype)
 
                 opt.zero_grad(set_to_none=True)
                 scaler.scale(loss).backward()
@@ -693,6 +691,7 @@ def main():
     model = UNetResSEASPP(in_ch=1, out_ch=1).to(device)
 
     trainer = Trainer(init_distributed=init_distributed, is_main_process=is_main_process, device=device, use_amp=True)
+    # cfg.train.warmup_epochs = cfg.train.head_epochs = cfg.train.tail_epochs = 0  # skip WARMUP/HEAD/TAIL phases
 
     try:
         model, thr, summary = trainer.train_full_probe(
