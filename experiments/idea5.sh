@@ -53,7 +53,7 @@ export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 
 # Run with 2 processes (one per GPU visible to the job)
 torchrun --standalone --nnodes=1 --nproc_per_node=2 \
-  idea4.py \
+  idea5.py \
   --repo-root "/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN" \
   --train-h5 "${DATA_DIR}/train.h5" \
   --train-csv "${DATA_DIR}/train.csv" \

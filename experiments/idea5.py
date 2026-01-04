@@ -491,7 +491,7 @@ class Trainer:
                 with amp.autocast("cuda", enabled=self.amp):
                     logits = model(xb)
                     yb_r = resize_masks_to(logits, yb)
-                    loss_bce = F.binary_cross_entropy_with_logits(logits, yb_r)
+                    loss_bce = bce_with_logits_posw(logits, yb_r, pos_weight=float(tail_pos_weight))
                     #loss_bce = bce_with_logits_posw(logits, yb_r, pos_weight=float(head_pos_weight))
 
                 # ---- shape reg in fp32 (no autocast) ----
