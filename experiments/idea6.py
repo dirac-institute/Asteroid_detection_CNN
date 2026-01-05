@@ -41,6 +41,20 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
 
+def get_dist_info() -> Tuple[bool, int, int, int]:
+    """
+    Safe distributed info getter.
+    Returns: (is_dist, rank, local_rank, world_size)
+    Does NOT initialize process group.
+    """
+    if dist.is_available() and dist.is_initialized():
+        import os
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+        local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+        return True, rank, local_rank, world_size
+    return False, 0, 0, 1
+
 
 # -------------------------
 # DDP init safety wrapper
@@ -408,10 +422,8 @@ class TrainerIdea6:
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.amp = bool(amp_enabled)
 
-    def init_distributed(self):
-        # imported from utils.dist_utils in repo
-        from utils.dist_utils import init_distributed
-        return init_distributed()
+    def get_dist(self):
+        return get_dist_info()
 
     def is_main_process(self):
         from utils.dist_utils import is_main_process
@@ -459,7 +471,11 @@ class TrainerIdea6:
         torch.cuda.manual_seed_all(int(seed))
         scaler = amp.GradScaler(enabled=self.amp)
 
-        is_dist, rank, local_rank, world_size = self.init_distributed()
+        is_dist, rank, local_rank, world_size = self.get_dist()
+
+        if is_dist and torch.cuda.is_available():
+            torch.cuda.set_device(local_rank)
+            self.device = torch.device("cuda", local_rank)
 
         raw_model = model.to(self.device)
         if is_dist:
@@ -470,6 +486,7 @@ class TrainerIdea6:
                 find_unused_parameters=True,
                 gradient_as_bucket_view=True,
             )
+
         ddp_model = model
         raw_model = ddp_model.module if isinstance(ddp_model, DDP) else ddp_model
         seg_model = SegOnlyWrapper(ddp_model)
