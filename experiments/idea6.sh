@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=AC_I5
+#SBATCH --job-name=AC_I6
 #SBATCH --mail-type=END,FAIL,REQUEUE
 #SBATCH --account kipac:kipac
 #SBATCH --partition ada
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:2
-#SBATCH --ntasks-per-node=2
+#SBATCH --gres=gpu:4
+#SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=60G
 #SBATCH --time=5-00:00:00
@@ -51,9 +51,9 @@ export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 export NCCL_DEBUG=warn
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 
-# Run with 2 processes (one per GPU visible to the job)
-torchrun --standalone --nnodes=1 --nproc_per_node=2 \
-  idea5.py \
+# Run with 4 processes (one per GPU visible to the job)
+torchrun --standalone --nnodes=1 --nproc_per_node=4 \
+  idea6.py \
   --repo-root "/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN" \
   --train-h5 "${DATA_DIR}/train.h5" \
   --train-csv "${DATA_DIR}/train.csv" \
