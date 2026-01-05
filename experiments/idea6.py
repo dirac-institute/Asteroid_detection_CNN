@@ -545,8 +545,8 @@ class TrainerIdea6:
                 if b >= warmup_batches:
                     break
 
+            stats = pix_eval(seg_model, resize_masks_to, train_loader, thr=0.2, max_batches=quick_eval_train_batches)
             if self.is_main_process() and verbose >= 2:
-                stats = pix_eval(seg_model, resize_masks_to, train_loader, thr=0.2, max_batches=quick_eval_train_batches)
                 print(f"[WARMUP] ep{ep} loss {loss_sum / max(seen,1):.4f} | F1 {stats['F']:.3f}")
 
         # Threshold pick
@@ -555,9 +555,9 @@ class TrainerIdea6:
             min_pos_rate=thr_pos_rate_early[0], max_pos_rate=thr_pos_rate_early[1]
         )
         thr0 = float(thr0)
+        val_stats = pix_eval(seg_model, resize_masks_to, val_loader, thr=thr0, max_batches=quick_eval_val_batches)
+        auc = roc_auc_ddp(seg_model, val_loader, n_bins=256, max_batches=quick_eval_val_batches)
         if self.is_main_process() and verbose >= 2:
-            val_stats = pix_eval(seg_model, resize_masks_to, val_loader, thr=thr0, max_batches=quick_eval_val_batches)
-            auc = roc_auc_ddp(seg_model, val_loader, n_bins=256, max_batches=quick_eval_val_batches)
             print(f"[WARMUP VALIDATION] AUC {auc:.3f} | F1 {val_stats['F']:.3f} | thr={thr0:.3f}")
 
         # ---------- Head ----------
@@ -606,8 +606,8 @@ class TrainerIdea6:
                 if b >= head_batches:
                     break
 
+            stats = pix_eval(seg_model, resize_masks_to, train_loader, thr=thr0, max_batches=quick_eval_train_batches)
             if self.is_main_process() and verbose >= 2:
-                stats = pix_eval(seg_model, resize_masks_to, train_loader, thr=thr0, max_batches=quick_eval_train_batches)
                 print(f"[HEAD] ep{ep} loss {loss_sum / max(seen,1):.4f} | F1 {stats['F']:.3f}")
 
         # ---------- Tail probe ----------
@@ -666,8 +666,8 @@ class TrainerIdea6:
             )
             thr0 = float(thr0)
 
+            val_stats = pix_eval(seg_model, resize_masks_to, val_loader, thr=thr0, max_batches=quick_eval_val_batches)
             if self.is_main_process() and verbose >= 2:
-                val_stats = pix_eval(seg_model, resize_masks_to, val_loader, thr=thr0, max_batches=quick_eval_val_batches)
                 print(f"[TAIL] ep{ep} loss {loss_sum / max(seen,1):.4f} | val F1 {val_stats['F']:.3f} | thr={thr0:.3f} | pos_rate≈{aux.get('pos_rate', float('nan')):.3f}")
 
         # ---------- Long ----------
