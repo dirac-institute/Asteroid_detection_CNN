@@ -23,6 +23,8 @@ OUT=/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/DATA
 rm -f $OUT/train.h5 $OUT/test.h5 $OUT/train.csv $OUT/test.csv
 mkdir -p $OUT
 
+echo "SLURM_CPUS_PER_TASK: ${SLURM_CPUS_PER_TASK:-8}"
+
 srun python3 -u simulate_inject.py \
   --repo /repo/main \
   --collections LSSTComCam/runs/DRP/DP1/w_2025_17/DM-50530 \
