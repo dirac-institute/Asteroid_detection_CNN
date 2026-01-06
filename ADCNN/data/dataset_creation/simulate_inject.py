@@ -22,6 +22,7 @@ from astropy.io import ascii
 import os
 from multiprocessing import Value, Lock
 import logging
+import pandas as pd
 
 completed_counter = Value('i', 0)
 counter_lock = Lock()
@@ -252,13 +253,17 @@ def worker(args):
 
 
 def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitude, beta, where, parallel=4,
-                           random_subset=0, train_test_split=0, seed=123, chunks=None, test_only=False):
+                           random_subset=0, train_test_split=0, seed=123, chunks=None, test_only=False, bad_visits_file=None):
     butler = Butler(repo, collections=coll)
     h5train_path = os.path.join(save_path, "train.h5")
     h5test_path = os.path.join(save_path, "test.h5")
 
     refs = list(set(butler.registry.queryDatasets("preliminary_visit_image", where=where, instrument="LSSTComCam", findFirst=True)))
     refs = sorted(refs, key=lambda r: str(r.dataId["visit"]*1000+r.dataId["detector"]))
+    if bad_visits_file is not None:
+        bad_df = pd.read_csv("bad_pairs.csv")
+        bad_set = set(zip(bad_df["visit"].astype(int), bad_df["detector"].astype(int)))
+        refs = [r for r in refs if (int(r.dataId["visit"]), int(r.dataId["detector"])) not in bad_set]
     if random_subset > 0:
         rng_subset = np.random.default_rng(seed)
         refs = list(rng_subset.choice(refs, random_subset, replace=False))
@@ -318,6 +323,7 @@ def main():
     ap.add_argument("--collections", type=str, default="LSSTComCam/runs/DRP/DP1/w_2025_17/DM-50530")
     ap.add_argument("--save-path", default="../../../DATA/")
     ap.add_argument("--where", default="")
+    ap.add_argument("--bad-visits-file", type=str, default="./bad_visits.csv",)
     ap.add_argument("--parallel", type=int, default=4)
     ap.add_argument("--random-subset", type=int, default=10)
     ap.add_argument("--train-test-split", type=float, default=0.1)

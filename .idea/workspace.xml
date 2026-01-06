@@ -5,7 +5,11 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="62ef92c8-e6b2-40b2-9628-bd3494e5b019" name="Changes" comment="Add SNR calculation">
+      <change afterPath="$PROJECT_DIR$/ADCNN/data/dataset_creation/bad_visits.csv" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/ADCNN/data/dataset_creation/scan_bad_data.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ADCNN/data/dataset_creation/simulate_inject.py" beforeDir="false" afterPath="$PROJECT_DIR$/ADCNN/data/dataset_creation/simulate_inject.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ADCNN/data/dataset_creation/slurm_inject.sh" beforeDir="false" afterPath="$PROJECT_DIR$/ADCNN/data/dataset_creation/slurm_inject.sh" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -50,46 +54,48 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ASKED_SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;Python.Attention.executor&quot;: &quot;Run&quot;,
-    &quot;Python.attention_module.executor&quot;: &quot;Run&quot;,
-    &quot;Python.baseline.executor&quot;: &quot;Run&quot;,
-    &quot;Python.eval_tools.executor&quot;: &quot;Run&quot;,
-    &quot;Python.extract_butler_to_tfrecords.executor&quot;: &quot;Run&quot;,
-    &quot;Python.gpu_healthcheck.executor&quot;: &quot;Run&quot;,
-    &quot;Python.hypertuneModels.executor&quot;: &quot;Run&quot;,
-    &quot;Python.idea1.executor&quot;: &quot;Run&quot;,
-    &quot;Python.idea2.executor&quot;: &quot;Run&quot;,
-    &quot;Python.idea2_new.executor&quot;: &quot;Run&quot;,
-    &quot;Python.idea3.executor&quot;: &quot;Run&quot;,
-    &quot;Python.idea4.executor&quot;: &quot;Run&quot;,
-    &quot;Python.idea6.executor&quot;: &quot;Run&quot;,
-    &quot;Python.mag_len_hist.executor&quot;: &quot;Run&quot;,
-    &quot;Python.main.executor&quot;: &quot;Run&quot;,
-    &quot;Python.model.executor&quot;: &quot;Run&quot;,
-    &quot;Python.postprocess.executor&quot;: &quot;Run&quot;,
-    &quot;Python.train.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
-    &quot;Shell Script.inject.sh.executor&quot;: &quot;Run&quot;,
-    &quot;ai.playground.ignore.import.keys.banner.in.settings&quot;: &quot;true&quot;,
-    &quot;deletionFromPopupRequiresConfirmation&quot;: &quot;false&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;eval__fix&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/home/karlo/Projects/Asteroid_detection_CNN&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;ssh.settings&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.Attention.executor": "Run",
+    "Python.attention_module.executor": "Run",
+    "Python.baseline.executor": "Run",
+    "Python.eval_tools.executor": "Run",
+    "Python.extract_butler_to_tfrecords.executor": "Run",
+    "Python.gpu_healthcheck.executor": "Run",
+    "Python.hypertuneModels.executor": "Run",
+    "Python.idea1.executor": "Run",
+    "Python.idea2.executor": "Run",
+    "Python.idea2_new.executor": "Run",
+    "Python.idea3.executor": "Run",
+    "Python.idea4.executor": "Run",
+    "Python.idea6.executor": "Run",
+    "Python.mag_len_hist.executor": "Run",
+    "Python.main.executor": "Run",
+    "Python.model.executor": "Run",
+    "Python.postprocess.executor": "Run",
+    "Python.simulate_inject.executor": "Run",
+    "Python.test.executor": "Run",
+    "Python.train.executor": "Run",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "Shell Script.inject.sh.executor": "Run",
+    "ai.playground.ignore.import.keys.banner.in.settings": "true",
+    "deletionFromPopupRequiresConfirmation": "false",
+    "git-widget-placeholder": "eval__fix",
+    "last_opened_file_path": "/home/karlo/Projects/Asteroid_detection_CNN",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "ssh.settings",
+    "vue.rearranger.settings.migration": "true"
   }
-}</component>
+}]]></component>
   <component name="RdControllerToolWindowsLayoutState" isNewUi="true">
     <layout>
       <window_info id="Bookmarks" side_tool="true" />
@@ -403,15 +409,7 @@
       <workItem from="1767704104358" duration="139000" />
       <workItem from="1767704254938" duration="50000" />
       <workItem from="1767704306419" duration="1041000" />
-      <workItem from="1767710079827" duration="8138000" />
-    </task>
-    <task id="LOCAL-00179" summary="Add new scripts and notebooks for dataset creation and simulation">
-      <option name="closed" value="true" />
-      <created>1762428315155</created>
-      <option name="number" value="00179" />
-      <option name="presentableId" value="LOCAL-00179" />
-      <option name="project" value="LOCAL" />
-      <updated>1762428315155</updated>
+      <workItem from="1767710079827" duration="12425000" />
     </task>
     <task id="LOCAL-00180" summary="Update notebooks and scripts for LSST migration; adjust kernel specs and versions, enhance dataset simulation parameters, and improve output handling.">
       <option name="closed" value="true" />
@@ -797,7 +795,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767724511493</updated>
     </task>
-    <option name="localTasksCounter" value="228" />
+    <task id="LOCAL-00228" summary="Add SNR calculation">
+      <option name="closed" value="true" />
+      <created>1767727257846</created>
+      <option name="number" value="00228" />
+      <option name="presentableId" value="LOCAL-00228" />
+      <option name="project" value="LOCAL" />
+      <updated>1767727257846</updated>
+    </task>
+    <option name="localTasksCounter" value="229" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -860,6 +866,7 @@
     <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$eval_tools.coverage" NAME="eval_tools Coverage Results" MODIFIED="1716663097179" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/evals" />
     <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$idea2.coverage" NAME="idea2 Coverage Results" MODIFIED="1766857018528" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/experiments" />
     <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$postprocess.coverage" NAME="postprocess Coverage Results" MODIFIED="1767376009713" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/experiments/utils" />
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$simulate_inject.coverage" NAME="simulate_inject Coverage Results" MODIFIED="1767729487158" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/ADCNN/data/dataset_creation" />
     <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$idea4.coverage" NAME="idea4 Coverage Results" MODIFIED="1767444102996" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/experiments" />
     <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$attention_module.coverage" NAME="attention_module Coverage Results" MODIFIED="1716478915026" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/tools" />
     <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$idea3.coverage" NAME="idea3 Coverage Results" MODIFIED="1767187663436" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/experiments" />
@@ -868,6 +875,7 @@
     <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$gpu_healthcheck.coverage" NAME="gpu_healthcheck Coverage Results" MODIFIED="1760949832299" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/ADCNN/utils" />
     <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$Attention.coverage" NAME="Attention Coverage Results" MODIFIED="1716323936190" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/tools/segformer" />
     <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$idea6.coverage" NAME="idea6 Coverage Results" MODIFIED="1767614632187" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/experiments" />
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$test.coverage" NAME="test Coverage Results" MODIFIED="1767729528871" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/ADCNN/data/dataset_creation" />
     <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$baseline.coverage" NAME="baseline Coverage Results" MODIFIED="1766845324233" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/experiments" />
     <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$hypertuneModels.coverage" NAME="hypertuneModels Coverage Results" MODIFIED="1716205725996" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/tools" />
     <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$idea1.coverage" NAME="idea1 Coverage Results" MODIFIED="1766847550164" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/experiments" />
