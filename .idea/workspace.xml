@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="62ef92c8-e6b2-40b2-9628-bd3494e5b019" name="Changes" comment="Add long_batches parameter and refactor init_distributed function for improved distributed training">
+    <list default="true" id="62ef92c8-e6b2-40b2-9628-bd3494e5b019" name="Changes" comment="Add SNR calculation">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -403,15 +403,7 @@
       <workItem from="1767704104358" duration="139000" />
       <workItem from="1767704254938" duration="50000" />
       <workItem from="1767704306419" duration="1041000" />
-      <workItem from="1767710079827" duration="5338000" />
-    </task>
-    <task id="LOCAL-00178" summary="Add new scripts and notebooks for dataset creation and simulation">
-      <option name="closed" value="true" />
-      <created>1762343797957</created>
-      <option name="number" value="00178" />
-      <option name="presentableId" value="LOCAL-00178" />
-      <option name="project" value="LOCAL" />
-      <updated>1762343797957</updated>
+      <workItem from="1767710079827" duration="8138000" />
     </task>
     <task id="LOCAL-00179" summary="Add new scripts and notebooks for dataset creation and simulation">
       <option name="closed" value="true" />
@@ -797,7 +789,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767718225195</updated>
     </task>
-    <option name="localTasksCounter" value="227" />
+    <task id="LOCAL-00227" summary="Add SNR calculation">
+      <option name="closed" value="true" />
+      <created>1767724511493</created>
+      <option name="number" value="00227" />
+      <option name="presentableId" value="LOCAL-00227" />
+      <option name="project" value="LOCAL" />
+      <updated>1767724511493</updated>
+    </task>
+    <option name="localTasksCounter" value="228" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -827,7 +827,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Restart with a replica of the HSC model." />
     <MESSAGE value="Created UNetResSe model and some scheduled training that seems to work from the initial testing." />
     <MESSAGE value="Tried to create multi GPU compatible model and training." />
     <MESSAGE value="Refactor distributed training setup and adjust DataLoader configuration" />
@@ -852,7 +851,8 @@
     <MESSAGE value="Add Idea 4 implementation: introduce trail-shape regularizer with penalties for isolated activations and compact blobs, along with training script and SLURM job configuration" />
     <MESSAGE value="Add Idea 6 implementation: introduce UNet with auxiliary orientation head for line coherence bias, including training script and SLURM job configuration" />
     <MESSAGE value="Add long_batches parameter and refactor init_distributed function for improved distributed training" />
-    <option name="LAST_COMMIT_MESSAGE" value="Add long_batches parameter and refactor init_distributed function for improved distributed training" />
+    <MESSAGE value="Add SNR calculation" />
+    <option name="LAST_COMMIT_MESSAGE" value="Add SNR calculation" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$extract_butler_to_tfrecords.coverage" NAME="extract_butler_to_tfrecords Coverage Results" MODIFIED="1721749689457" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/tools" />

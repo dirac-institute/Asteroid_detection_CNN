@@ -48,16 +48,20 @@ def inject(postISRCCD, injection_catalog):
     return inject_res.output_exposure
 
 
-def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, dimensions, source_type, seed, calexp=None):
+def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp):
     rng = np.random.default_rng(seed)
     injection_catalog = Table(
         names=('injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit', 'detector',
                'integrated_mag', 'PSF_mag', 'SNR', 'physical_filter', 'x', 'y'),
         dtype=('int64', 'float64', 'float64', 'str', 'float64', 'float64', 'float64', 'int64', 'int64', 'float64',
                'float64', 'float64', 'str', 'int64', 'int64'))
-    raw = butler.get(source_type + ".wcs", dataId=ref.dataId)
-    info = butler.get(source_type + ".visitInfo", dataId=ref.dataId)
-    filter_name = butler.get(source_type + ".filter", dataId=ref.dataId)
+
+    raw = calexp.wcs
+    info = calexp.visitInfo
+    filter_name = calexp.filter
+    #raw = butler.get(source_type + ".wcs", dataId=ref.dataId)
+    #info = butler.get(source_type + ".visitInfo", dataId=ref.dataId)
+    #filter_name = butler.get(source_type + ".filter", dataId=ref.dataId)
     fwhm = {"u": 0.92, "g": 0.87, "r": 0.83, "i": 0.80, "z": 0.78, "y": 0.76}
     m5 = {"u": 23.7, "g": 24.97, "r": 24.52, "i": 24.13, "z": 23.56, "y": 22.55}
     psf_depth = m5[filter_name.bandLabel]
@@ -77,14 +81,9 @@ def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, dimensions
         surface_brightness = magnitude + 2.5 * np.log10(inject_length)
         psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
         angle = rng.uniform(*beta)
-        if calexp is not None:
-            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos)
-            injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, info.id,
+        snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos)
+        injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, info.id,
                                        int(ref.dataId["detector"]), magnitude, psf_magnitude, snr, str(filter_name.bandLabel),
-                                       x_pos, y_pos])
-        else:
-            injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, info.id,
-                                       int(ref.dataId["detector"]), magnitude, psf_magnitude, str(filter_name.bandLabel),
                                        x_pos, y_pos])
     return injection_catalog
 
@@ -198,7 +197,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
         butler = Butler(repo, collections=coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
         calexp = butler.get("preliminary_visit_image", dataId=ref.dataId)
-        injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, butler, ref, dimensions, source_type, seed, calexp)
+        injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp)
         pre_injection_Src = butler.get("single_visit_star_footprints", dataId=ref.dataId)
         injected_calexp, post_injection_Src = characterizeCalibrate(inject(calexp, injection_catalog))
         mask = np.zeros((dimensions.y, dimensions.x), dtype=int)
