@@ -34,6 +34,7 @@ class TrainConfig:
     tail_pos_weight: float = 2.0
 
     max_epochs:   int   = 60
+    long_batches: int   = 0
     val_every:    int   = 3
     base_lrs:     tuple[float, float, float] = (3e-4, 2e-4, 1e-4)
     weight_decay: float = 1e-4
