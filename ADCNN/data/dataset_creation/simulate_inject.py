@@ -356,7 +356,7 @@ def main():
         random_subset=args.random_subset,
         train_test_split=args.train_test_split,
         chunks=args.chunks,
-        test_only=True,
+        test_only=False,
         seed=args.seed,
         bad_visits_file=args.bad_visits_file,
     )
