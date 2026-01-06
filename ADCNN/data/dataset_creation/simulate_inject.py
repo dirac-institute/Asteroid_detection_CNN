@@ -272,6 +272,8 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
     rng_split = np.random.default_rng(seed + 1)
     test_index = rng_split.choice(np.arange(len(refs)), int((1 - train_test_split) * len(refs)),
                                   replace=False) if 0 < train_test_split < 1 else []
+    if test_only:
+        total_tasks = len(test_index)
     dims = butler.get("preliminary_visit_image.dimensions", dataId=refs[0].dataId)
     if chunks is not None:
         chunks = (1, min(int(chunks), dims.y), min(int(chunks), dims.x))
