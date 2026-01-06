@@ -4,12 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="62ef92c8-e6b2-40b2-9628-bd3494e5b019" name="Changes" comment="Add SNR calculation">
-      <change afterPath="$PROJECT_DIR$/ADCNN/data/dataset_creation/bad_visits.csv" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/ADCNN/data/dataset_creation/scan_bad_data.py" afterDir="false" />
+    <list default="true" id="62ef92c8-e6b2-40b2-9628-bd3494e5b019" name="Changes" comment="Add bad visits dataset and update scripts for handling bad data in LSST queries">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ADCNN/data/dataset_creation/simulate_inject.py" beforeDir="false" afterPath="$PROJECT_DIR$/ADCNN/data/dataset_creation/simulate_inject.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ADCNN/data/dataset_creation/slurm_inject.sh" beforeDir="false" afterPath="$PROJECT_DIR$/ADCNN/data/dataset_creation/slurm_inject.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ADCNN/data/dataset_creation/scan_bad_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/ADCNN/data/dataset_creation/scan_bad_data.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -409,15 +406,7 @@
       <workItem from="1767704104358" duration="139000" />
       <workItem from="1767704254938" duration="50000" />
       <workItem from="1767704306419" duration="1041000" />
-      <workItem from="1767710079827" duration="12425000" />
-    </task>
-    <task id="LOCAL-00180" summary="Update notebooks and scripts for LSST migration; adjust kernel specs and versions, enhance dataset simulation parameters, and improve output handling.">
-      <option name="closed" value="true" />
-      <created>1766061721574</created>
-      <option name="number" value="00180" />
-      <option name="presentableId" value="LOCAL-00180" />
-      <option name="project" value="LOCAL" />
-      <updated>1766061721575</updated>
+      <workItem from="1767710079827" duration="14128000" />
     </task>
     <task id="LOCAL-00181" summary="Update notebooks and scripts for LSST migration; adjust kernel specs and versions, enhance dataset simulation parameters, and improve output handling.">
       <option name="closed" value="true" />
@@ -803,7 +792,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767727257846</updated>
     </task>
-    <option name="localTasksCounter" value="229" />
+    <task id="LOCAL-00229" summary="Add bad visits dataset and update scripts for handling bad data in LSST queries">
+      <option name="closed" value="true" />
+      <created>1767731288146</created>
+      <option name="number" value="00229" />
+      <option name="presentableId" value="LOCAL-00229" />
+      <option name="project" value="LOCAL" />
+      <updated>1767731288146</updated>
+    </task>
+    <option name="localTasksCounter" value="230" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -833,7 +830,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Created UNetResSe model and some scheduled training that seems to work from the initial testing." />
     <MESSAGE value="Tried to create multi GPU compatible model and training." />
     <MESSAGE value="Refactor distributed training setup and adjust DataLoader configuration" />
     <MESSAGE value="Enhance DDP configuration for distributed training with gradient bucket view and unused parameter handling" />
@@ -858,7 +854,8 @@
     <MESSAGE value="Add Idea 6 implementation: introduce UNet with auxiliary orientation head for line coherence bias, including training script and SLURM job configuration" />
     <MESSAGE value="Add long_batches parameter and refactor init_distributed function for improved distributed training" />
     <MESSAGE value="Add SNR calculation" />
-    <option name="LAST_COMMIT_MESSAGE" value="Add SNR calculation" />
+    <MESSAGE value="Add bad visits dataset and update scripts for handling bad data in LSST queries" />
+    <option name="LAST_COMMIT_MESSAGE" value="Add bad visits dataset and update scripts for handling bad data in LSST queries" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$extract_butler_to_tfrecords.coverage" NAME="extract_butler_to_tfrecords Coverage Results" MODIFIED="1721749689457" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/tools" />
