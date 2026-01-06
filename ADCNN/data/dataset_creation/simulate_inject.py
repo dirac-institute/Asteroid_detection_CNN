@@ -4,6 +4,7 @@ from pathlib import Path
 
 from common import ensure_dir  # and anything else you need
 from common import draw_one_line
+from common import mag_to_snr
 
 from astroML.crossmatch import crossmatch_angular
 from lsst.daf.butler import Butler
@@ -47,13 +48,13 @@ def inject(postISRCCD, injection_catalog):
     return inject_res.output_exposure
 
 
-def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, dimensions, source_type, seed):
+def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, dimensions, source_type, seed, calexp=None):
     rng = np.random.default_rng(seed)
     injection_catalog = Table(
         names=('injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit', 'detector',
-               'integrated_mag', 'PSF_mag', 'physical_filter', 'x', 'y'),
+               'integrated_mag', 'PSF_mag', 'SNR', 'physical_filter', 'x', 'y'),
         dtype=('int64', 'float64', 'float64', 'str', 'float64', 'float64', 'float64', 'int64', 'int64', 'float64',
-               'float64', 'str', 'int64', 'int64'))
+               'float64', 'float64', 'str', 'int64', 'int64'))
     raw = butler.get(source_type + ".wcs", dataId=ref.dataId)
     info = butler.get(source_type + ".visitInfo", dataId=ref.dataId)
     filter_name = butler.get(source_type + ".filter", dataId=ref.dataId)
@@ -76,9 +77,15 @@ def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, dimensions
         surface_brightness = magnitude + 2.5 * np.log10(inject_length)
         psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
         angle = rng.uniform(*beta)
-        injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, info.id,
-                                   int(ref.dataId["detector"]), magnitude, psf_magnitude, str(filter_name.bandLabel),
-                                   x_pos, y_pos])
+        if calexp is not None:
+            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos)
+            injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, info.id,
+                                       int(ref.dataId["detector"]), magnitude, psf_magnitude, snr, str(filter_name.bandLabel),
+                                       x_pos, y_pos])
+        else:
+            injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, info.id,
+                                       int(ref.dataId["detector"]), magnitude, psf_magnitude, str(filter_name.bandLabel),
+                                       x_pos, y_pos])
     return injection_catalog
 
 def stack_hits_by_footprints(
@@ -96,6 +103,7 @@ def stack_hits_by_footprints(
     det_flag = np.zeros(N, bool)
     det_mag = np.full(N, np.nan)
     det_magerr = np.full(N, np.nan)
+    det_snr = np.full(N, np.nan)
     matched_fp_masks = [np.zeros((H, W), bool) for _ in range(N)]
 
     mags = calexp_pre.photoCalib.instFluxToMagnitude(post_src, "base_PsfFlux")
@@ -157,12 +165,15 @@ def stack_hits_by_footprints(
             det_flag[inj_id] = True
             det_mag[inj_id] = mags[best_idx, 0]
             det_magerr[inj_id] = mags[best_idx, 1]
+            f = float(post_src[best_idx].get("base_PsfFlux_instFlux"))
+            fe = float(post_src[best_idx].get("base_PsfFlux_instFluxErr"))
+            det_snr[inj_id] = f / fe if (np.isfinite(f) and np.isfinite(fe) and fe > 0) else np.nan
             matched_fp_masks[inj_id][y0:y1+1, x0:x1+1] |= best_fp
 
     injection_catalog["stack_detection"] = det_flag
     injection_catalog["stack_mag"] = det_mag
     injection_catalog["stack_mag_err"] = det_magerr
-
+    injection_catalog["stack_snr"] = det_snr
     return injection_catalog, matched_fp_masks
 
 def crossmatch_catalogs (pre, post):
@@ -186,8 +197,8 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             seed = np.random.randint(0,10000)
         butler = Butler(repo, collections=coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
-        injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, butler, ref, dimensions, source_type, seed)
         calexp = butler.get("preliminary_visit_image", dataId=ref.dataId)
+        injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, butler, ref, dimensions, source_type, seed, calexp)
         pre_injection_Src = butler.get("single_visit_star_footprints", dataId=ref.dataId)
         injected_calexp, post_injection_Src = characterizeCalibrate(inject(calexp, injection_catalog))
         mask = np.zeros((dimensions.y, dimensions.x), dtype=int)
@@ -340,7 +351,7 @@ def main():
         random_subset=args.random_subset,
         train_test_split=args.train_test_split,
         chunks=args.chunks,
-        test_only=False,
+        test_only=True,
         seed=args.seed
     )
 

@@ -4,7 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="62ef92c8-e6b2-40b2-9628-bd3494e5b019" name="Changes" comment="Add long_batches parameter and refactor init_distributed function for improved distributed training" />
+    <list default="true" id="62ef92c8-e6b2-40b2-9628-bd3494e5b019" name="Changes" comment="Add long_batches parameter and refactor init_distributed function for improved distributed training">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -401,15 +403,7 @@
       <workItem from="1767704104358" duration="139000" />
       <workItem from="1767704254938" duration="50000" />
       <workItem from="1767704306419" duration="1041000" />
-      <workItem from="1767710079827" duration="1499000" />
-    </task>
-    <task id="LOCAL-00177" summary="Added two evaluation notebooks.">
-      <option name="closed" value="true" />
-      <created>1761655522682</created>
-      <option name="number" value="00177" />
-      <option name="presentableId" value="LOCAL-00177" />
-      <option name="project" value="LOCAL" />
-      <updated>1761655522683</updated>
+      <workItem from="1767710079827" duration="5338000" />
     </task>
     <task id="LOCAL-00178" summary="Add new scripts and notebooks for dataset creation and simulation">
       <option name="closed" value="true" />
@@ -795,7 +789,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767704488943</updated>
     </task>
-    <option name="localTasksCounter" value="226" />
+    <task id="LOCAL-00226" summary="Add long_batches parameter and refactor init_distributed function for improved distributed training">
+      <option name="closed" value="true" />
+      <created>1767718225195</created>
+      <option name="number" value="00226" />
+      <option name="presentableId" value="LOCAL-00226" />
+      <option name="project" value="LOCAL" />
+      <updated>1767718225195</updated>
+    </task>
+    <option name="localTasksCounter" value="227" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
