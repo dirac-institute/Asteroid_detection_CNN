@@ -59,5 +59,5 @@ with ProcessPoolExecutor(max_workers=max_workers) as ex:
 print()
 
 bad_df = pd.DataFrame(bad, columns=["visit", "detector", "reason"])
-bad_df.to_csv("bad_pairs.csv", index=False)
-print("Wrote bad_pairs.csv with", len(bad_df), "rows")
+bad_df.to_csv("bad_visits.csv", index=False)
+print("Wrote bad_visits.csv with", len(bad_df), "rows")

@@ -78,9 +78,9 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
         inject_length = rng.uniform(*trail_length)
         x = inject_length / (24 * theta_p)
         upper_limit_mag = psf_depth - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x)) if mag[1] == 0 else mag[1]
-        magnitude = rng.uniform(mag[0], upper_limit_mag)
+        psf_magnitude = rng.uniform(mag[0], upper_limit_mag)
+        magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
         surface_brightness = magnitude + 2.5 * np.log10(inject_length)
-        psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
         angle = rng.uniform(*beta)
         snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos)
         injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, info.id,
@@ -357,7 +357,8 @@ def main():
         train_test_split=args.train_test_split,
         chunks=args.chunks,
         test_only=True,
-        seed=args.seed
+        seed=args.seed,
+        bad_visits_file=args.bad_visits_file,
     )
 
 if __name__ == "__main__":
