@@ -5,6 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="62ef92c8-e6b2-40b2-9628-bd3494e5b019" name="Changes" comment="Add bad visits dataset and update scripts for handling bad data in LSST queries">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ADCNN/data/dataset_creation/slurm_inject.sh" beforeDir="false" afterPath="$PROJECT_DIR$/ADCNN/data/dataset_creation/slurm_inject.sh" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -405,15 +406,7 @@
       <workItem from="1767704104358" duration="139000" />
       <workItem from="1767704254938" duration="50000" />
       <workItem from="1767704306419" duration="1041000" />
-      <workItem from="1767710079827" duration="17496000" />
-    </task>
-    <task id="LOCAL-00188" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
-      <option name="closed" value="true" />
-      <created>1766848762728</created>
-      <option name="number" value="00188" />
-      <option name="presentableId" value="LOCAL-00188" />
-      <option name="project" value="LOCAL" />
-      <updated>1766848762728</updated>
+      <workItem from="1767710079827" duration="17513000" />
     </task>
     <task id="LOCAL-00189" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
       <option name="closed" value="true" />
@@ -799,7 +792,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767737090440</updated>
     </task>
-    <option name="localTasksCounter" value="237" />
+    <task id="LOCAL-00237" summary="Add bad visits dataset and update scripts for handling bad data in LSST queries">
+      <option name="closed" value="true" />
+      <created>1767737248633</created>
+      <option name="number" value="00237" />
+      <option name="presentableId" value="LOCAL-00237" />
+      <option name="project" value="LOCAL" />
+      <updated>1767737248633</updated>
+    </task>
+    <option name="localTasksCounter" value="238" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
