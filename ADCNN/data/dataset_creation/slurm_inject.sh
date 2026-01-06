@@ -29,7 +29,7 @@ srun python3 -u simulate_inject.py \
   --repo /repo/main \
   --collections LSSTComCam/runs/DRP/DP1/w_2025_17/DM-50530 \
   --save-path $OUT \
-  --parallel "${SLURM_CPUS_PER_TASK:-8}" \
+  --parallel 20 \
   --train-test-split 0.94117 \
   --random-subset 850 \
   --trail-length-min 6 --trail-length-max 60 \
