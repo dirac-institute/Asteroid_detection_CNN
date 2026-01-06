@@ -1,0 +1,883 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="62ef92c8-e6b2-40b2-9628-bd3494e5b019" name="Changes" comment="Add long_batches parameter and refactor init_distributed function for improved distributed training" />
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Jupyter Notebook" />
+        <option value="Python Script" />
+      </list>
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_BRANCH_BY_REPOSITORY">
+      <map>
+        <entry key="$PROJECT_DIR$" value="master" />
+      </map>
+    </option>
+    <option name="RECENT_COMMON_BRANCH" value="master" />
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+    <option name="ROOT_SYNC" value="SYNC" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;kmrakovcic&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/dirac-institute/Asteroid_detection_CNN.git&quot;,
+    &quot;accountId&quot;: &quot;cde75394-3cb1-4256-ab2b-b546a8a5bf36&quot;
+  }
+}</component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 7
+}</component>
+  <component name="ProjectId" id="2fJPH7TlBjhDELyalntpWeThZwF" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ASKED_SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Python.Attention.executor&quot;: &quot;Run&quot;,
+    &quot;Python.attention_module.executor&quot;: &quot;Run&quot;,
+    &quot;Python.baseline.executor&quot;: &quot;Run&quot;,
+    &quot;Python.eval_tools.executor&quot;: &quot;Run&quot;,
+    &quot;Python.extract_butler_to_tfrecords.executor&quot;: &quot;Run&quot;,
+    &quot;Python.gpu_healthcheck.executor&quot;: &quot;Run&quot;,
+    &quot;Python.hypertuneModels.executor&quot;: &quot;Run&quot;,
+    &quot;Python.idea1.executor&quot;: &quot;Run&quot;,
+    &quot;Python.idea2.executor&quot;: &quot;Run&quot;,
+    &quot;Python.idea2_new.executor&quot;: &quot;Run&quot;,
+    &quot;Python.idea3.executor&quot;: &quot;Run&quot;,
+    &quot;Python.idea4.executor&quot;: &quot;Run&quot;,
+    &quot;Python.idea6.executor&quot;: &quot;Run&quot;,
+    &quot;Python.mag_len_hist.executor&quot;: &quot;Run&quot;,
+    &quot;Python.main.executor&quot;: &quot;Run&quot;,
+    &quot;Python.model.executor&quot;: &quot;Run&quot;,
+    &quot;Python.postprocess.executor&quot;: &quot;Run&quot;,
+    &quot;Python.train.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
+    &quot;Shell Script.inject.sh.executor&quot;: &quot;Run&quot;,
+    &quot;ai.playground.ignore.import.keys.banner.in.settings&quot;: &quot;true&quot;,
+    &quot;deletionFromPopupRequiresConfirmation&quot;: &quot;false&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;eval__fix&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/home/karlo/Projects/Asteroid_detection_CNN&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;ssh.settings&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  }
+}</component>
+  <component name="RdControllerToolWindowsLayoutState" isNewUi="true">
+    <layout>
+      <window_info id="Bookmarks" side_tool="true" />
+      <window_info id="Merge Requests" />
+      <window_info id="Backup and Sync History" />
+      <window_info id="Commit_Guest" show_stripe_button="false" />
+      <window_info id="Pull Requests" />
+      <window_info id="Learn" show_stripe_button="false" />
+      <window_info active="true" content_ui="combo" id="Project" order="0" visible="true" weight="0.32994792" />
+      <window_info id="Commit" order="1" weight="0.33035713" />
+      <window_info id="Structure" order="2" side_tool="true" weight="0.25" />
+      <window_info id="Welcome to GitHub Copilot" order="3" show_stripe_button="false" weight="0.33035713" />
+      <window_info id="AI Playground" order="4" show_stripe_button="false" side_tool="true" weight="0.33046874" />
+      <window_info anchor="bottom" id="Database Changes" />
+      <window_info anchor="bottom" id="TypeScript" />
+      <window_info anchor="bottom" id="GitHub Copilot MCP Log" />
+      <window_info anchor="bottom" id="TODO" />
+      <window_info anchor="bottom" id="File Transfer" />
+      <window_info anchor="bottom" id="HfCacheToolWindow" />
+      <window_info anchor="bottom" id="Find" />
+      <window_info anchor="bottom" id="Jupyter" />
+      <window_info anchor="bottom" id="Version Control" order="0" />
+      <window_info anchor="bottom" id="Problems" order="1" />
+      <window_info anchor="bottom" id="Problems View" order="2" />
+      <window_info anchor="bottom" id="Terminal" order="3" />
+      <window_info anchor="bottom" id="Services" order="4" />
+      <window_info anchor="bottom" id="Python Packages" order="5" weight="0.1" />
+      <window_info anchor="bottom" id="Python Console" order="6" weight="0.1" />
+      <window_info anchor="right" id="Endpoints" />
+      <window_info anchor="right" id="github.copilotToolWindow" />
+      <window_info anchor="right" id="Coverage" side_tool="true" />
+      <window_info anchor="right" id="GitHub Copilot Chat" />
+      <window_info anchor="right" id="SciView" />
+      <window_info anchor="right" content_ui="combo" id="Notifications" order="0" weight="0.25" />
+      <window_info anchor="right" id="AIAssistant" order="1" weight="0.25" />
+      <window_info anchor="right" id="Database" order="2" weight="0.25" />
+      <window_info anchor="right" id="Gradle" order="3" weight="0.25" />
+      <window_info anchor="right" id="Maven" order="4" weight="0.25" />
+      <window_info anchor="right" id="Plots" order="5" weight="0.1" />
+      <window_info anchor="right" id="Jupyter Variables" order="6" side_tool="true" weight="0.32994792" />
+      <window_info anchor="right" id="documentation.v2" order="7" side_tool="true" weight="0.32994792" />
+    </layout>
+  </component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/experiments" />
+      <recent name="$PROJECT_DIR$/ADCNN/data/dataset_creation" />
+      <recent name="$PROJECT_DIR$/ADCNN1/data" />
+      <recent name="$PROJECT_DIR$/ADCNN1/models" />
+    </key>
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/ADCNN/data/dataset_creation" />
+      <recent name="$PROJECT_DIR$/ADCNN/data/dataset_creation/old" />
+      <recent name="$PROJECT_DIR$/Notebooks" />
+      <recent name="$PROJECT_DIR$/ADCNN/utils" />
+      <recent name="$PROJECT_DIR$/ADCNN/utils/" />
+    </key>
+  </component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-js-predefined-d6986cc7102b-9b0f141eb926-JavaScript-PY-253.29346.142" />
+        <option value="bundled-python-sdk-f2b7a9f6281b-6e1f45a539f7-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.29346.142" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
+  <component name="SvnConfiguration">
+    <configuration>$USER_HOME$/.subversion</configuration>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="62ef92c8-e6b2-40b2-9628-bd3494e5b019" name="Changes" comment="" />
+      <created>1713516116934</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1713516116934</updated>
+      <workItem from="1713516118193" duration="1756000" />
+      <workItem from="1713525365032" duration="2657000" />
+      <workItem from="1713548108565" duration="5272000" />
+      <workItem from="1713876284859" duration="6154000" />
+      <workItem from="1713938739830" duration="4199000" />
+      <workItem from="1713948646631" duration="916000" />
+      <workItem from="1713962657527" duration="962000" />
+      <workItem from="1713978696589" duration="250000" />
+      <workItem from="1713979028719" duration="717000" />
+      <workItem from="1714029074044" duration="696000" />
+      <workItem from="1714296572178" duration="906000" />
+      <workItem from="1714411482394" duration="621000" />
+      <workItem from="1714412505159" duration="1817000" />
+      <workItem from="1714507175922" duration="1402000" />
+      <workItem from="1714753483178" duration="381000" />
+      <workItem from="1715172322936" duration="481000" />
+      <workItem from="1715172819801" duration="358000" />
+      <workItem from="1715241674804" duration="1470000" />
+      <workItem from="1715431768466" duration="624000" />
+      <workItem from="1715521371846" duration="1240000" />
+      <workItem from="1715795977315" duration="882000" />
+      <workItem from="1715870061764" duration="1057000" />
+      <workItem from="1715930377791" duration="10926000" />
+      <workItem from="1715968801091" duration="3100000" />
+      <workItem from="1716021467716" duration="3639000" />
+      <workItem from="1716111709340" duration="840000" />
+      <workItem from="1716191033588" duration="3033000" />
+      <workItem from="1716218445608" duration="7931000" />
+      <workItem from="1716280566886" duration="14829000" />
+      <workItem from="1716322463648" duration="2776000" />
+      <workItem from="1716363846100" duration="1286000" />
+      <workItem from="1716451028803" duration="2073000" />
+      <workItem from="1716478853788" duration="2515000" />
+      <workItem from="1716504500064" duration="1244000" />
+      <workItem from="1716653040543" duration="9111000" />
+      <workItem from="1716806476105" duration="13318000" />
+      <workItem from="1717019295085" duration="4137000" />
+      <workItem from="1717063815377" duration="2447000" />
+      <workItem from="1717176135004" duration="1993000" />
+      <workItem from="1717318679514" duration="2876000" />
+      <workItem from="1717618176992" duration="3192000" />
+      <workItem from="1717687279606" duration="1332000" />
+      <workItem from="1717925552780" duration="5362000" />
+      <workItem from="1718039185861" duration="2008000" />
+      <workItem from="1718091332058" duration="4642000" />
+      <workItem from="1718117215115" duration="881000" />
+      <workItem from="1718459530277" duration="313000" />
+      <workItem from="1718465203327" duration="1674000" />
+      <workItem from="1718470773404" duration="2156000" />
+      <workItem from="1718534213251" duration="9405000" />
+      <workItem from="1718550884197" duration="2633000" />
+      <workItem from="1718558254388" duration="2371000" />
+      <workItem from="1718814276207" duration="3015000" />
+      <workItem from="1718956073055" duration="11195000" />
+      <workItem from="1719055957707" duration="1580000" />
+      <workItem from="1719067977061" duration="85000" />
+      <workItem from="1719079699945" duration="4401000" />
+      <workItem from="1719129800627" duration="1368000" />
+      <workItem from="1719164554917" duration="4852000" />
+      <workItem from="1719219919316" duration="4712000" />
+      <workItem from="1719230511025" duration="1353000" />
+      <workItem from="1719259187985" duration="1037000" />
+      <workItem from="1719308830640" duration="5316000" />
+      <workItem from="1719332799989" duration="9627000" />
+      <workItem from="1719395599938" duration="3591000" />
+      <workItem from="1719484578859" duration="6838000" />
+      <workItem from="1719521007376" duration="670000" />
+      <workItem from="1719582140871" duration="842000" />
+      <workItem from="1719657609202" duration="1437000" />
+      <workItem from="1719690894999" duration="1617000" />
+      <workItem from="1719695562013" duration="620000" />
+      <workItem from="1719738172929" duration="654000" />
+      <workItem from="1719740789286" duration="2064000" />
+      <workItem from="1719783358211" duration="329000" />
+      <workItem from="1720027048557" duration="8317000" />
+      <workItem from="1720046854620" duration="488000" />
+      <workItem from="1720080101068" duration="1900000" />
+      <workItem from="1720189307304" duration="5012000" />
+      <workItem from="1720264836491" duration="11216000" />
+      <workItem from="1720341501278" duration="1510000" />
+      <workItem from="1720343721593" duration="3193000" />
+      <workItem from="1720382440246" duration="1822000" />
+      <workItem from="1720461199657" duration="2445000" />
+      <workItem from="1720463845322" duration="1719000" />
+      <workItem from="1720470303741" duration="8000" />
+      <workItem from="1721484154434" duration="1798000" />
+      <workItem from="1721662417250" duration="1253000" />
+      <workItem from="1721745682796" duration="3848000" />
+      <workItem from="1721767317112" duration="2658000" />
+      <workItem from="1721774557456" duration="1541000" />
+      <workItem from="1721814629555" duration="1359000" />
+      <workItem from="1721847134614" duration="7999000" />
+      <workItem from="1721901638385" duration="1875000" />
+      <workItem from="1721988085292" duration="596000" />
+      <workItem from="1722257703820" duration="2249000" />
+      <workItem from="1722273667693" duration="4347000" />
+      <workItem from="1722331820385" duration="1268000" />
+      <workItem from="1722368954668" duration="2052000" />
+      <workItem from="1722428526079" duration="1351000" />
+      <workItem from="1722527152281" duration="34000" />
+      <workItem from="1722529365176" duration="914000" />
+      <workItem from="1722591414485" duration="676000" />
+      <workItem from="1722620218600" duration="2020000" />
+      <workItem from="1722690431239" duration="705000" />
+      <workItem from="1722693819514" duration="2043000" />
+      <workItem from="1723910696052" duration="3726000" />
+      <workItem from="1723923027828" duration="2189000" />
+      <workItem from="1723932591757" duration="503000" />
+      <workItem from="1725014206114" duration="5556000" />
+      <workItem from="1725791067637" duration="2879000" />
+      <workItem from="1726143436047" duration="858000" />
+      <workItem from="1727943010073" duration="9392000" />
+      <workItem from="1727975518808" duration="851000" />
+      <workItem from="1728040895107" duration="49000" />
+      <workItem from="1728053901582" duration="1799000" />
+      <workItem from="1728230496817" duration="1812000" />
+      <workItem from="1728244891923" duration="3218000" />
+      <workItem from="1728317669042" duration="1767000" />
+      <workItem from="1728329718310" duration="85000" />
+      <workItem from="1728656779468" duration="3152000" />
+      <workItem from="1728674285859" duration="658000" />
+      <workItem from="1730375293038" duration="868000" />
+      <workItem from="1743954122159" duration="253000" />
+      <workItem from="1743954381909" duration="22000" />
+      <workItem from="1743954546427" duration="30000" />
+      <workItem from="1747484972867" duration="460000" />
+      <workItem from="1747485466390" duration="1718000" />
+      <workItem from="1747488301969" duration="17421000" />
+      <workItem from="1747646150618" duration="9509000" />
+      <workItem from="1747658181856" duration="16578000" />
+      <workItem from="1747732173284" duration="2005000" />
+      <workItem from="1747738635242" duration="5445000" />
+      <workItem from="1747744897504" duration="6130000" />
+      <workItem from="1747759234890" duration="9518000" />
+      <workItem from="1747995325596" duration="4967000" />
+      <workItem from="1748000884081" duration="19527000" />
+      <workItem from="1748026721511" duration="240000" />
+      <workItem from="1748026975172" duration="3854000" />
+      <workItem from="1748078342610" duration="6043000" />
+      <workItem from="1748595781136" duration="8162000" />
+      <workItem from="1748698289408" duration="8375000" />
+      <workItem from="1748786149786" duration="14573000" />
+      <workItem from="1748806507611" duration="6192000" />
+      <workItem from="1748880946280" duration="4382000" />
+      <workItem from="1748961770812" duration="5582000" />
+      <workItem from="1748974541394" duration="475000" />
+      <workItem from="1748975411576" duration="2472000" />
+      <workItem from="1748978327543" duration="948000" />
+      <workItem from="1748979416818" duration="2112000" />
+      <workItem from="1748982439507" duration="7013000" />
+      <workItem from="1749023539831" duration="4335000" />
+      <workItem from="1749043899709" duration="6646000" />
+      <workItem from="1749054541266" duration="8262000" />
+      <workItem from="1749064878890" duration="3009000" />
+      <workItem from="1749122574666" duration="1000" />
+      <workItem from="1749147842085" duration="536000" />
+      <workItem from="1749305647472" duration="723000" />
+      <workItem from="1749392482948" duration="930000" />
+      <workItem from="1749484272588" duration="1819000" />
+      <workItem from="1749488979905" duration="11007000" />
+      <workItem from="1749542088369" duration="8731000" />
+      <workItem from="1749552011335" duration="26730000" />
+      <workItem from="1749632472219" duration="1329000" />
+      <workItem from="1749654547707" duration="12086000" />
+      <workItem from="1749717981568" duration="14663000" />
+      <workItem from="1749746931171" duration="4567000" />
+      <workItem from="1749811848491" duration="9000" />
+      <workItem from="1749848796100" duration="4000" />
+      <workItem from="1752603308869" duration="1240000" />
+      <workItem from="1752680561937" duration="4621000" />
+      <workItem from="1752686384255" duration="282000" />
+      <workItem from="1757160995221" duration="268000" />
+      <workItem from="1759764813678" duration="2790000" />
+      <workItem from="1759852349757" duration="93000" />
+      <workItem from="1759852513819" duration="2589000" />
+      <workItem from="1759918587569" duration="9827000" />
+      <workItem from="1759948178772" duration="194000" />
+      <workItem from="1759948414964" duration="297000" />
+      <workItem from="1759950167686" duration="1209000" />
+      <workItem from="1760114978098" duration="325000" />
+      <workItem from="1760264319978" duration="57000" />
+      <workItem from="1760779846667" duration="22068000" />
+      <workItem from="1760872863471" duration="3499000" />
+      <workItem from="1760891019034" duration="5561000" />
+      <workItem from="1760913025232" duration="91000" />
+      <workItem from="1760949369413" duration="2102000" />
+      <workItem from="1760991986144" duration="2328000" />
+      <workItem from="1761039990604" duration="2112000" />
+      <workItem from="1761061599613" duration="2136000" />
+      <workItem from="1761562587421" duration="1480000" />
+      <workItem from="1761644925253" duration="7790000" />
+      <workItem from="1762248208565" duration="23000" />
+      <workItem from="1762338341939" duration="4878000" />
+      <workItem from="1762427933416" duration="3858000" />
+      <workItem from="1765036319215" duration="103000" />
+      <workItem from="1765637348961" duration="773000" />
+      <workItem from="1765735623671" duration="17000" />
+      <workItem from="1765892600164" duration="3617000" />
+      <workItem from="1766005255095" duration="1068000" />
+      <workItem from="1766060581806" duration="1009000" />
+      <workItem from="1766062079931" duration="2029000" />
+      <workItem from="1766091005205" duration="682000" />
+      <workItem from="1766137616461" duration="708000" />
+      <workItem from="1766154308316" duration="2837000" />
+      <workItem from="1766232053583" duration="18687000" />
+      <workItem from="1766260339064" duration="2249000" />
+      <workItem from="1766311702569" duration="3119000" />
+      <workItem from="1766317400495" duration="226000" />
+      <workItem from="1766340193799" duration="9826000" />
+      <workItem from="1766395525022" duration="9105000" />
+      <workItem from="1766406484031" duration="68000" />
+      <workItem from="1766481540837" duration="38059000" />
+      <workItem from="1766763520125" duration="12862000" />
+      <workItem from="1766832652616" duration="16212000" />
+      <workItem from="1766856395450" duration="1058000" />
+      <workItem from="1766911316365" duration="1568000" />
+      <workItem from="1766955345677" duration="1273000" />
+      <workItem from="1767179194564" duration="8976000" />
+      <workItem from="1767188284079" duration="1214000" />
+      <workItem from="1767193427113" duration="1579000" />
+      <workItem from="1767200655442" duration="1017000" />
+      <workItem from="1767365264509" duration="9917000" />
+      <workItem from="1767443396319" duration="1013000" />
+      <workItem from="1767527072637" duration="4234000" />
+      <workItem from="1767536509200" duration="2929000" />
+      <workItem from="1767547400527" duration="10000" />
+      <workItem from="1767611076317" duration="1559000" />
+      <workItem from="1767612809292" duration="5162000" />
+      <workItem from="1767621963471" duration="4000" />
+      <workItem from="1767631207657" duration="2207000" />
+      <workItem from="1767646675006" duration="336000" />
+      <workItem from="1767700856124" duration="2509000" />
+      <workItem from="1767703532126" duration="550000" />
+      <workItem from="1767704104358" duration="139000" />
+      <workItem from="1767704254938" duration="50000" />
+      <workItem from="1767704306419" duration="1041000" />
+      <workItem from="1767710079827" duration="1499000" />
+    </task>
+    <task id="LOCAL-00177" summary="Added two evaluation notebooks.">
+      <option name="closed" value="true" />
+      <created>1761655522682</created>
+      <option name="number" value="00177" />
+      <option name="presentableId" value="LOCAL-00177" />
+      <option name="project" value="LOCAL" />
+      <updated>1761655522683</updated>
+    </task>
+    <task id="LOCAL-00178" summary="Add new scripts and notebooks for dataset creation and simulation">
+      <option name="closed" value="true" />
+      <created>1762343797957</created>
+      <option name="number" value="00178" />
+      <option name="presentableId" value="LOCAL-00178" />
+      <option name="project" value="LOCAL" />
+      <updated>1762343797957</updated>
+    </task>
+    <task id="LOCAL-00179" summary="Add new scripts and notebooks for dataset creation and simulation">
+      <option name="closed" value="true" />
+      <created>1762428315155</created>
+      <option name="number" value="00179" />
+      <option name="presentableId" value="LOCAL-00179" />
+      <option name="project" value="LOCAL" />
+      <updated>1762428315155</updated>
+    </task>
+    <task id="LOCAL-00180" summary="Update notebooks and scripts for LSST migration; adjust kernel specs and versions, enhance dataset simulation parameters, and improve output handling.">
+      <option name="closed" value="true" />
+      <created>1766061721574</created>
+      <option name="number" value="00180" />
+      <option name="presentableId" value="LOCAL-00180" />
+      <option name="project" value="LOCAL" />
+      <updated>1766061721575</updated>
+    </task>
+    <task id="LOCAL-00181" summary="Update notebooks and scripts for LSST migration; adjust kernel specs and versions, enhance dataset simulation parameters, and improve output handling.">
+      <option name="closed" value="true" />
+      <created>1766075062988</created>
+      <option name="number" value="00181" />
+      <option name="presentableId" value="LOCAL-00181" />
+      <option name="project" value="LOCAL" />
+      <updated>1766075062988</updated>
+    </task>
+    <task id="LOCAL-00182" summary="Update notebooks and scripts for LSST migration; adjust kernel specs and versions, enhance dataset simulation parameters, and improve output handling.">
+      <option name="closed" value="true" />
+      <created>1766091077357</created>
+      <option name="number" value="00182" />
+      <option name="presentableId" value="LOCAL-00182" />
+      <option name="project" value="LOCAL" />
+      <updated>1766091077357</updated>
+    </task>
+    <task id="LOCAL-00183" summary="Update notebooks and scripts for LSST migration; adjust kernel specs and versions, enhance dataset simulation parameters, and improve output handling.">
+      <option name="closed" value="true" />
+      <created>1766138289906</created>
+      <option name="number" value="00183" />
+      <option name="presentableId" value="LOCAL-00183" />
+      <option name="project" value="LOCAL" />
+      <updated>1766138289906</updated>
+    </task>
+    <task id="LOCAL-00184" summary="Refactor simulation and evaluation scripts; remove unused imports, update detection logic, and add utility function for line drawing in masks.">
+      <option name="closed" value="true" />
+      <created>1766267095866</created>
+      <option name="number" value="00184" />
+      <option name="presentableId" value="LOCAL-00184" />
+      <option name="project" value="LOCAL" />
+      <updated>1766267095866</updated>
+    </task>
+    <task id="LOCAL-00185" summary="Added two threshold detection experimentation">
+      <option name="closed" value="true" />
+      <created>1766406546641</created>
+      <option name="number" value="00185" />
+      <option name="presentableId" value="LOCAL-00185" />
+      <option name="project" value="LOCAL" />
+      <updated>1766406546641</updated>
+    </task>
+    <task id="LOCAL-00186" summary="Update evaluation notebook and training script; adjust execution times and refactor epoch setting logic for data loaders.">
+      <option name="closed" value="true" />
+      <created>1766574678273</created>
+      <option name="number" value="00186" />
+      <option name="presentableId" value="LOCAL-00186" />
+      <option name="project" value="LOCAL" />
+      <updated>1766574678273</updated>
+    </task>
+    <task id="LOCAL-00187" summary="Add baseline and curriculum training scripts with dataset handling and model training logic">
+      <option name="closed" value="true" />
+      <created>1766840083414</created>
+      <option name="number" value="00187" />
+      <option name="presentableId" value="LOCAL-00187" />
+      <option name="project" value="LOCAL" />
+      <updated>1766840083414</updated>
+    </task>
+    <task id="LOCAL-00188" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
+      <option name="closed" value="true" />
+      <created>1766848762728</created>
+      <option name="number" value="00188" />
+      <option name="presentableId" value="LOCAL-00188" />
+      <option name="project" value="LOCAL" />
+      <updated>1766848762728</updated>
+    </task>
+    <task id="LOCAL-00189" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
+      <option name="closed" value="true" />
+      <created>1766848896497</created>
+      <option name="number" value="00189" />
+      <option name="presentableId" value="LOCAL-00189" />
+      <option name="project" value="LOCAL" />
+      <updated>1766848896497</updated>
+    </task>
+    <task id="LOCAL-00190" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
+      <option name="closed" value="true" />
+      <created>1766849143606</created>
+      <option name="number" value="00190" />
+      <option name="presentableId" value="LOCAL-00190" />
+      <option name="project" value="LOCAL" />
+      <updated>1766849143606</updated>
+    </task>
+    <task id="LOCAL-00191" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
+      <option name="closed" value="true" />
+      <created>1766849180876</created>
+      <option name="number" value="00191" />
+      <option name="presentableId" value="LOCAL-00191" />
+      <option name="project" value="LOCAL" />
+      <updated>1766849180876</updated>
+    </task>
+    <task id="LOCAL-00192" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
+      <option name="closed" value="true" />
+      <created>1766849381219</created>
+      <option name="number" value="00192" />
+      <option name="presentableId" value="LOCAL-00192" />
+      <option name="project" value="LOCAL" />
+      <updated>1766849381219</updated>
+    </task>
+    <task id="LOCAL-00193" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
+      <option name="closed" value="true" />
+      <created>1766850074786</created>
+      <option name="number" value="00193" />
+      <option name="presentableId" value="LOCAL-00193" />
+      <option name="project" value="LOCAL" />
+      <updated>1766850074786</updated>
+    </task>
+    <task id="LOCAL-00194" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
+      <option name="closed" value="true" />
+      <created>1766850217672</created>
+      <option name="number" value="00194" />
+      <option name="presentableId" value="LOCAL-00194" />
+      <option name="project" value="LOCAL" />
+      <updated>1766850217672</updated>
+    </task>
+    <task id="LOCAL-00195" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
+      <option name="closed" value="true" />
+      <created>1766850318427</created>
+      <option name="number" value="00195" />
+      <option name="presentableId" value="LOCAL-00195" />
+      <option name="project" value="LOCAL" />
+      <updated>1766850318427</updated>
+    </task>
+    <task id="LOCAL-00196" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
+      <option name="closed" value="true" />
+      <created>1766850731921</created>
+      <option name="number" value="00196" />
+      <option name="presentableId" value="LOCAL-00196" />
+      <option name="project" value="LOCAL" />
+      <updated>1766850731921</updated>
+    </task>
+    <task id="LOCAL-00197" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
+      <option name="closed" value="true" />
+      <created>1766851376154</created>
+      <option name="number" value="00197" />
+      <option name="presentableId" value="LOCAL-00197" />
+      <option name="project" value="LOCAL" />
+      <updated>1766851376154</updated>
+    </task>
+    <task id="LOCAL-00198" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
+      <option name="closed" value="true" />
+      <created>1766851752715</created>
+      <option name="number" value="00198" />
+      <option name="presentableId" value="LOCAL-00198" />
+      <option name="project" value="LOCAL" />
+      <updated>1766851752715</updated>
+    </task>
+    <task id="LOCAL-00199" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
+      <option name="closed" value="true" />
+      <created>1766852020435</created>
+      <option name="number" value="00199" />
+      <option name="presentableId" value="LOCAL-00199" />
+      <option name="project" value="LOCAL" />
+      <updated>1766852020435</updated>
+    </task>
+    <task id="LOCAL-00200" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
+      <option name="closed" value="true" />
+      <created>1766852093867</created>
+      <option name="number" value="00200" />
+      <option name="presentableId" value="LOCAL-00200" />
+      <option name="project" value="LOCAL" />
+      <updated>1766852093867</updated>
+    </task>
+    <task id="LOCAL-00201" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
+      <option name="closed" value="true" />
+      <created>1766852215330</created>
+      <option name="number" value="00201" />
+      <option name="presentableId" value="LOCAL-00201" />
+      <option name="project" value="LOCAL" />
+      <updated>1766852215330</updated>
+    </task>
+    <task id="LOCAL-00202" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
+      <option name="closed" value="true" />
+      <created>1766852304364</created>
+      <option name="number" value="00202" />
+      <option name="presentableId" value="LOCAL-00202" />
+      <option name="project" value="LOCAL" />
+      <updated>1766852304364</updated>
+    </task>
+    <task id="LOCAL-00203" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
+      <option name="closed" value="true" />
+      <created>1766853072966</created>
+      <option name="number" value="00203" />
+      <option name="presentableId" value="LOCAL-00203" />
+      <option name="project" value="LOCAL" />
+      <updated>1766853072966</updated>
+    </task>
+    <task id="LOCAL-00204" summary="Update argument parsing in idea2.py: add validation fraction and pin memory options, modify save paths">
+      <option name="closed" value="true" />
+      <created>1766857101931</created>
+      <option name="number" value="00204" />
+      <option name="presentableId" value="LOCAL-00204" />
+      <option name="project" value="LOCAL" />
+      <updated>1766857101932</updated>
+    </task>
+    <task id="LOCAL-00205" summary="Update argument parsing in idea2.py: add validation fraction and pin memory options, modify save paths">
+      <option name="closed" value="true" />
+      <created>1766857361474</created>
+      <option name="number" value="00205" />
+      <option name="presentableId" value="LOCAL-00205" />
+      <option name="project" value="LOCAL" />
+      <updated>1766857361474</updated>
+    </task>
+    <task id="LOCAL-00206" summary="Update argument parsing in idea2.py: add validation fraction and pin memory options, modify save paths">
+      <option name="closed" value="true" />
+      <created>1766956613166</created>
+      <option name="number" value="00206" />
+      <option name="presentableId" value="LOCAL-00206" />
+      <option name="project" value="LOCAL" />
+      <updated>1766956613166</updated>
+    </task>
+    <task id="LOCAL-00207" summary="Refactor Idea 2 training logic in idea2.py and update Evaluation.ipynb: streamline argument parsing, enhance loss function, and improve evaluation metrics">
+      <option name="closed" value="true" />
+      <created>1767187017206</created>
+      <option name="number" value="00207" />
+      <option name="presentableId" value="LOCAL-00207" />
+      <option name="project" value="LOCAL" />
+      <updated>1767187017206</updated>
+    </task>
+    <task id="LOCAL-00208" summary="Add Idea 3 implementation: introduce two-phase loss schedule with BCE and Focal Tversky, along with training script and SLURM job configuration">
+      <option name="closed" value="true" />
+      <created>1767187978003</created>
+      <option name="number" value="00208" />
+      <option name="presentableId" value="LOCAL-00208" />
+      <option name="project" value="LOCAL" />
+      <updated>1767187978003</updated>
+    </task>
+    <task id="LOCAL-00209" summary="Add Idea 3 implementation: introduce two-phase loss schedule with BCE and Focal Tversky, along with training script and SLURM job configuration">
+      <option name="closed" value="true" />
+      <created>1767188823854</created>
+      <option name="number" value="00209" />
+      <option name="presentableId" value="LOCAL-00209" />
+      <option name="project" value="LOCAL" />
+      <updated>1767188823855</updated>
+    </task>
+    <task id="LOCAL-00210" summary="Add Idea 3 implementation: introduce two-phase loss schedule with BCE and Focal Tversky, along with training script and SLURM job configuration">
+      <option name="closed" value="true" />
+      <created>1767189349682</created>
+      <option name="number" value="00210" />
+      <option name="presentableId" value="LOCAL-00210" />
+      <option name="project" value="LOCAL" />
+      <updated>1767189349682</updated>
+    </task>
+    <task id="LOCAL-00211" summary="Add Idea 3 implementation: introduce two-phase loss schedule with BCE and Focal Tversky, along with training script and SLURM job configuration">
+      <option name="closed" value="true" />
+      <created>1767193855516</created>
+      <option name="number" value="00211" />
+      <option name="presentableId" value="LOCAL-00211" />
+      <option name="project" value="LOCAL" />
+      <updated>1767193855516</updated>
+    </task>
+    <task id="LOCAL-00212" summary="Add Idea 3 implementation: introduce two-phase loss schedule with BCE and Focal Tversky, along with training script and SLURM job configuration">
+      <option name="closed" value="true" />
+      <created>1767194913245</created>
+      <option name="number" value="00212" />
+      <option name="presentableId" value="LOCAL-00212" />
+      <option name="project" value="LOCAL" />
+      <updated>1767194913246</updated>
+    </task>
+    <task id="LOCAL-00213" summary="Add Idea 3 implementation: introduce two-phase loss schedule with BCE and Focal Tversky, along with training script and SLURM job configuration">
+      <option name="closed" value="true" />
+      <created>1767200727067</created>
+      <option name="number" value="00213" />
+      <option name="presentableId" value="LOCAL-00213" />
+      <option name="project" value="LOCAL" />
+      <updated>1767200727068</updated>
+    </task>
+    <task id="LOCAL-00214" summary="Add Idea 3 implementation: introduce two-phase loss schedule with BCE and Focal Tversky, along with training script and SLURM job configuration">
+      <option name="closed" value="true" />
+      <created>1767372603942</created>
+      <option name="number" value="00214" />
+      <option name="presentableId" value="LOCAL-00214" />
+      <option name="project" value="LOCAL" />
+      <updated>1767372603942</updated>
+    </task>
+    <task id="LOCAL-00215" summary="Add Idea 4 implementation: introduce trail-shape regularizer with penalties for isolated activations and compact blobs, along with training script and SLURM job configuration">
+      <option name="closed" value="true" />
+      <created>1767374675587</created>
+      <option name="number" value="00215" />
+      <option name="presentableId" value="LOCAL-00215" />
+      <option name="project" value="LOCAL" />
+      <updated>1767374675587</updated>
+    </task>
+    <task id="LOCAL-00216" summary="Add Idea 4 implementation: introduce trail-shape regularizer with penalties for isolated activations and compact blobs, along with training script and SLURM job configuration">
+      <option name="closed" value="true" />
+      <created>1767375246908</created>
+      <option name="number" value="00216" />
+      <option name="presentableId" value="LOCAL-00216" />
+      <option name="project" value="LOCAL" />
+      <updated>1767375246908</updated>
+    </task>
+    <task id="LOCAL-00217" summary="Add Idea 4 implementation: introduce trail-shape regularizer with penalties for isolated activations and compact blobs, along with training script and SLURM job configuration">
+      <option name="closed" value="true" />
+      <created>1767379381934</created>
+      <option name="number" value="00217" />
+      <option name="presentableId" value="LOCAL-00217" />
+      <option name="project" value="LOCAL" />
+      <updated>1767379381934</updated>
+    </task>
+    <task id="LOCAL-00218" summary="Add Idea 4 implementation: introduce trail-shape regularizer with penalties for isolated activations and compact blobs, along with training script and SLURM job configuration">
+      <option name="closed" value="true" />
+      <created>1767444228694</created>
+      <option name="number" value="00218" />
+      <option name="presentableId" value="LOCAL-00218" />
+      <option name="project" value="LOCAL" />
+      <updated>1767444228694</updated>
+    </task>
+    <task id="LOCAL-00219" summary="Add Idea 4 implementation: introduce trail-shape regularizer with penalties for isolated activations and compact blobs, along with training script and SLURM job configuration">
+      <option name="closed" value="true" />
+      <created>1767530387271</created>
+      <option name="number" value="00219" />
+      <option name="presentableId" value="LOCAL-00219" />
+      <option name="project" value="LOCAL" />
+      <updated>1767530387272</updated>
+    </task>
+    <task id="LOCAL-00220" summary="Add Idea 4 implementation: introduce trail-shape regularizer with penalties for isolated activations and compact blobs, along with training script and SLURM job configuration">
+      <option name="closed" value="true" />
+      <created>1767612761622</created>
+      <option name="number" value="00220" />
+      <option name="presentableId" value="LOCAL-00220" />
+      <option name="project" value="LOCAL" />
+      <updated>1767612761622</updated>
+    </task>
+    <task id="LOCAL-00221" summary="Add Idea 6 implementation: introduce UNet with auxiliary orientation head for line coherence bias, including training script and SLURM job configuration">
+      <option name="closed" value="true" />
+      <created>1767615696536</created>
+      <option name="number" value="00221" />
+      <option name="presentableId" value="LOCAL-00221" />
+      <option name="project" value="LOCAL" />
+      <updated>1767615696536</updated>
+    </task>
+    <task id="LOCAL-00222" summary="Add Idea 6 implementation: introduce UNet with auxiliary orientation head for line coherence bias, including training script and SLURM job configuration">
+      <option name="closed" value="true" />
+      <created>1767616206905</created>
+      <option name="number" value="00222" />
+      <option name="presentableId" value="LOCAL-00222" />
+      <option name="project" value="LOCAL" />
+      <updated>1767616206905</updated>
+    </task>
+    <task id="LOCAL-00223" summary="Add Idea 6 implementation: introduce UNet with auxiliary orientation head for line coherence bias, including training script and SLURM job configuration">
+      <option name="closed" value="true" />
+      <created>1767621135344</created>
+      <option name="number" value="00223" />
+      <option name="presentableId" value="LOCAL-00223" />
+      <option name="project" value="LOCAL" />
+      <updated>1767621135344</updated>
+    </task>
+    <task id="LOCAL-00224" summary="Add Idea 6 implementation: introduce UNet with auxiliary orientation head for line coherence bias, including training script and SLURM job configuration">
+      <option name="closed" value="true" />
+      <created>1767703866072</created>
+      <option name="number" value="00224" />
+      <option name="presentableId" value="LOCAL-00224" />
+      <option name="project" value="LOCAL" />
+      <updated>1767703866072</updated>
+    </task>
+    <task id="LOCAL-00225" summary="Add long_batches parameter and refactor init_distributed function for improved distributed training">
+      <option name="closed" value="true" />
+      <created>1767704488943</created>
+      <option name="number" value="00225" />
+      <option name="presentableId" value="LOCAL-00225" />
+      <option name="project" value="LOCAL" />
+      <updated>1767704488943</updated>
+    </task>
+    <option name="localTasksCounter" value="226" />
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State>
+              <option name="FILTERS">
+                <map>
+                  <entry key="branch">
+                    <value>
+                      <list>
+                        <option value="origin/experiments" />
+                      </list>
+                    </value>
+                  </entry>
+                </map>
+              </option>
+            </State>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="Restart with a replica of the HSC model." />
+    <MESSAGE value="Created UNetResSe model and some scheduled training that seems to work from the initial testing." />
+    <MESSAGE value="Tried to create multi GPU compatible model and training." />
+    <MESSAGE value="Refactor distributed training setup and adjust DataLoader configuration" />
+    <MESSAGE value="Enhance DDP configuration for distributed training with gradient bucket view and unused parameter handling" />
+    <MESSAGE value="Add requirements file and SLURM script for distributed training setup" />
+    <MESSAGE value="Fix NCCL async error handling environment variable in SLURM script" />
+    <MESSAGE value="Refactor code structure and add GPU health check script" />
+    <MESSAGE value="Refactor import paths for distributed utilities" />
+    <MESSAGE value="Update repository and collection paths in dataset creation script" />
+    <MESSAGE value="Add support for saving last checkpoint in training configuration" />
+    <MESSAGE value="Added two evaluation notebooks." />
+    <MESSAGE value="Add new scripts and notebooks for dataset creation and simulation" />
+    <MESSAGE value="Update notebooks and scripts for LSST migration; adjust kernel specs and versions, enhance dataset simulation parameters, and improve output handling." />
+    <MESSAGE value="Refactor simulation and evaluation scripts; remove unused imports, update detection logic, and add utility function for line drawing in masks." />
+    <MESSAGE value="Added two threshold detection experimentation" />
+    <MESSAGE value="Update evaluation notebook and training script; adjust execution times and refactor epoch setting logic for data loaders." />
+    <MESSAGE value="Add baseline and curriculum training scripts with dataset handling and model training logic" />
+    <MESSAGE value="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic" />
+    <MESSAGE value="Update argument parsing in idea2.py: add validation fraction and pin memory options, modify save paths" />
+    <MESSAGE value="Refactor Idea 2 training logic in idea2.py and update Evaluation.ipynb: streamline argument parsing, enhance loss function, and improve evaluation metrics" />
+    <MESSAGE value="Add Idea 3 implementation: introduce two-phase loss schedule with BCE and Focal Tversky, along with training script and SLURM job configuration" />
+    <MESSAGE value="Add Idea 4 implementation: introduce trail-shape regularizer with penalties for isolated activations and compact blobs, along with training script and SLURM job configuration" />
+    <MESSAGE value="Add Idea 6 implementation: introduce UNet with auxiliary orientation head for line coherence bias, including training script and SLURM job configuration" />
+    <MESSAGE value="Add long_batches parameter and refactor init_distributed function for improved distributed training" />
+    <option name="LAST_COMMIT_MESSAGE" value="Add long_batches parameter and refactor init_distributed function for improved distributed training" />
+  </component>
+  <component name="com.intellij.coverage.CoverageDataManagerImpl">
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$extract_butler_to_tfrecords.coverage" NAME="extract_butler_to_tfrecords Coverage Results" MODIFIED="1721749689457" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/tools" />
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$idea2_new.coverage" NAME="idea2_new Coverage Results" MODIFIED="1767186028161" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/experiments" />
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$eval_tools.coverage" NAME="eval_tools Coverage Results" MODIFIED="1716663097179" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/evals" />
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$idea2.coverage" NAME="idea2 Coverage Results" MODIFIED="1766857018528" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/experiments" />
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$postprocess.coverage" NAME="postprocess Coverage Results" MODIFIED="1767376009713" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/experiments/utils" />
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$idea4.coverage" NAME="idea4 Coverage Results" MODIFIED="1767444102996" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/experiments" />
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$attention_module.coverage" NAME="attention_module Coverage Results" MODIFIED="1716478915026" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/tools" />
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$idea3.coverage" NAME="idea3 Coverage Results" MODIFIED="1767187663436" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/experiments" />
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$model.coverage" NAME="model Coverage Results" MODIFIED="1717176957343" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/tools" />
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$main.coverage" NAME="main Coverage Results" MODIFIED="1766839273774" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/ADCNN" />
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$gpu_healthcheck.coverage" NAME="gpu_healthcheck Coverage Results" MODIFIED="1760949832299" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/ADCNN/utils" />
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$Attention.coverage" NAME="Attention Coverage Results" MODIFIED="1716323936190" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/tools/segformer" />
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$idea6.coverage" NAME="idea6 Coverage Results" MODIFIED="1767614632187" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/experiments" />
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$baseline.coverage" NAME="baseline Coverage Results" MODIFIED="1766845324233" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/experiments" />
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$hypertuneModels.coverage" NAME="hypertuneModels Coverage Results" MODIFIED="1716205725996" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/tools" />
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$idea1.coverage" NAME="idea1 Coverage Results" MODIFIED="1766847550164" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/experiments" />
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$train.coverage" NAME="train Coverage Results" MODIFIED="1760795193408" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/ADCNN" />
+    <SUITE FILE_PATH="coverage/Asteroid_detection_CNN$mag_len_hist.coverage" NAME="mag_len_hist Coverage Results" MODIFIED="1717622334152" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/experiments" />
+  </component>
+  <component name="github-copilot-workspace">
+    <instructionFileLocations>
+      <option value=".github/instructions" />
+    </instructionFileLocations>
+    <promptFileLocations>
+      <option value=".github/prompts" />
+    </promptFileLocations>
+  </component>
+</project>
