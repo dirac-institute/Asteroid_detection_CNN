@@ -28,8 +28,11 @@ def check_pair(args):
             dataId={"instrument": "LSSTComCam", "visit": int(visit), "detector": int(detector)},
         )
         wcs = calexp.wcs
-        if wcs is None:
+        photocalib = calexp.getPhotoCalib()
+        if (wcs is None):
             return (visit, detector, "wcs_none")
+        if (photocalib is None):
+            return (visit, detector, "photocalib_none")
         try:
             _ = wcs.getPixelScale()
             return None

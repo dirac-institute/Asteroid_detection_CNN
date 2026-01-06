@@ -6,7 +6,6 @@
   <component name="ChangeListManager">
     <list default="true" id="62ef92c8-e6b2-40b2-9628-bd3494e5b019" name="Changes" comment="Add bad visits dataset and update scripts for handling bad data in LSST queries">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ADCNN/data/dataset_creation/simulate_inject.py" beforeDir="false" afterPath="$PROJECT_DIR$/ADCNN/data/dataset_creation/simulate_inject.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -406,31 +405,7 @@
       <workItem from="1767704104358" duration="139000" />
       <workItem from="1767704254938" duration="50000" />
       <workItem from="1767704306419" duration="1041000" />
-      <workItem from="1767710079827" duration="14750000" />
-    </task>
-    <task id="LOCAL-00182" summary="Update notebooks and scripts for LSST migration; adjust kernel specs and versions, enhance dataset simulation parameters, and improve output handling.">
-      <option name="closed" value="true" />
-      <created>1766091077357</created>
-      <option name="number" value="00182" />
-      <option name="presentableId" value="LOCAL-00182" />
-      <option name="project" value="LOCAL" />
-      <updated>1766091077357</updated>
-    </task>
-    <task id="LOCAL-00183" summary="Update notebooks and scripts for LSST migration; adjust kernel specs and versions, enhance dataset simulation parameters, and improve output handling.">
-      <option name="closed" value="true" />
-      <created>1766138289906</created>
-      <option name="number" value="00183" />
-      <option name="presentableId" value="LOCAL-00183" />
-      <option name="project" value="LOCAL" />
-      <updated>1766138289906</updated>
-    </task>
-    <task id="LOCAL-00184" summary="Refactor simulation and evaluation scripts; remove unused imports, update detection logic, and add utility function for line drawing in masks.">
-      <option name="closed" value="true" />
-      <created>1766267095866</created>
-      <option name="number" value="00184" />
-      <option name="presentableId" value="LOCAL-00184" />
-      <option name="project" value="LOCAL" />
-      <updated>1766267095866</updated>
+      <workItem from="1767710079827" duration="16310000" />
     </task>
     <task id="LOCAL-00185" summary="Added two threshold detection experimentation">
       <option name="closed" value="true" />
@@ -800,7 +775,31 @@
       <option name="project" value="LOCAL" />
       <updated>1767733391312</updated>
     </task>
-    <option name="localTasksCounter" value="231" />
+    <task id="LOCAL-00231" summary="Add bad visits dataset and update scripts for handling bad data in LSST queries">
+      <option name="closed" value="true" />
+      <created>1767734055704</created>
+      <option name="number" value="00231" />
+      <option name="presentableId" value="LOCAL-00231" />
+      <option name="project" value="LOCAL" />
+      <updated>1767734055704</updated>
+    </task>
+    <task id="LOCAL-00232" summary="Add bad visits dataset and update scripts for handling bad data in LSST queries">
+      <option name="closed" value="true" />
+      <created>1767734127491</created>
+      <option name="number" value="00232" />
+      <option name="presentableId" value="LOCAL-00232" />
+      <option name="project" value="LOCAL" />
+      <updated>1767734127491</updated>
+    </task>
+    <task id="LOCAL-00233" summary="Add bad visits dataset and update scripts for handling bad data in LSST queries">
+      <option name="closed" value="true" />
+      <created>1767734475111</created>
+      <option name="number" value="00233" />
+      <option name="presentableId" value="LOCAL-00233" />
+      <option name="project" value="LOCAL" />
+      <updated>1767734475111</updated>
+    </task>
+    <option name="localTasksCounter" value="234" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
