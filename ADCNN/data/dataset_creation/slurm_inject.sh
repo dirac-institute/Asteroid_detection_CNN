@@ -2,10 +2,10 @@
 #SBATCH --requeue
 #SBATCH --job-name=adc-inject
 #SBATCH --account=rubin:developers
-#SBATCH --output=/sdf/home/m/mrakovci/logs/ADCNN_train_creation.out
+#SBATCH --output=/sdf/home/m/mrakovci/logs/ADCNN_train_inject.out
 #SBATCH --partition=milano
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=21
+#SBATCH --cpus-per-task=45
 #SBATCH --mem-per-cpu=16G
 #SBATCH --time=3-00:00:00
 
@@ -27,7 +27,7 @@ srun python3 -u simulate_inject.py \
   --repo /repo/main \
   --collections LSSTComCam/runs/DRP/DP1/w_2025_17/DM-50530 \
   --save-path $OUT \
-  --parallel 20 \
+  --parallel "${SLURM_CPUS_PER_TASK:-8}" \
   --train-test-split 0.94117 \
   --random-subset 850 \
   --trail-length-min 6 --trail-length-max 60 \
