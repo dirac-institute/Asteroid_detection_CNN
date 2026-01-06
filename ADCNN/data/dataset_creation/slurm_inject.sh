@@ -2,7 +2,7 @@
 #SBATCH --requeue
 #SBATCH --job-name=adc-inject
 #SBATCH --account=rubin:developers
-#SBATCH --output=/sdf/home/m/mrakovci/logs/ADCNN.out
+#SBATCH --output=/sdf/home/m/mrakovci/logs/ADCNN_train_creation.out
 #SBATCH --partition=milano
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=21
