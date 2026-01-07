@@ -192,6 +192,29 @@ def crossmatch_catalogs (pre, post):
         new_post = post.copy()
     return new_post
 
+def footprints_to_label_mask(src_cat, dimensions, dtype=np.uint16):
+    """
+    Build integer label mask from source footprints.
+    0 = background, (idx+1) = source idx in src_cat.
+    """
+    H, W = int(dimensions.y), int(dimensions.x)
+    lab = np.zeros((H, W), dtype=dtype)
+
+    for sid in range(len(src_cat)):
+        fp = src_cat[sid].getFootprint()
+        label = sid + 1  # 1..N
+
+        # Fill footprint pixels using spans (fast, no per-pixel loops)
+        for span in fp.spans:
+            y = span.getY()
+            if y < 0 or y >= H:
+                continue
+            x0 = max(span.getX0(), 0)
+            x1 = min(span.getX1(), W - 1)
+            if x0 <= x1:
+                lab[y, x0:x1+1] = label  # overwrite is fine for ignore-mask use
+    return lab
+
 def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=123, debug=False):
     try:
         if seed is None:
@@ -215,8 +238,9 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
                                                                        overlap_minpix=10,
                                                                        overlap_frac=0.5,)
 
+        real_labels = footprints_to_label_mask(pre_injection_Src, dimensions, dtype=np.uint16)
         if not debug:
-            return injected_calexp.image.array.astype("float32"), mask.astype("bool"), injection_catalog
+            return injected_calexp.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog
         else:
             det_mask = None
             m = injected_calexp.mask
@@ -228,7 +252,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
                 detn_bit = m.getPlaneBitMask("DETECTED_NEGATIVE")
                 det_neg_mask = (m.array & detn_bit) != 0
             matched_fp_masks = np.any(np.stack(matched_fp_mask, axis=-1), axis=-1)
-            return injected_calexp.image.array.astype("float32"), mask.astype("bool"), injection_catalog, det_mask, matched_fp_masks
+            return injected_calexp.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog, det_mask, matched_fp_masks
     except Exception as e:
         return {"ok": False, "dataId": ref_dataId, "error": repr(e), "traceback": traceback.format_exc()}
 
@@ -241,16 +265,16 @@ def worker(args):
         if res is None:
             raise RuntimeError("one_detector_injection returned None")
 
-        img, mask, catalog = res
+        img, mask, real_labels, catalog = res
         with lock:
             with h5py.File(h5path, "a") as f:
                 f["images"][idx] = img
                 f["masks"][idx] = mask
+                if "real_labels" in f:
+                    f["real_labels"][idx] = real_labels
 
             df = catalog.to_pandas()
             df["image_id"] = idx
-
-            import os
             file_exists = os.path.exists(csvpath)
             df.to_csv(csvpath, mode=("a" if file_exists else "w"),
                       header=(not file_exists), index=False)
@@ -293,8 +317,33 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             f.create_dataset("masks", shape=(len(refs) - len(test_index), dims.y, dims.x), dtype="bool", chunks=chunks)
     if len(test_index) > 0:
         with h5py.File(h5test_path, "w") as f:
-            f.create_dataset("images", shape=(len(test_index), dims.y, dims.x), dtype="float32", chunks=chunks)
-            f.create_dataset("masks", shape=(len(test_index), dims.y, dims.x), dtype="bool", chunks=chunks)
+            f.create_dataset(
+                "images",
+                shape=(len(test_index), dims.y, dims.x),
+                dtype="float32",
+                chunks=chunks,
+                compression="gzip",
+                compression_opts=4,
+                shuffle=True,
+            )
+            f.create_dataset(
+                "masks",
+                shape=(len(test_index), dims.y, dims.x),
+                dtype="bool",
+                chunks=chunks,
+                compression="gzip",
+                compression_opts=4,
+                shuffle=True,
+            )
+            f.create_dataset(
+                "real_labels",
+                shape=(len(test_index), dims.y, dims.x),
+                dtype="uint16",
+                chunks=chunks,
+                compression="gzip",
+                compression_opts=4,
+                shuffle=True,
+            )
     manager = Manager()
     lock = manager.Lock()
     count_train = 0
@@ -386,7 +435,7 @@ def main():
         random_subset=args.random_subset,
         train_test_split=args.train_test_split,
         chunks=args.chunks,
-        test_only=False,
+        test_only=True,
         seed=args.seed,
         bad_visits_file=args.bad_visits_file,
     )
