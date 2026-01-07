@@ -20,7 +20,7 @@ set -euo pipefail
 cd /sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/ADCNN/data/dataset_creation
 
 OUT=/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/DATA
-#rm -f $OUT/train.h5 $OUT/test.h5 $OUT/train.csv $OUT/test.csv
+rm -f $OUT/train.h5 $OUT/test.h5 $OUT/train.csv $OUT/test.csv
 mkdir -p $OUT
 
 echo "SLURM_CPUS_PER_TASK: ${SLURM_CPUS_PER_TASK:-8}"

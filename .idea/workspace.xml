@@ -5,7 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="62ef92c8-e6b2-40b2-9628-bd3494e5b019" name="Changes" comment="Add bad visits dataset and update scripts for handling bad data in LSST queries">
-      <change beforePath="$PROJECT_DIR$/ADCNN/data/dataset_creation/slurm_inject.sh" beforeDir="false" afterPath="$PROJECT_DIR$/ADCNN/data/dataset_creation/slurm_inject.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -100,7 +100,7 @@
       <window_info id="Commit_Guest" show_stripe_button="false" />
       <window_info id="Pull Requests" />
       <window_info id="Learn" show_stripe_button="false" />
-      <window_info active="true" content_ui="combo" id="Project" order="0" visible="true" weight="0.32994792" />
+      <window_info active="true" content_ui="combo" id="Project" order="0" visible="true" />
       <window_info id="Commit" order="1" weight="0.33035713" />
       <window_info id="Structure" order="2" side_tool="true" weight="0.25" />
       <window_info id="Welcome to GitHub Copilot" order="3" show_stripe_button="false" weight="0.33035713" />
@@ -153,8 +153,8 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-js-predefined-d6986cc7102b-9b0f141eb926-JavaScript-PY-253.29346.142" />
-        <option value="bundled-python-sdk-f2b7a9f6281b-6e1f45a539f7-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.29346.142" />
+        <option value="bundled-js-predefined-d6986cc7102b-09060db00ec0-JavaScript-PY-251.26927.90" />
+        <option value="bundled-python-sdk-41e8cd69c857-64d779b69b7a-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-251.26927.90" />
       </set>
     </attachedChunks>
   </component>
