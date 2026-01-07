@@ -407,15 +407,7 @@
       <workItem from="1767704306419" duration="1041000" />
       <workItem from="1767710079827" duration="17984000" />
       <workItem from="1767784330534" duration="6028000" />
-      <workItem from="1767806557606" duration="3531000" />
-    </task>
-    <task id="LOCAL-00195" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
-      <option name="closed" value="true" />
-      <created>1766850318427</created>
-      <option name="number" value="00195" />
-      <option name="presentableId" value="LOCAL-00195" />
-      <option name="project" value="LOCAL" />
-      <updated>1766850318427</updated>
+      <workItem from="1767806557606" duration="5096000" />
     </task>
     <task id="LOCAL-00196" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
       <option name="closed" value="true" />
@@ -801,7 +793,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767819806053</updated>
     </task>
-    <option name="localTasksCounter" value="244" />
+    <task id="LOCAL-00244" summary="Add bad visits dataset and update scripts for handling bad data in LSST queries">
+      <option name="closed" value="true" />
+      <created>1767820652758</created>
+      <option name="number" value="00244" />
+      <option name="presentableId" value="LOCAL-00244" />
+      <option name="project" value="LOCAL" />
+      <updated>1767820652758</updated>
+    </task>
+    <option name="localTasksCounter" value="245" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
