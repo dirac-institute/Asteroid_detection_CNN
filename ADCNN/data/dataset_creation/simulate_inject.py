@@ -229,8 +229,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             matched_fp_masks = np.any(np.stack(matched_fp_mask, axis=-1), axis=-1)
             return injected_calexp.image.array.astype("float32"), mask.astype("bool"), injection_catalog, det_mask, matched_fp_masks
     except Exception as e:
-        print(f"[WARNING] Skipping {ref_dataId} due to failure: {e}")
-        return None
+        return {"ok": False, "dataId": ref_dataId, "error": repr(e), "traceback": traceback.format_exc()}
 
 
 def worker(args):
@@ -240,8 +239,12 @@ def worker(args):
     with counter_lock:
         completed_counter.value += 1
         print(f"[{completed_counter.value}/{total_tasks}] done", flush=True)
-    if res is None:
-        return
+    # Failure path
+    if isinstance(res, dict) and res.get("ok") is False:
+        res["idx"] = idx
+        return res
+
+    # Success path
     img, mask, catalog = res
     with lock:
         with h5py.File(h5path, "a") as f:
@@ -250,6 +253,8 @@ def worker(args):
         df = catalog.to_pandas()
         df["image_id"] = idx
         df.to_csv(csvpath, mode=("w" if idx == 0 else "a"), header=(idx == 0), index=False)
+
+    return {"ok": True, "idx": idx, "dataId": dataId}
 
 
 def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitude, beta, where, parallel=4,
@@ -261,7 +266,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
     refs = list(set(butler.registry.queryDatasets("preliminary_visit_image", where=where, instrument="LSSTComCam", findFirst=True)))
     refs = sorted(refs, key=lambda r: str(r.dataId["visit"]*1000+r.dataId["detector"]))
     if bad_visits_file is not None:
-        bad_df = pd.read_csv("bad_pairs.csv")
+        bad_df = pd.read_csv(bad_visits_file)
         bad_set = set(zip(bad_df["visit"].astype(int), bad_df["detector"].astype(int)))
         refs = [r for r in refs if (int(r.dataId["visit"]), int(r.dataId["detector"])) not in bad_set]
     if random_subset > 0:
@@ -306,8 +311,24 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
                           "preliminary_visit_image", seed])
     if parallel > 1:
+        fails = []
+        oks = 0
+
         with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as executor:
-            list(executor.map(worker, tasks))
+            for out in executor.map(worker, tasks):
+                if out is None:
+                    continue
+                if out.get("ok"):
+                    oks += 1
+                else:
+                    fails.append(out)
+
+        print(f"SUCCESS: {oks}, FAIL:  {len(fails)}, TOTAL:  {len(tasks)}")
+
+        if fails:
+            pd.DataFrame(fails).to_csv(os.path.join(save_path, "failed_tasks.csv"), index=False)
+        #with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as executor:
+        #    list(executor.map(worker, tasks))
     else:
         for task in tasks:
             worker(task)

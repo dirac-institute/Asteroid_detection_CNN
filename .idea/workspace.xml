@@ -6,7 +6,7 @@
   <component name="ChangeListManager">
     <list default="true" id="62ef92c8-e6b2-40b2-9628-bd3494e5b019" name="Changes" comment="Add bad visits dataset and update scripts for handling bad data in LSST queries">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ADCNN/data/dataset_creation/slurm_inject.sh" beforeDir="false" afterPath="$PROJECT_DIR$/ADCNN/data/dataset_creation/slurm_inject.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ADCNN/data/dataset_creation/simulate_inject.py" beforeDir="false" afterPath="$PROJECT_DIR$/ADCNN/data/dataset_creation/simulate_inject.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -51,48 +51,48 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "Python.Attention.executor": "Run",
-    "Python.attention_module.executor": "Run",
-    "Python.baseline.executor": "Run",
-    "Python.eval_tools.executor": "Run",
-    "Python.extract_butler_to_tfrecords.executor": "Run",
-    "Python.gpu_healthcheck.executor": "Run",
-    "Python.hypertuneModels.executor": "Run",
-    "Python.idea1.executor": "Run",
-    "Python.idea2.executor": "Run",
-    "Python.idea2_new.executor": "Run",
-    "Python.idea3.executor": "Run",
-    "Python.idea4.executor": "Run",
-    "Python.idea6.executor": "Run",
-    "Python.mag_len_hist.executor": "Run",
-    "Python.main.executor": "Run",
-    "Python.model.executor": "Run",
-    "Python.postprocess.executor": "Run",
-    "Python.simulate_inject.executor": "Run",
-    "Python.test.executor": "Run",
-    "Python.train.executor": "Run",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
-    "Shell Script.inject.sh.executor": "Run",
-    "ai.playground.ignore.import.keys.banner.in.settings": "true",
-    "deletionFromPopupRequiresConfirmation": "false",
-    "git-widget-placeholder": "eval__fix",
-    "last_opened_file_path": "/home/karlo/Projects/Asteroid_detection_CNN",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs_package_manager_path": "npm",
-    "settings.editor.selected.configurable": "ssh.settings",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ASKED_SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Python.Attention.executor&quot;: &quot;Run&quot;,
+    &quot;Python.attention_module.executor&quot;: &quot;Run&quot;,
+    &quot;Python.baseline.executor&quot;: &quot;Run&quot;,
+    &quot;Python.eval_tools.executor&quot;: &quot;Run&quot;,
+    &quot;Python.extract_butler_to_tfrecords.executor&quot;: &quot;Run&quot;,
+    &quot;Python.gpu_healthcheck.executor&quot;: &quot;Run&quot;,
+    &quot;Python.hypertuneModels.executor&quot;: &quot;Run&quot;,
+    &quot;Python.idea1.executor&quot;: &quot;Run&quot;,
+    &quot;Python.idea2.executor&quot;: &quot;Run&quot;,
+    &quot;Python.idea2_new.executor&quot;: &quot;Run&quot;,
+    &quot;Python.idea3.executor&quot;: &quot;Run&quot;,
+    &quot;Python.idea4.executor&quot;: &quot;Run&quot;,
+    &quot;Python.idea6.executor&quot;: &quot;Run&quot;,
+    &quot;Python.mag_len_hist.executor&quot;: &quot;Run&quot;,
+    &quot;Python.main.executor&quot;: &quot;Run&quot;,
+    &quot;Python.model.executor&quot;: &quot;Run&quot;,
+    &quot;Python.postprocess.executor&quot;: &quot;Run&quot;,
+    &quot;Python.simulate_inject.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test.executor&quot;: &quot;Run&quot;,
+    &quot;Python.train.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
+    &quot;Shell Script.inject.sh.executor&quot;: &quot;Run&quot;,
+    &quot;ai.playground.ignore.import.keys.banner.in.settings&quot;: &quot;true&quot;,
+    &quot;deletionFromPopupRequiresConfirmation&quot;: &quot;false&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;eval__fix&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/home/karlo/Projects/Asteroid_detection_CNN&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;ssh.settings&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RdControllerToolWindowsLayoutState" isNewUi="true">
     <layout>
       <window_info id="Bookmarks" side_tool="true" />
@@ -406,31 +406,8 @@
       <workItem from="1767704104358" duration="139000" />
       <workItem from="1767704254938" duration="50000" />
       <workItem from="1767704306419" duration="1041000" />
-      <workItem from="1767710079827" duration="17513000" />
-    </task>
-    <task id="LOCAL-00189" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
-      <option name="closed" value="true" />
-      <created>1766848896497</created>
-      <option name="number" value="00189" />
-      <option name="presentableId" value="LOCAL-00189" />
-      <option name="project" value="LOCAL" />
-      <updated>1766848896497</updated>
-    </task>
-    <task id="LOCAL-00190" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
-      <option name="closed" value="true" />
-      <created>1766849143606</created>
-      <option name="number" value="00190" />
-      <option name="presentableId" value="LOCAL-00190" />
-      <option name="project" value="LOCAL" />
-      <updated>1766849143606</updated>
-    </task>
-    <task id="LOCAL-00191" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
-      <option name="closed" value="true" />
-      <created>1766849180876</created>
-      <option name="number" value="00191" />
-      <option name="presentableId" value="LOCAL-00191" />
-      <option name="project" value="LOCAL" />
-      <updated>1766849180876</updated>
+      <workItem from="1767710079827" duration="17984000" />
+      <workItem from="1767784330534" duration="2705000" />
     </task>
     <task id="LOCAL-00192" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
       <option name="closed" value="true" />
@@ -800,7 +777,31 @@
       <option name="project" value="LOCAL" />
       <updated>1767737248633</updated>
     </task>
-    <option name="localTasksCounter" value="238" />
+    <task id="LOCAL-00238" summary="Add bad visits dataset and update scripts for handling bad data in LSST queries">
+      <option name="closed" value="true" />
+      <created>1767737275706</created>
+      <option name="number" value="00238" />
+      <option name="presentableId" value="LOCAL-00238" />
+      <option name="project" value="LOCAL" />
+      <updated>1767737275707</updated>
+    </task>
+    <task id="LOCAL-00239" summary="Add bad visits dataset and update scripts for handling bad data in LSST queries">
+      <option name="closed" value="true" />
+      <created>1767737417769</created>
+      <option name="number" value="00239" />
+      <option name="presentableId" value="LOCAL-00239" />
+      <option name="project" value="LOCAL" />
+      <updated>1767737417769</updated>
+    </task>
+    <task id="LOCAL-00240" summary="Add bad visits dataset and update scripts for handling bad data in LSST queries">
+      <option name="closed" value="true" />
+      <created>1767737514607</created>
+      <option name="number" value="00240" />
+      <option name="presentableId" value="LOCAL-00240" />
+      <option name="project" value="LOCAL" />
+      <updated>1767737514607</updated>
+    </task>
+    <option name="localTasksCounter" value="241" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
