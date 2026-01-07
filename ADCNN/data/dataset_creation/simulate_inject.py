@@ -23,6 +23,7 @@ import os
 from multiprocessing import Value, Lock
 import logging
 import pandas as pd
+import traceback
 
 completed_counter = Value('i', 0)
 counter_lock = Lock()
@@ -235,26 +236,30 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
 def worker(args):
     idx, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta, source_type, global_seed = args
     seed = (int(global_seed) * 1_000_003 + int(dataId["visit"]) * 1_003 + int(dataId["detector"])) & 0xFFFFFFFF
-    res = one_detector_injection(number, trail_length, magnitude, beta, repo, coll, dims, source_type, dataId, seed)
-    with counter_lock:
-        completed_counter.value += 1
-        print(f"[{completed_counter.value}/{total_tasks}] done", flush=True)
-    # Failure path
-    if isinstance(res, dict) and res.get("ok") is False:
-        res["idx"] = idx
-        return res
+    try:
+        res = one_detector_injection(number, trail_length, magnitude, beta, repo, coll, dims, source_type, dataId, seed)
+        if res is None:
+            raise RuntimeError("one_detector_injection returned None")
 
-    # Success path
-    img, mask, catalog = res
-    with lock:
-        with h5py.File(h5path, "a") as f:
-            f["images"][idx] = img
-            f["masks"][idx] = mask
-        df = catalog.to_pandas()
-        df["image_id"] = idx
-        df.to_csv(csvpath, mode=("w" if idx == 0 else "a"), header=(idx == 0), index=False)
+        img, mask, catalog = res
+        with lock:
+            with h5py.File(h5path, "a") as f:
+                f["images"][idx] = img
+                f["masks"][idx] = mask
 
-    return {"ok": True, "idx": idx, "dataId": dataId}
+            df = catalog.to_pandas()
+            df["image_id"] = idx
+
+            import os
+            file_exists = os.path.exists(csvpath)
+            df.to_csv(csvpath, mode=("a" if file_exists else "w"),
+                      header=(not file_exists), index=False)
+
+        return ("ok", idx)
+
+    except Exception:
+        tb = traceback.format_exc()
+        return ("err", idx, dataId, tb)
 
 
 def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitude, beta, where, parallel=4,
@@ -311,22 +316,24 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
                           "preliminary_visit_image", seed])
     if parallel > 1:
-        fails = []
-        oks = 0
+        completed = 0
+        total_tasks = len(tasks)
 
-        with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as executor:
-            for out in executor.map(worker, tasks):
-                if out is None:
-                    continue
-                if out.get("ok"):
-                    oks += 1
+        with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as ex:
+            futs = [ex.submit(worker, t) for t in tasks]
+
+            for fut in concurrent.futures.as_completed(futs):
+                completed += 1
+                out = fut.result()
+
+                if out[0] == "ok":
+                    print(f"[{completed}/{total_tasks}] done", flush=True)
+
                 else:
-                    fails.append(out)
+                    _, idx, dataId, tb = out
+                    print(f"[{completed}/{total_tasks}] ERROR: idx={idx} dataId={dataId}", flush=True)
+                    print(tb, flush=True)
 
-        print(f"SUCCESS: {oks}, FAIL:  {len(fails)}, TOTAL:  {len(tasks)}")
-
-        if fails:
-            pd.DataFrame(fails).to_csv(os.path.join(save_path, "failed_tasks.csv"), index=False)
         #with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as executor:
         #    list(executor.map(worker, tasks))
     else:
