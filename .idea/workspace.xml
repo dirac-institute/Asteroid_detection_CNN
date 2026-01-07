@@ -6,7 +6,6 @@
   <component name="ChangeListManager">
     <list default="true" id="62ef92c8-e6b2-40b2-9628-bd3494e5b019" name="Changes" comment="Add bad visits dataset and update scripts for handling bad data in LSST queries">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ADCNN/data/dataset_creation/simulate_inject.py" beforeDir="false" afterPath="$PROJECT_DIR$/ADCNN/data/dataset_creation/simulate_inject.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -408,15 +407,7 @@
       <workItem from="1767704306419" duration="1041000" />
       <workItem from="1767710079827" duration="17984000" />
       <workItem from="1767784330534" duration="6028000" />
-      <workItem from="1767806557606" duration="2623000" />
-    </task>
-    <task id="LOCAL-00194" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
-      <option name="closed" value="true" />
-      <created>1766850217672</created>
-      <option name="number" value="00194" />
-      <option name="presentableId" value="LOCAL-00194" />
-      <option name="project" value="LOCAL" />
-      <updated>1766850217672</updated>
+      <workItem from="1767806557606" duration="3531000" />
     </task>
     <task id="LOCAL-00195" summary="Add SLURM job scripts for ADCNN experiments and implement Idea 2 training logic">
       <option name="closed" value="true" />
@@ -802,7 +793,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767788009988</updated>
     </task>
-    <option name="localTasksCounter" value="243" />
+    <task id="LOCAL-00243" summary="Add bad visits dataset and update scripts for handling bad data in LSST queries">
+      <option name="closed" value="true" />
+      <created>1767819806053</created>
+      <option name="number" value="00243" />
+      <option name="presentableId" value="LOCAL-00243" />
+      <option name="project" value="LOCAL" />
+      <updated>1767819806053</updated>
+    </task>
+    <option name="localTasksCounter" value="244" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
