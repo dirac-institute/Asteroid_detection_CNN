@@ -4,6 +4,7 @@ from pathlib import Path
 
 from common import ensure_dir  # and anything else you need
 from common import draw_one_line
+from common import mag_to_snr
 
 from astroML.crossmatch import crossmatch_angular
 from lsst.daf.butler import Butler
@@ -21,6 +22,8 @@ from astropy.io import ascii
 import os
 from multiprocessing import Value, Lock
 import logging
+import pandas as pd
+import traceback
 
 completed_counter = Value('i', 0)
 counter_lock = Lock()
@@ -47,16 +50,20 @@ def inject(postISRCCD, injection_catalog):
     return inject_res.output_exposure
 
 
-def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, dimensions, source_type, seed):
+def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp):
     rng = np.random.default_rng(seed)
     injection_catalog = Table(
         names=('injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit', 'detector',
-               'integrated_mag', 'PSF_mag', 'physical_filter', 'x', 'y'),
+               'integrated_mag', 'PSF_mag', 'SNR', 'physical_filter', 'x', 'y'),
         dtype=('int64', 'float64', 'float64', 'str', 'float64', 'float64', 'float64', 'int64', 'int64', 'float64',
-               'float64', 'str', 'int64', 'int64'))
-    raw = butler.get(source_type + ".wcs", dataId=ref.dataId)
-    info = butler.get(source_type + ".visitInfo", dataId=ref.dataId)
-    filter_name = butler.get(source_type + ".filter", dataId=ref.dataId)
+               'float64', 'float64', 'str', 'int64', 'int64'))
+
+    raw = calexp.wcs
+    info = calexp.visitInfo
+    filter_name = calexp.filter
+    #raw = butler.get(source_type + ".wcs", dataId=ref.dataId)
+    #info = butler.get(source_type + ".visitInfo", dataId=ref.dataId)
+    #filter_name = butler.get(source_type + ".filter", dataId=ref.dataId)
     fwhm = {"u": 0.92, "g": 0.87, "r": 0.83, "i": 0.80, "z": 0.78, "y": 0.76}
     m5 = {"u": 23.7, "g": 24.97, "r": 24.52, "i": 24.13, "z": 23.56, "y": 22.55}
     psf_depth = m5[filter_name.bandLabel]
@@ -72,13 +79,14 @@ def generate_one_line(n_inject, trail_length, mag, beta, butler, ref, dimensions
         inject_length = rng.uniform(*trail_length)
         x = inject_length / (24 * theta_p)
         upper_limit_mag = psf_depth - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x)) if mag[1] == 0 else mag[1]
-        magnitude = rng.uniform(mag[0], upper_limit_mag)
+        psf_magnitude = rng.uniform(mag[0], upper_limit_mag)
+        magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
         surface_brightness = magnitude + 2.5 * np.log10(inject_length)
-        psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
         angle = rng.uniform(*beta)
+        snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos)
         injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, info.id,
-                                   int(ref.dataId["detector"]), magnitude, psf_magnitude, str(filter_name.bandLabel),
-                                   x_pos, y_pos])
+                                       int(ref.dataId["detector"]), magnitude, psf_magnitude, snr, str(filter_name.bandLabel),
+                                       x_pos, y_pos])
     return injection_catalog
 
 def stack_hits_by_footprints(
@@ -96,6 +104,7 @@ def stack_hits_by_footprints(
     det_flag = np.zeros(N, bool)
     det_mag = np.full(N, np.nan)
     det_magerr = np.full(N, np.nan)
+    det_snr = np.full(N, np.nan)
     matched_fp_masks = [np.zeros((H, W), bool) for _ in range(N)]
 
     mags = calexp_pre.photoCalib.instFluxToMagnitude(post_src, "base_PsfFlux")
@@ -157,12 +166,15 @@ def stack_hits_by_footprints(
             det_flag[inj_id] = True
             det_mag[inj_id] = mags[best_idx, 0]
             det_magerr[inj_id] = mags[best_idx, 1]
+            f = float(post_src[best_idx].get("base_PsfFlux_instFlux"))
+            fe = float(post_src[best_idx].get("base_PsfFlux_instFluxErr"))
+            det_snr[inj_id] = f / fe if (np.isfinite(f) and np.isfinite(fe) and fe > 0) else np.nan
             matched_fp_masks[inj_id][y0:y1+1, x0:x1+1] |= best_fp
 
     injection_catalog["stack_detection"] = det_flag
     injection_catalog["stack_mag"] = det_mag
     injection_catalog["stack_mag_err"] = det_magerr
-
+    injection_catalog["stack_snr"] = det_snr
     return injection_catalog, matched_fp_masks
 
 def crossmatch_catalogs (pre, post):
@@ -180,14 +192,37 @@ def crossmatch_catalogs (pre, post):
         new_post = post.copy()
     return new_post
 
+def footprints_to_label_mask(src_cat, dimensions, dtype=np.uint16):
+    """
+    Build integer label mask from source footprints.
+    0 = background, (idx+1) = source idx in src_cat.
+    """
+    H, W = int(dimensions.y), int(dimensions.x)
+    lab = np.zeros((H, W), dtype=dtype)
+
+    for sid in range(len(src_cat)):
+        fp = src_cat[sid].getFootprint()
+        label = sid + 1  # 1..N
+
+        # Fill footprint pixels using spans (fast, no per-pixel loops)
+        for span in fp.spans:
+            y = span.getY()
+            if y < 0 or y >= H:
+                continue
+            x0 = max(span.getX0(), 0)
+            x1 = min(span.getX1(), W - 1)
+            if x0 <= x1:
+                lab[y, x0:x1+1] = label  # overwrite is fine for ignore-mask use
+    return lab
+
 def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=123, debug=False):
     try:
         if seed is None:
             seed = np.random.randint(0,10000)
         butler = Butler(repo, collections=coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
-        injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, butler, ref, dimensions, source_type, seed)
         calexp = butler.get("preliminary_visit_image", dataId=ref.dataId)
+        injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp)
         pre_injection_Src = butler.get("single_visit_star_footprints", dataId=ref.dataId)
         injected_calexp, post_injection_Src = characterizeCalibrate(inject(calexp, injection_catalog))
         mask = np.zeros((dimensions.y, dimensions.x), dtype=int)
@@ -203,8 +238,9 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
                                                                        overlap_minpix=10,
                                                                        overlap_frac=0.5,)
 
+        real_labels = footprints_to_label_mask(pre_injection_Src, dimensions, dtype=np.uint16)
         if not debug:
-            return injected_calexp.image.array.astype("float32"), mask.astype("bool"), injection_catalog
+            return injected_calexp.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog
         else:
             det_mask = None
             m = injected_calexp.mask
@@ -216,39 +252,52 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
                 detn_bit = m.getPlaneBitMask("DETECTED_NEGATIVE")
                 det_neg_mask = (m.array & detn_bit) != 0
             matched_fp_masks = np.any(np.stack(matched_fp_mask, axis=-1), axis=-1)
-            return injected_calexp.image.array.astype("float32"), mask.astype("bool"), injection_catalog, det_mask, matched_fp_masks
+            return injected_calexp.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog, det_mask, matched_fp_masks
     except Exception as e:
-        print(f"[WARNING] Skipping {ref_dataId} due to failure: {e}")
-        return None
+        return {"ok": False, "dataId": ref_dataId, "error": repr(e), "traceback": traceback.format_exc()}
 
 
 def worker(args):
     idx, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta, source_type, global_seed = args
     seed = (int(global_seed) * 1_000_003 + int(dataId["visit"]) * 1_003 + int(dataId["detector"])) & 0xFFFFFFFF
-    res = one_detector_injection(number, trail_length, magnitude, beta, repo, coll, dims, source_type, dataId, seed)
-    with counter_lock:
-        completed_counter.value += 1
-        print(f"[{completed_counter.value}/{total_tasks}] done", flush=True)
-    if res is None:
-        return
-    img, mask, catalog = res
-    with lock:
-        with h5py.File(h5path, "a") as f:
-            f["images"][idx] = img
-            f["masks"][idx] = mask
-        df = catalog.to_pandas()
-        df["image_id"] = idx
-        df.to_csv(csvpath, mode=("w" if idx == 0 else "a"), header=(idx == 0), index=False)
+    try:
+        res = one_detector_injection(number, trail_length, magnitude, beta, repo, coll, dims, source_type, dataId, seed)
+        if res is None:
+            raise RuntimeError("one_detector_injection returned None")
+
+        img, mask, real_labels, catalog = res
+        with lock:
+            with h5py.File(h5path, "a") as f:
+                f["images"][idx] = img
+                f["masks"][idx] = mask
+                if "real_labels" in f:
+                    f["real_labels"][idx] = real_labels
+
+            df = catalog.to_pandas()
+            df["image_id"] = idx
+            file_exists = os.path.exists(csvpath)
+            df.to_csv(csvpath, mode=("a" if file_exists else "w"),
+                      header=(not file_exists), index=False)
+
+        return ("ok", idx)
+
+    except Exception:
+        tb = traceback.format_exc()
+        return ("err", idx, dataId, tb)
 
 
 def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitude, beta, where, parallel=4,
-                           random_subset=0, train_test_split=0, seed=123, chunks=None, test_only=False):
+                           random_subset=0, train_test_split=0, seed=123, chunks=None, test_only=False, bad_visits_file=None):
     butler = Butler(repo, collections=coll)
     h5train_path = os.path.join(save_path, "train.h5")
     h5test_path = os.path.join(save_path, "test.h5")
 
     refs = list(set(butler.registry.queryDatasets("preliminary_visit_image", where=where, instrument="LSSTComCam", findFirst=True)))
     refs = sorted(refs, key=lambda r: str(r.dataId["visit"]*1000+r.dataId["detector"]))
+    if bad_visits_file is not None:
+        bad_df = pd.read_csv(bad_visits_file)
+        bad_set = set(zip(bad_df["visit"].astype(int), bad_df["detector"].astype(int)))
+        refs = [r for r in refs if (int(r.dataId["visit"]), int(r.dataId["detector"])) not in bad_set]
     if random_subset > 0:
         rng_subset = np.random.default_rng(seed)
         refs = list(rng_subset.choice(refs, random_subset, replace=False))
@@ -257,6 +306,8 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
     rng_split = np.random.default_rng(seed + 1)
     test_index = rng_split.choice(np.arange(len(refs)), int((1 - train_test_split) * len(refs)),
                                   replace=False) if 0 < train_test_split < 1 else []
+    if test_only:
+        total_tasks = len(test_index)
     dims = butler.get("preliminary_visit_image.dimensions", dataId=refs[0].dataId)
     if chunks is not None:
         chunks = (1, min(int(chunks), dims.y), min(int(chunks), dims.x))
@@ -266,8 +317,33 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             f.create_dataset("masks", shape=(len(refs) - len(test_index), dims.y, dims.x), dtype="bool", chunks=chunks)
     if len(test_index) > 0:
         with h5py.File(h5test_path, "w") as f:
-            f.create_dataset("images", shape=(len(test_index), dims.y, dims.x), dtype="float32", chunks=chunks)
-            f.create_dataset("masks", shape=(len(test_index), dims.y, dims.x), dtype="bool", chunks=chunks)
+            f.create_dataset(
+                "images",
+                shape=(len(test_index), dims.y, dims.x),
+                dtype="float32",
+                chunks=chunks,
+                compression="gzip",
+                compression_opts=4,
+                shuffle=True,
+            )
+            f.create_dataset(
+                "masks",
+                shape=(len(test_index), dims.y, dims.x),
+                dtype="bool",
+                chunks=chunks,
+                compression="gzip",
+                compression_opts=4,
+                shuffle=True,
+            )
+            f.create_dataset(
+                "real_labels",
+                shape=(len(test_index), dims.y, dims.x),
+                dtype="uint16",
+                chunks=chunks,
+                compression="gzip",
+                compression_opts=4,
+                shuffle=True,
+            )
     manager = Manager()
     lock = manager.Lock()
     count_train = 0
@@ -289,8 +365,26 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
                           "preliminary_visit_image", seed])
     if parallel > 1:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as executor:
-            list(executor.map(worker, tasks))
+        completed = 0
+        total_tasks = len(tasks)
+
+        with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as ex:
+            futs = [ex.submit(worker, t) for t in tasks]
+
+            for fut in concurrent.futures.as_completed(futs):
+                completed += 1
+                out = fut.result()
+
+                if out[0] == "ok":
+                    print(f"[{completed}/{total_tasks}] done", flush=True)
+
+                else:
+                    _, idx, dataId, tb = out
+                    print(f"[{completed}/{total_tasks}] ERROR: idx={idx} dataId={dataId}", flush=True)
+                    print(tb, flush=True)
+
+        #with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as executor:
+        #    list(executor.map(worker, tasks))
     else:
         for task in tasks:
             worker(task)
@@ -308,6 +402,7 @@ def main():
     ap.add_argument("--collections", type=str, default="LSSTComCam/runs/DRP/DP1/w_2025_17/DM-50530")
     ap.add_argument("--save-path", default="../../../DATA/")
     ap.add_argument("--where", default="")
+    ap.add_argument("--bad-visits-file", type=str, default="./bad_visits.csv",)
     ap.add_argument("--parallel", type=int, default=4)
     ap.add_argument("--random-subset", type=int, default=10)
     ap.add_argument("--train-test-split", type=float, default=0.1)
@@ -341,7 +436,8 @@ def main():
         train_test_split=args.train_test_split,
         chunks=args.chunks,
         test_only=False,
-        seed=args.seed
+        seed=args.seed,
+        bad_visits_file=args.bad_visits_file,
     )
 
 if __name__ == "__main__":
