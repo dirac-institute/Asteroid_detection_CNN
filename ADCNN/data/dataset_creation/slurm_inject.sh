@@ -34,9 +34,6 @@ WHERE="instrument='LSSTComCam' AND skymap='lsst_cells_v1' AND day_obs>=20241101 
 mkdir -p "$OUT"
 BAD="$OUT/bad_visits.csv"
 
-echo "SLURM_CPUS_PER_TASK: ${SLURM_CPUS_PER_TASK:-8}"
-echo "Flags: scan=$DO_SCAN test_only=$([[ -n "$TEST_ONLY_FLAG" ]] && echo 1 || echo 0)"
-
 if [[ "$DO_SCAN" -eq 1 ]]; then
   echo "Running bad-visits scan..."
   srun python3 -u scan_bad_data.py \
