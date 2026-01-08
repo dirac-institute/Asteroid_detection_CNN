@@ -9,7 +9,7 @@
 #SBATCH --mem-per-cpu=2G
 #SBATCH --time=3-00:00:00
 
-set -euo pipefail
+set -eo pipefail
 
 DO_SCAN=0
 TEST_ONLY_FLAG=""
