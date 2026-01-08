@@ -43,7 +43,8 @@ if [[ "$DO_SCAN" -eq 1 ]]; then
     --repo "$REPO" \
     --collections "$COLL" \
     --where "$WHERE" \
-    --out "$BAD"
+    --out "$BAD" \\
+    --no-progress
 else
   echo "Skipping bad-visits scan"
 fi
