@@ -446,6 +446,7 @@ def main():
         number=args.number,
         trail_length=[args.trail_length_min, args.trail_length_max],
         magnitude=[args.mag_min, args.mag_max],
+        mag_mode=args.mag_mode,
         beta=[args.beta_min, args.beta_max],
         parallel=args.parallel,
         where=args.where,
