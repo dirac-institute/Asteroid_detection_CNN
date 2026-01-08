@@ -39,7 +39,7 @@ echo "Flags: scan=$DO_SCAN test_only=$([[ -n "$TEST_ONLY_FLAG" ]] && echo 1 || e
 
 if [[ "$DO_SCAN" -eq 1 ]]; then
   echo "Running bad-visits scan..."
-  srun python3 -u check_bad_visits.py \
+  srun python3 -u scan_bad_data.py \
     --repo "$REPO" \
     --collections "$COLL" \
     --where "$WHERE" \
