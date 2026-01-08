@@ -61,7 +61,7 @@ srun python3 -u simulate_inject.py \
   --train-test-split 0.94117 \
   --random-subset 850 \
   --trail-length-min 6 --trail-length-max 60 \
-  --mag-min 0.01 --mag-max 10 \
+  --mag-min 2 --mag-max 10 \
   --mag-mode snr \
   --beta-min 0 --beta-max 180 \
   --number 20 \

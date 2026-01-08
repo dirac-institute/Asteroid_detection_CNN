@@ -4,10 +4,10 @@
 #SBATCH --account kipac:kipac
 #SBATCH --partition ada
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:2
-#SBATCH --ntasks-per-node=2
+#SBATCH --gres=gpu:4
+#SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=60G
+#SBATCH --mem=30G
 #SBATCH --time=5-00:00:00
 #SBATCH --output=/sdf/home/m/mrakovci/logs/%x.out
 
@@ -52,7 +52,7 @@ export NCCL_DEBUG=warn
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 
 # Run with 2 processes (one per GPU visible to the job)
-torchrun --standalone --nnodes=1 --nproc_per_node=2 \
+torchrun --standalone --nnodes=1 --nproc_per_node=4 \
   idea2.py \
   --repo-root "/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN" \
   --train-h5 "${DATA_DIR}/train.h5" \
