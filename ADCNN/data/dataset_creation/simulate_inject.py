@@ -35,7 +35,7 @@ def characterizeCalibrate(postISRCCD):
     char_config.doDeblend = True
     char_task = CharacterizeImageTask(config=char_config)
     char_result = char_task.run(postISRCCD)
-    
+
     calib_config = CalibrateTask.ConfigClass()
     calib_config.doAstrometry = False
     calib_config.doPhotoCal = False
@@ -270,8 +270,9 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
                 detn_bit = m.getPlaneBitMask("DETECTED_NEGATIVE")
                 det_neg_mask = (m.array & detn_bit) != 0
             matched_fp_masks = np.any(np.stack(matched_fp_mask, axis=-1), axis=-1)
-            return injected_calexp.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog, det_mask, matched_fp_masks
+            return True, injected_calexp.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog, det_mask, matched_fp_masks
     except Exception as e:
+        return False, ref_dataId, repr(e), traceback.format_exc()
         return {"ok": False, "dataId": ref_dataId, "error": repr(e), "traceback": traceback.format_exc()}
 
 
@@ -280,10 +281,9 @@ def worker(args):
     seed = (int(global_seed) * 1_000_003 + int(dataId["visit"]) * 1_003 + int(dataId["detector"])) & 0xFFFFFFFF
     try:
         res = one_detector_injection(number, trail_length, magnitude, beta, repo, coll, dims, source_type, dataId, seed, mag_mode=mag_mode)
-        if res is None:
-            raise RuntimeError("one_detector_injection returned None")
-
-        img, mask, real_labels, catalog = res
+        if res[0] is False:
+            return ("err", res[1], res[2], res[3])
+        _, img, mask, real_labels, catalog = res
         with lock:
             with h5py.File(h5path, "a") as f:
                 f["images"][idx] = img
@@ -296,7 +296,6 @@ def worker(args):
             file_exists = os.path.exists(csvpath)
             df.to_csv(csvpath, mode=("a" if file_exists else "w"),
                       header=(not file_exists), index=False)
-
         return ("ok", idx)
 
     except Exception:
@@ -411,7 +410,7 @@ def rng_for_task(seed: int, dataId: dict) -> np.random.Generator:
          + int(dataId["visit"]) * 1_003
          + int(dataId["detector"])) & 0xFFFFFFFF
     return np.random.default_rng(s)
-    
+
 def main():
     ap = argparse.ArgumentParser("Build a SIMULATED (injected) dataset")
     ap.add_argument("--repo", type=str, default="/repo/main")
