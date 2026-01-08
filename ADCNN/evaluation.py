@@ -147,18 +147,31 @@ def _choose_mag_field(df):
         if c in df.columns: return c
     return None
 
-def plot_detect_hist(cat, field, bins=12, title=None):
+def plot_detect_hist(cat, field, bins=12, title=None, density=False, xlim=None):
     nn_det = cat[cat["nn_detected"]]
     stk_det = cat[cat["stack_detection"]]
     cum_det = cat[cat["nn_detected"] | cat["stack_detection"]]
     vals = cat[field].to_numpy(); vals = vals[np.isfinite(vals)]
+    if xlim is not None:
+        vals = vals[(vals>=xlim[0]) & (vals<=xlim[1])]
     edges = np.histogram_bin_edges(vals, bins=bins)
     fig, ax = plt.subplots(figsize=(6.5,4.5))
-    ax.hist(cat[field],     bins=edges, histtype="step", label="All injected", alpha=0.7)
-    ax.hist(cum_det[field], bins=edges, histtype="step", label="Cumulative (NN ∪ LSST)")
-    ax.hist(nn_det[field],  bins=edges, histtype="step", label="NN detected")
-    ax.hist(stk_det[field], bins=edges, histtype="step", label="LSST stack detected")
-    ax.set_xlabel(field.replace("_"," ")); ax.set_ylabel("Count")
+    if not density:
+        ax.hist(cat[field],     bins=edges, histtype="step", label="All injected", alpha=0.7)
+        ax.hist(cum_det[field], bins=edges, histtype="step", label="Cumulative (NN ∪ LSST)")
+        ax.hist(nn_det[field],  bins=edges, histtype="step", label="NN detected")
+        ax.hist(stk_det[field], bins=edges, histtype="step", label="LSST stack detected")
+        ax.set_xlabel(field.replace("_"," ")); ax.set_ylabel("Count")
+    else:
+        all_i = np.histogram(cat[field],     bins=edges)[0]
+        cum_i = np.histogram(cum_det[field], bins=edges)[0]
+        nn_i  = np.histogram(nn_det[field],  bins=edges)[0]
+        stk_i = np.histogram(stk_det[field], bins=edges)[0]
+        bin_widths = np.diff(edges)
+        ax.stairs(cum_i/all_i, edges, label="Cumulative (NN ∪ LSST)")
+        ax.stairs(nn_i/all_i,  edges, label="NN detected")
+        ax.stairs(stk_i/all_i, edges, label="LSST stack detected")
+        ax.set_xlabel(field.replace("_"," ")); ax.set_ylabel("Completeness")
     if title: ax.set_title(title)
     ax.legend(); ax.grid(True, alpha=0.3)
     return fig, ax

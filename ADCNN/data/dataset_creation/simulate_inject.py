@@ -4,7 +4,7 @@ from pathlib import Path
 
 from common import ensure_dir  # and anything else you need
 from common import draw_one_line
-from common import mag_to_snr
+from common import mag_to_snr, snr_to_mag
 
 from astroML.crossmatch import crossmatch_angular
 from lsst.daf.butler import Butler
@@ -35,7 +35,7 @@ def characterizeCalibrate(postISRCCD):
     char_config.doDeblend = True
     char_task = CharacterizeImageTask(config=char_config)
     char_result = char_task.run(postISRCCD)
-    
+
     calib_config = CalibrateTask.ConfigClass()
     calib_config.doAstrometry = False
     calib_config.doPhotoCal = False
@@ -50,7 +50,7 @@ def inject(postISRCCD, injection_catalog):
     return inject_res.output_exposure
 
 
-def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp):
+def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode="psf_mag"):
     rng = np.random.default_rng(seed)
     injection_catalog = Table(
         names=('injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit', 'detector',
@@ -79,11 +79,29 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
         inject_length = rng.uniform(*trail_length)
         x = inject_length / (24 * theta_p)
         upper_limit_mag = psf_depth - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x)) if mag[1] == 0 else mag[1]
-        psf_magnitude = rng.uniform(mag[0], upper_limit_mag)
-        magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
-        surface_brightness = magnitude + 2.5 * np.log10(inject_length)
+        if mag_mode == "snr":
+            snr = rng.uniform(mag[0], upper_limit_mag)
+            psf_magnitude = snr_to_mag(snr, calexp, x_pos, y_pos)
+            magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
+            surface_brightness = magnitude + 2.5 * np.log10(inject_length)
+        elif mag_mode == "psf_mag":
+            psf_magnitude = rng.uniform(mag[0], upper_limit_mag)
+            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos)
+            magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
+            surface_brightness = magnitude + 2.5 * np.log10(inject_length)
+        elif mag_mode == "surface_brightness":
+            surface_brightness = rng.uniform(mag[0], mag[1])
+            magnitude = surface_brightness - 2.5 * np.log10(inject_length)
+            psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
+            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos)
+        elif mag_mode == "integrated_mag":
+            magnitude = rng.uniform(mag[0], mag[1])
+            psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
+            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos)
+            surface_brightness = magnitude + 2.5 * np.log10(inject_length)
+        else:
+            raise ValueError(f"Unknown mag_mode: {mag_mode}")
         angle = rng.uniform(*beta)
-        snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos)
         injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, info.id,
                                        int(ref.dataId["detector"]), magnitude, psf_magnitude, snr, str(filter_name.bandLabel),
                                        x_pos, y_pos])
@@ -215,14 +233,14 @@ def footprints_to_label_mask(src_cat, dimensions, dtype=np.uint16):
                 lab[y, x0:x1+1] = label  # overwrite is fine for ignore-mask use
     return lab
 
-def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=123, debug=False):
+def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=None, debug=False, mag_mode="psf_mag"):
     try:
         if seed is None:
             seed = np.random.randint(0,10000)
         butler = Butler(repo, collections=coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
         calexp = butler.get("preliminary_visit_image", dataId=ref.dataId)
-        injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp)
+        injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode)
         pre_injection_Src = butler.get("single_visit_star_footprints", dataId=ref.dataId)
         injected_calexp, post_injection_Src = characterizeCalibrate(inject(calexp, injection_catalog))
         mask = np.zeros((dimensions.y, dimensions.x), dtype=int)
@@ -240,7 +258,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
 
         real_labels = footprints_to_label_mask(pre_injection_Src, dimensions, dtype=np.uint16)
         if not debug:
-            return injected_calexp.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog
+            return True, injected_calexp.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog
         else:
             det_mask = None
             m = injected_calexp.mask
@@ -252,20 +270,20 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
                 detn_bit = m.getPlaneBitMask("DETECTED_NEGATIVE")
                 det_neg_mask = (m.array & detn_bit) != 0
             matched_fp_masks = np.any(np.stack(matched_fp_mask, axis=-1), axis=-1)
-            return injected_calexp.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog, det_mask, matched_fp_masks
+            return True, injected_calexp.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog, det_mask, matched_fp_masks
     except Exception as e:
+        return False, ref_dataId, repr(e), traceback.format_exc()
         return {"ok": False, "dataId": ref_dataId, "error": repr(e), "traceback": traceback.format_exc()}
 
 
 def worker(args):
-    idx, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta, source_type, global_seed = args
+    idx, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta, source_type, global_seed, mag_mode = args
     seed = (int(global_seed) * 1_000_003 + int(dataId["visit"]) * 1_003 + int(dataId["detector"])) & 0xFFFFFFFF
     try:
-        res = one_detector_injection(number, trail_length, magnitude, beta, repo, coll, dims, source_type, dataId, seed)
-        if res is None:
-            raise RuntimeError("one_detector_injection returned None")
-
-        img, mask, real_labels, catalog = res
+        res = one_detector_injection(number, trail_length, magnitude, beta, repo, coll, dims, source_type, dataId, seed, mag_mode=mag_mode)
+        if res[0] is False:
+            return ("err", res[1], res[2], res[3])
+        _, img, mask, real_labels, catalog = res
         with lock:
             with h5py.File(h5path, "a") as f:
                 f["images"][idx] = img
@@ -278,7 +296,6 @@ def worker(args):
             file_exists = os.path.exists(csvpath)
             df.to_csv(csvpath, mode=("a" if file_exists else "w"),
                       header=(not file_exists), index=False)
-
         return ("ok", idx)
 
     except Exception:
@@ -287,7 +304,7 @@ def worker(args):
 
 
 def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitude, beta, where, parallel=4,
-                           random_subset=0, train_test_split=0, seed=123, chunks=None, test_only=False, bad_visits_file=None):
+                           random_subset=0, train_test_split=0, seed=123, chunks=None, test_only=False, bad_visits_file=None, mag_mode="psf_mag"):
     butler = Butler(repo, collections=coll)
     h5train_path = os.path.join(save_path, "train.h5")
     h5test_path = os.path.join(save_path, "test.h5")
@@ -356,14 +373,14 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             count = count_test
             count_test += 1
             tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
-                          "preliminary_visit_image", seed])
+                          "preliminary_visit_image", seed, mag_mode])
         elif not test_only:
             h5path = h5train_path
             csvpath = os.path.join(save_path, "train.csv")
             count = count_train
             count_train += 1
             tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
-                          "preliminary_visit_image", seed])
+                          "preliminary_visit_image", seed, mag_mode])
     if parallel > 1:
         completed = 0
         total_tasks = len(tasks)
@@ -383,8 +400,6 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                     print(f"[{completed}/{total_tasks}] ERROR: idx={idx} dataId={dataId}", flush=True)
                     print(tb, flush=True)
 
-        #with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as executor:
-        #    list(executor.map(worker, tasks))
     else:
         for task in tasks:
             worker(task)
@@ -395,7 +410,7 @@ def rng_for_task(seed: int, dataId: dict) -> np.random.Generator:
          + int(dataId["visit"]) * 1_003
          + int(dataId["detector"])) & 0xFFFFFFFF
     return np.random.default_rng(s)
-    
+
 def main():
     ap = argparse.ArgumentParser("Build a SIMULATED (injected) dataset")
     ap.add_argument("--repo", type=str, default="/repo/main")
@@ -410,12 +425,13 @@ def main():
     ap.add_argument("--trail-length-max", type=float, default=60)
     ap.add_argument("--mag-min", type=float, default=19)
     ap.add_argument("--mag-max", type=float, default=24)
+    ap.add_argument("--mag-mode", choices=["psf_mag", "snr", "surface_brightness", "integrated_mag"], default="psf_mag")
     ap.add_argument("--beta-min", type=float, default=0)
     ap.add_argument("--beta-max", type=float, default=180)
     ap.add_argument("--number", type=int, default=20)
     ap.add_argument("--seed", type=int, default=123)
-    ap.add_argument("--chunks", type=int, default=None,
-    help="HDF5 chunk size (square). Example: 128 -> chunks=(1,128,128). None = contiguous")
+    ap.add_argument("--chunks", type=int, default=None, help="HDF5 chunk size (square). Example: 128 -> chunks=(1,128,128). None = contiguous")
+    ap.add_argument("--test-only", action="store_true", default=False, help="Only generate test set")
     args = ap.parse_args()
 
     ensure_dir(args.save_path)
@@ -429,13 +445,14 @@ def main():
         number=args.number,
         trail_length=[args.trail_length_min, args.trail_length_max],
         magnitude=[args.mag_min, args.mag_max],
+        mag_mode=args.mag_mode,
         beta=[args.beta_min, args.beta_max],
         parallel=args.parallel,
         where=args.where,
         random_subset=args.random_subset,
         train_test_split=args.train_test_split,
         chunks=args.chunks,
-        test_only=False,
+        test_only=args.test_only,
         seed=args.seed,
         bad_visits_file=args.bad_visits_file,
     )
