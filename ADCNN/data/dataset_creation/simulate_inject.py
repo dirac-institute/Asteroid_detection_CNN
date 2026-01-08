@@ -258,7 +258,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
 
         real_labels = footprints_to_label_mask(pre_injection_Src, dimensions, dtype=np.uint16)
         if not debug:
-            return injected_calexp.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog
+            return True, injected_calexp.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog
         else:
             det_mask = None
             m = injected_calexp.mask
