@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-"""
-Find (visit, detector) pairs where preliminary_visit_image is missing key metadata
-(e.g., WCS / PhotoCalib / getPixelScale failure) and write bad_visits.csv.
-
-Designed to run under SLURM (or locally) with CLI args.
-"""
-
 from __future__ import annotations
 
 import argparse
