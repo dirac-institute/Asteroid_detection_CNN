@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --ntasks-per-node=4
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=2
 #SBATCH --mem=30G
 #SBATCH --time=5-00:00:00
 #SBATCH --output=/sdf/home/m/mrakovci/logs/%x.out
@@ -47,11 +47,12 @@ if torch.cuda.is_available():
         print(i, torch.cuda.get_device_name(i))
 PY
 
-export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-2}"
 export NCCL_DEBUG=warn
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 
-# Run with 2 processes (one per GPU visible to the job)
+# Run with 4 processes (one per GPU visible to the job)
+srun --ntasks=1 --gpus=4 --cpus-per-task=${SLURM_CPUS_PER_TASK:-2} \
 torchrun --standalone --nnodes=1 --nproc_per_node=4 \
   idea2.py \
   --repo-root "/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN" \
@@ -60,7 +61,7 @@ torchrun --standalone --nnodes=1 --nproc_per_node=4 \
   --test-h5  "${DATA_DIR}/test.h5" \
   --tile 128 \
   --batch-size 256 \
-  --num-workers "${SLURM_CPUS_PER_TASK:-8}" \
+  --num-workers "${SLURM_CPUS_PER_TASK:-2}" \
   --seed 1337 \
   --max-epochs 50 \
-  --val-every 3
+  --val-every 25
