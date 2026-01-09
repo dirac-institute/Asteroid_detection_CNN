@@ -51,6 +51,18 @@ export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-2}"
 export NCCL_DEBUG=warn
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 
+GPU_LOG="/sdf/home/m/mrakovci/logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}_gpu_dmon.log"
+
+# Start GPU utilization logging in background
+nvidia-smi dmon -s pucvmet -d 2 > "$GPU_LOG" &
+DMON_PID=$!
+echo "[launcher] GPU monitor PID=$DMON_PID log=$GPU_LOG"
+
+# Ensure the monitor is killed on exit (success/fail)
+cleanup() { kill "$DMON_PID" 2>/dev/null || true; }
+trap cleanup EXIT
+
+
 # Run with 4 processes (one per GPU visible to the job)
 srun --ntasks=1 --gpus=4 --cpus-per-task=${SLURM_CPUS_PER_TASK:-2} \
 torchrun --standalone --nnodes=1 --nproc_per_node=4 \
