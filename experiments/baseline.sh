@@ -4,10 +4,10 @@
 #SBATCH --account kipac:kipac
 #SBATCH --partition ada
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:4
-#SBATCH --ntasks-per-node=4
+#SBATCH --gres=gpu:2
+#SBATCH --ntasks-per-node=2
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=30G
+#SBATCH --mem=70G
 #SBATCH --time=5-00:00:00
 #SBATCH --output=/sdf/home/m/mrakovci/logs/%x.out
 
@@ -65,7 +65,7 @@ trap cleanup EXIT
 
 
 # Run with 4 processes (one per GPU visible to the job)
-srun --ntasks=1 --gpus=4 --cpus-per-task=${SLURM_CPUS_PER_TASK:-2} \
+srun --ntasks=1 --gpus=2 --cpus-per-task=${SLURM_CPUS_PER_TASK:-2} \
 torchrun --standalone --nnodes=1 --nproc_per_node=4 \
   baseline.py \
   --repo-root "/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN" \
