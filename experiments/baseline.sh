@@ -66,7 +66,7 @@ trap cleanup EXIT
 
 # Run with 4 processes (one per GPU visible to the job)
 srun --ntasks=1 --gpus=2 --cpus-per-task=${SLURM_CPUS_PER_TASK:-2} \
-torchrun --standalone --nnodes=1 --nproc_per_node=4 \
+torchrun --standalone --nnodes=1 --nproc_per_node=2 \
   baseline.py \
   --repo-root "/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN" \
   --train-h5 "${DATA_DIR}/train.h5" \
