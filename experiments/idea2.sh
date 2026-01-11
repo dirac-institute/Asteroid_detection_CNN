@@ -4,8 +4,8 @@
 #SBATCH --account kipac:kipac
 #SBATCH --partition ada
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:4
-#SBATCH --ntasks-per-node=4
+#SBATCH --gres=gpu:1
+#SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=30G
 #SBATCH --time=5-00:00:00
@@ -51,7 +51,7 @@ export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-2}"
 export NCCL_DEBUG=warn
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 
-GPU_LOG="/sdf/home/m/mrakovci/logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}_gpu_dmon.log"
+GPU_LOG="/sdf/home/m/mrakovci/logs/${SLURM_JOB_NAME}_gpu_dmon.log"
 
 # Start GPU utilization logging in background
 nvidia-smi dmon -s pucvmet -d 2 > "$GPU_LOG" &
@@ -64,8 +64,8 @@ trap cleanup EXIT
 
 
 # Run with 4 processes (one per GPU visible to the job)
-srun --ntasks=1 --gpus=4 --cpus-per-task=${SLURM_CPUS_PER_TASK:-2} \
-torchrun --standalone --nnodes=1 --nproc_per_node=4 \
+srun --ntasks=1 --gpus=1 --cpus-per-task=${SLURM_CPUS_PER_TASK:-2} \
+torchrun --standalone --nnodes=1 --nproc_per_node=1 \
   idea2.py \
   --repo-root "/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN" \
   --train-h5 "${DATA_DIR}/train.h5" \
