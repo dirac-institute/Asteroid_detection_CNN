@@ -87,7 +87,7 @@ def _process_chunk(args) -> None:
         shm_out.close()
 
 
-def two_threshold_prediction_mp(
+def two_threshold_prediction(
     predictions: np.ndarray,
     *,
     t_low: float = 0.1,
