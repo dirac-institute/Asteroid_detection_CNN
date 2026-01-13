@@ -6,7 +6,7 @@
 #SBATCH --partition=milano
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=51
-#SBATCH --mem=20G
+#SBATCH --mem=40G
 #SBATCH --time=3-00:00:00
 
 set -eo pipefail
