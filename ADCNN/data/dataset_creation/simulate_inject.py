@@ -332,6 +332,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
         with h5py.File(h5train_path, "w") as f:
             f.create_dataset("images", shape=(len(refs) - len(test_index), dims.y, dims.x), dtype="float32", chunks=chunks)
             f.create_dataset("masks", shape=(len(refs) - len(test_index), dims.y, dims.x), dtype="bool", chunks=chunks)
+            f.create_dataset("real_labels", shape=(len(refs) - len(test_index), dims.y, dims.x), dtype="uint16", chunks=chunks)
     if len(test_index) > 0:
         with h5py.File(h5test_path, "w") as f:
             f.create_dataset(
