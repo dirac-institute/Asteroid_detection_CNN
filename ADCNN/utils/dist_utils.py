@@ -27,13 +27,12 @@ def init_distributed(backend: str = "nccl", timeout_sec: int = 1800):
     # Single-process fallback
     return False, 0, 0, 1"""
 
-def init_distributed():
+"""def init_distributed():
     if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
         rank = int(os.environ["RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
         local_rank = int(os.environ.get("LOCAL_RANK", 0))
 
-        # ---- add this block ----
         if torch.cuda.is_available():
             torch.cuda.set_device(local_rank)
         # (optional but helpful for debugging)
@@ -42,6 +41,30 @@ def init_distributed():
         dist.init_process_group(backend="nccl", init_method="env://")
         return True, rank, local_rank, world_size
 
+    return False, 0, 0, 1"""
+def init_distributed(backend: str = "nccl", init_method: str = "env://"):
+    # If already initialized, just report ranks (do NOT re-init)
+    if dist.is_available() and dist.is_initialized():
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+        local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+        if torch.cuda.is_available():
+            torch.cuda.set_device(local_rank)
+        return True, rank, local_rank, world_size
+
+    # Initialize only if launched with torchrun / SLURM env
+    if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
+        rank = int(os.environ["RANK"])
+        world_size = int(os.environ["WORLD_SIZE"])
+        local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+
+        if torch.cuda.is_available():
+            torch.cuda.set_device(local_rank)
+
+        dist.init_process_group(backend=backend, init_method=init_method)
+        return True, rank, local_rank, world_size
+
+    # Single-process fallback
     return False, 0, 0, 1
 
 
