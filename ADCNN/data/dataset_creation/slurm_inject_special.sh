@@ -5,7 +5,7 @@
 #SBATCH --output=/sdf/home/m/mrakovci/logs/ADCNN_special_inject.out
 #SBATCH --partition=milano
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=55
+#SBATCH --cpus-per-task=51
 #SBATCH --mem-per-cpu=2G
 #SBATCH --time=3-00:00:00
 
