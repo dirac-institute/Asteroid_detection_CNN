@@ -17,7 +17,7 @@ mkdir -p /sdf/home/m/mrakovci/logs
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
 
-PROJ="/sdf/data/rubin/user/m/mrakovci/Projects/Asteroid_detection_CNN"
+PROJ="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"
 EXPDIR="${PROJ}/experiments"
 DATA_DIR="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/DATA"
 cd "${EXPDIR}"
