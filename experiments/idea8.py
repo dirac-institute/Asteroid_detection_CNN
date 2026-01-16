@@ -318,23 +318,28 @@ def focal_tversky_masked_weighted(
     gamma: float,
     eps: float = 1e-6,
 ) -> torch.Tensor:
-    """
-    logits, targets: [B,1,H,W]
-    valid, weights:  [B,1,H,W] float32, where valid is 0/1
-    Computes TP/FP/FN only over valid pixels, scaled by weights.
-    """
-    p = torch.sigmoid(logits)
-    t = targets.clamp(0, 1)
+    # Force stable math in fp32 (even if caller uses AMP)
+    logits_f  = logits.float()
+    targets_f = targets.float().clamp(0.0, 1.0)
+    valid_f   = valid.float()
+    weights_f = weights.float()
 
-    w = (valid * weights).to(dtype=p.dtype)
+    # p in (eps, 1-eps) to avoid edge instabilities
+    p = torch.sigmoid(logits_f).clamp(eps, 1.0 - eps)
+    t = targets_f
+    w = (valid_f * weights_f)
 
     TP = (w * p * t).sum(dim=(1, 2, 3))
     FP = (w * p * (1.0 - t)).sum(dim=(1, 2, 3))
     FN = (w * (1.0 - p) * t).sum(dim=(1, 2, 3))
 
-    tv = (TP + eps) / (TP + alpha * FP + (1.0 - alpha) * FN + eps)
+    denom = (TP + alpha * FP + (1.0 - alpha) * FN + eps)
+    tv = (TP + eps) / denom
+    tv = tv.clamp(0.0, 1.0)  # critical for fractional gamma
+
     loss = torch.pow(1.0 - tv, gamma)
     return loss.mean()
+
 
 
 # -------------------------
@@ -657,6 +662,10 @@ class TrainerIdea8:
                     loss = focal_tversky_masked_weighted(
                         logits, yb_r, valid, weights, alpha=float(alpha), gamma=float(gamma)
                     )
+                if not torch.isfinite(loss):
+                    print("Non-finite loss:", loss.item())
+                    print("logits finite:", torch.isfinite(logits).all().item())
+                    raise RuntimeError("NaN/Inf loss")
 
                 opt.zero_grad(set_to_none=True)
                 scaler.scale(loss).backward()
