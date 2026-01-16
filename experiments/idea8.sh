@@ -71,10 +71,16 @@ torchrun --standalone --nnodes=1 --nproc_per_node=1 \
   --batch-size 256 \
   --num-workers "${SLURM_CPUS_PER_TASK:-2}" \
   --seed 1337 \
-  --alpha 0.4 \
-  --gamma 1.0 \
-  --missed-weight 4.0 \
+  --missed-frac 0.45 \
   --margin-pix 0.0 \
+  --fixed-thr 0.5 \
+  --ft-alpha 0.45 \
+  --ft-gamma 1.3 \
+  --ramp-kind linear \
+  --ramp-start-epoch 11 \
+  --ramp-end-epoch 40 \
   --max-epochs 60 \
   --val-every 25 \
+  --val-metric-batches 60 \
   --save-best-to "checkpoints/Experiments/Last/idea8.pt"
+
