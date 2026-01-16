@@ -544,7 +544,9 @@ class TrainerIdea8:
         FIXED_THR = float(fixed_thr)
 
         is_dist, rank, local_rank, world_size = self.init_distributed()
-        if is_dist and not isinstance(model, DDP):
+        use_ddp = bool(is_dist and world_size > 1)
+
+        if use_ddp and not isinstance(model, DDP):
             model = DDP(
                 model,
                 device_ids=[local_rank],
@@ -1033,7 +1035,8 @@ def main():
 
     # Sampler: Idea 1 oversampling
     epoch_size = None if int(args.epoch_size) <= 0 else int(args.epoch_size)
-    if is_dist:
+    use_ddp = bool(is_dist and world_size > 1)
+    if use_ddp:
         train_sampler = DistributedStratifiedMissedSampler(
             dataset_size=len(train_ds),
             miss_ids=missed_local,
