@@ -63,6 +63,19 @@ def import_project():
     )
 
 
+class XYOnlyLoader:
+    """Wrap a DataLoader that yields (x,y,...) and expose it as (x,y) only."""
+    def __init__(self, loader):
+        self.loader = loader
+
+    def __len__(self):
+        return len(self.loader)
+
+    def __iter__(self):
+        for batch in self.loader:
+            yield batch[0], batch[1]
+
+
 # -------------------------
 # DDP reduce helpers
 # -------------------------
@@ -467,7 +480,7 @@ class TrainerIdea8:
         f1 = fbeta_from_counts(tp_all, fp_all, fn_all, beta=1.0)
         f2 = fbeta_from_counts(tp_all, fp_all, fn_all, beta=2.0)
 
-        auc = float(roc_auc_ddp(model, loader, n_bins=256, max_batches=12))
+        auc = float(roc_auc_ddp(model, XYOnlyLoader(loader), n_bins=256, max_batches=12))
         return f1, f2, auc
 
     def train_full_probe(
@@ -536,7 +549,7 @@ class TrainerIdea8:
                 model,
                 device_ids=[local_rank],
                 output_device=local_rank,
-                find_unused_parameters=True,
+                find_unused_parameters=False,
                 gradient_as_bucket_view=True,
             )
         raw_model = model.module if isinstance(model, DDP) else model
