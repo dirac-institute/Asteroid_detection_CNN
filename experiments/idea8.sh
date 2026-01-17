@@ -82,5 +82,6 @@ torchrun --standalone --nnodes=1 --nproc_per_node=1 \
   --max-epochs 60 \
   --val-every 25 \
   --val-metric-batches 60 \
-  --save-best-to "checkpoints/Experiments/Last/idea8.pt"
+  --save-best-to "../checkpoints/Experiments/Best/idea8.pt" \
+  --save-last-to "../checkpoints/Experiments/Last/idea8.pt"
 

@@ -522,6 +522,8 @@ class TrainerIdea8:
         val_metric_batches: int,
         # io
         save_best_to: str,
+        save_last_to: str,
+        best_metric: str,
         long_batches: int = 0,
         verbose: int = 2,
     ):
@@ -841,6 +843,12 @@ class TrainerIdea8:
                     f"[EP{ep:02d}] lam={lam:.3f} loss {train_loss:.4f} | thr={FIXED_THR:.3f} | "
                     f"F1={f1_tr:.4f} F2={f2_tr:.4f} | active_pix={active:.0f} masked_out={masked_pct:.2f}% | {time.time()-t0:.1f}s"
                 )
+                if self.is_main_process() and save_last_to:
+                    Path(save_last_to).parent.mkdir(parents=True, exist_ok=True)
+                    torch.save(
+                        {"state": raw_model.state_dict(), "thr": FIXED_THR, "ep": int(ep)},
+                        save_last_to,
+                    )
 
             if (ep % val_every == 0) or (ep <= 3):
                 f1v, f2v, auc = self.eval_val_f1f2_auc(
@@ -855,21 +863,41 @@ class TrainerIdea8:
                 if self.is_main_process():
                     print(f"[VAL ep{ep}] AUC {auc:.3f} | thr={FIXED_THR:.3f} | F1={f1v:.4f} F2={f2v:.4f}")
 
-                # keep baseline criterion: best by AUC (thr fixed)
-                if float(auc) > best["auc"]:
+                # ---- robust metric values ----
+                auc_v = float(auc)
+                f2_v = float(f2v)
+
+                # NaN guard (prevents "never best" due to NaN comparisons)
+                if not np.isfinite(auc_v):
+                    auc_v = -1e9
+                if not np.isfinite(f2_v):
+                    f2_v = -1e9
+
+                # choose best criterion
+                score = auc_v if best_metric == "auc" else f2_v
+                best_score = best["auc"] if best_metric == "auc" else best.get("f2", -1e9)
+                if score > best_score:
                     best = {
-                        "auc": float(auc),
+                        "auc": auc_v,
+                        "f2": f2_v,
                         "state": copy.deepcopy(raw_model.state_dict()),
                         "thr": FIXED_THR,
                         "ep": int(ep),
-                        "f2": float(f2v),
                     }
-                    if self.is_main_process():
+                    if self.is_main_process() and save_best_to:
                         Path(save_best_to).parent.mkdir(parents=True, exist_ok=True)
                         torch.save(
-                            {"state": best["state"], "thr": best["thr"], "ep": best["ep"], "auc": best["auc"], "f2": best["f2"]},
+                            {
+                                "state": best["state"],
+                                "thr": best["thr"],
+                                "ep": best["ep"],
+                                "auc": best["auc"],
+                                "f2": best["f2"],
+                                "best_metric": best_metric,
+                            },
                             save_best_to,
                         )
+
 
         if best["state"] is not None:
             raw_model.load_state_dict(best["state"])
@@ -893,7 +921,7 @@ def cli():
 
     ap.add_argument("--batch-size", type=int, default=64)
     ap.add_argument("--num-workers", type=int, default=2)
-    ap.add_argument("--pin-memory", action="store_true", default=True)
+    ap.add_argument("--pin-memory", action=argparse.BooleanOptionalAction, default=True)
 
     # Idea 1 oversampling
     ap.add_argument("--missed-frac", type=float, default=0.35,
@@ -945,7 +973,11 @@ def cli():
     ap.add_argument("--val-metric-batches", type=int, default=60,
                     help="How many val batches to use for F1/F2 (0 = all).")
 
-    ap.add_argument("--save-best-to", type=str, default="checkpoints/Experiments/Last/idea8.pt")
+    ap.add_argument("--save-best-to", type=str, default="../checkpoints/Experiments/Best/idea8.pt")
+    ap.add_argument("--save-last-to", type=str, default="../checkpoints/Experiments/Last/idea8.pt")
+    ap.add_argument("--best-metric", type=str, default="auc", choices=["auc", "f2"],
+                    help="Which metric decides best checkpoint. thr is fixed anyway.")
+
     ap.add_argument("--verbose", type=int, default=2)
     return ap.parse_args()
 
@@ -1127,6 +1159,8 @@ def main():
         val_metric_batches=int(args.val_metric_batches),
 
         save_best_to=str(args.save_best_to),
+        save_last_to=str(args.save_last_to),
+        best_metric=str(args.best_metric),
         long_batches=int(args.long_batches),
         verbose=int(args.verbose),
     )
