@@ -18,12 +18,20 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset, Sampler
 from torch.utils.data.distributed import DistributedSampler
 
+# Based on your existing idea8.py, with the key change:
+#   - build 3 buckets in TRAIN: (missed, detected, background)
+#   - sample each epoch with fixed mixture fractions (DDP-safe)
+# Everything else (masking real_labels in loss, warmup/head/tail/long, ramp) is preserved.
+#
+# Source baseline: your uploaded idea8.py :contentReference[oaicite:0]{index=0}
+
 
 # -------------------------
 # Path setup (repo imports)
 # -------------------------
 def add_repo_to_syspath(repo_root: str):
     import sys
+
     repo = Path(repo_root).resolve()
     if str(repo) not in sys.path:
         sys.path.insert(0, str(repo))
@@ -65,6 +73,7 @@ def import_project():
 
 class XYOnlyLoader:
     """Wrap a DataLoader that yields (x,y,...) and expose it as (x,y) only."""
+
     def __init__(self, loader):
         self.loader = loader
 
@@ -126,22 +135,37 @@ def tiles_touched_by_bbox(
     return r0, r1, c0, c1
 
 
-def build_missed_tile_mask_from_csv(
+def build_tile_mask_from_csv(
     train_csv: str,
     base_ds,
     *,
     tile: int,
     margin_pix: float = 0.0,
     stack_col: str = "stack_detection",
+    stack_value: Optional[int] = None,
 ) -> np.ndarray:
+    """
+    Returns BASE-length boolean mask over tiles in base_ds.
+
+    stack_value:
+      - None: use all rows (any injection)
+      - 0: only rows where stack_col==0 (LSST missed)
+      - 1: only rows where stack_col==1 (LSST detected)
+    """
     cat = pd.read_csv(train_csv)
-    need = {"image_id", "x", "y", "trail_length", stack_col}
+    need = {"image_id", "x", "y", "trail_length"}
+    if stack_value is not None:
+        need.add(stack_col)
     miss = need - set(cat.columns)
     if miss:
         raise ValueError(f"train.csv missing required columns: {sorted(miss)}")
 
-    miss_df = cat[cat[stack_col].astype(int) == 0].copy()
-    if len(miss_df) == 0:
+    if stack_value is None:
+        df = cat
+    else:
+        df = cat[cat[stack_col].astype(int) == int(stack_value)]
+
+    if len(df) == 0:
         return np.zeros(len(base_ds), dtype=bool)
 
     with h5py.File(base_ds.h5_path, "r") as f:
@@ -151,9 +175,9 @@ def build_missed_tile_mask_from_csv(
     Hb = int(np.ceil(H / tile))
     Wb = int(np.ceil(W / tile))
 
-    hard_rc_by_panel: Dict[int, set[Tuple[int, int]]] = {}
+    rc_by_panel: Dict[int, set[Tuple[int, int]]] = {}
 
-    for _, row in miss_df.iterrows():
+    for _, row in df.iterrows():
         pid = int(row["image_id"])
         x = float(row["x"])
         y = float(row["y"])
@@ -166,29 +190,30 @@ def build_missed_tile_mask_from_csv(
         c0 = max(0, min(Wb - 1, c0))
         c1 = max(0, min(Wb - 1, c1))
 
-        s = hard_rc_by_panel.setdefault(pid, set())
+        s = rc_by_panel.setdefault(pid, set())
         for r in range(r0, r1 + 1):
             for c in range(c0, c1 + 1):
                 s.add((r, c))
 
     base_map = {(i, r, c): k for k, (i, r, c) in enumerate(base_ds.indices)}
-    hard_mask = np.zeros(len(base_ds), dtype=bool)
+    mask = np.zeros(len(base_ds), dtype=bool)
 
-    for pid, rcset in hard_rc_by_panel.items():
+    for pid, rcset in rc_by_panel.items():
         for (r, c) in rcset:
             k = base_map.get((pid, r, c))
             if k is not None:
-                hard_mask[k] = True
+                mask[k] = True
 
-    return hard_mask
+    return mask
 
 
-class TileSubsetWithRealAndMissed(Dataset):
+class TileSubsetWithRealAndFlags(Dataset):
     """
-    Returns (x, y, real, missed_flag)
+    Returns (x, y, real, missed_flag, detected_flag)
     - real: tile of real_labels (or zeros if missing)
-    - missed_flag: bool per tile from CSV-derived mask in BASE indexing
+    - missed_flag/detected_flag are BASE-derived masks (in base_ds indexing)
     """
+
     def __init__(
         self,
         base,
@@ -197,6 +222,7 @@ class TileSubsetWithRealAndMissed(Dataset):
         train_h5: str,
         real_labels_key: str,
         missed_mask_base: np.ndarray,
+        detected_mask_base: np.ndarray,
     ):
         self.base = base
         self.base_tile_indices = np.asarray(base_tile_indices, dtype=np.int64)
@@ -204,9 +230,13 @@ class TileSubsetWithRealAndMissed(Dataset):
         self.real_labels_key = str(real_labels_key)
 
         missed_mask_base = np.asarray(missed_mask_base, dtype=bool)
+        detected_mask_base = np.asarray(detected_mask_base, dtype=bool)
         if missed_mask_base.shape[0] != len(base):
             raise ValueError("missed_mask_base must have length len(base_ds)")
+        if detected_mask_base.shape[0] != len(base):
+            raise ValueError("detected_mask_base must have length len(base_ds)")
         self.missed_mask_base = missed_mask_base
+        self.detected_mask_base = detected_mask_base
 
         self._h5 = None
         self._has_real = None
@@ -222,15 +252,19 @@ class TileSubsetWithRealAndMissed(Dataset):
     def __getitem__(self, i: int):
         base_idx = int(self.base_tile_indices[int(i)])
         x, y = self.base[base_idx]
+
         missed_flag = bool(self.missed_mask_base[base_idx])
+        detected_flag = bool(self.detected_mask_base[base_idx])
 
         self._ensure_h5()
         if not self._has_real:
             real = torch.zeros_like(y) if torch.is_tensor(y) else np.zeros_like(y)
-            return x, y, real, missed_flag
+            return x, y, real, missed_flag, detected_flag
 
         panel_i, r, c = self.base.indices[base_idx]
-        panel_i = int(panel_i); r = int(r); c = int(c)
+        panel_i = int(panel_i)
+        r = int(r)
+        c = int(c)
         t = int(self.base.tile)
 
         rl = self._h5[self.real_labels_key]  # [N,H,W]
@@ -257,46 +291,60 @@ class TileSubsetWithRealAndMissed(Dataset):
                 out[..., :hh, :ww] = real[..., :hh, :ww]
                 real = out
 
-        return x, y, real, missed_flag
+        return x, y, real, missed_flag, detected_flag
 
 
 # -------------------------
-# Idea 1: DDP-safe stratified sampler (missed oversampling)
+# DDP-safe mixture sampler (missed + detected + background)
 # -------------------------
-class DistributedStratifiedMissedSampler(Sampler[int]):
+class DistributedMixtureSampler(Sampler[int]):
     """
-    Builds an epoch index list with a controlled missed fraction,
+    Builds an epoch index list with controlled mixture fractions across 3 buckets,
     then shards across DDP ranks.
 
     dataset indices are LOCAL to the dataset passed to DataLoader (0..len(ds)-1).
     """
+
     def __init__(
         self,
         *,
         dataset_size: int,
-        miss_ids: np.ndarray,
-        norm_ids: np.ndarray,
+        missed_ids: np.ndarray,
+        detected_ids: np.ndarray,
+        background_ids: np.ndarray,
         num_replicas: int,
         rank: int,
         seed: int,
-        missed_frac: float,
+        frac_missed: float,
+        frac_detected: float,
+        frac_background: float,
         epoch_size: Optional[int] = None,
     ):
         self.dataset_size = int(dataset_size)
-        self.miss_ids = np.asarray(miss_ids, dtype=np.int64)
-        self.norm_ids = np.asarray(norm_ids, dtype=np.int64)
+        self.missed_ids = np.asarray(missed_ids, dtype=np.int64)
+        self.detected_ids = np.asarray(detected_ids, dtype=np.int64)
+        self.background_ids = np.asarray(background_ids, dtype=np.int64)
+
         self.num_replicas = int(num_replicas)
         self.rank = int(rank)
         self.seed = int(seed)
-        self.missed_frac = float(missed_frac)
+
+        # normalize fractions robustly
+        f = np.asarray([frac_missed, frac_detected, frac_background], dtype=float)
+        f = np.clip(f, 0.0, None)
+        s = float(f.sum())
+        if s <= 0:
+            f = np.asarray([0.0, 0.0, 1.0], dtype=float)
+        else:
+            f = f / s
+        self.frac_missed = float(f[0])
+        self.frac_detected = float(f[1])
+        self.frac_background = float(f[2])
 
         if epoch_size is None:
             self.epoch_size = int(math.ceil(self.dataset_size / max(self.num_replicas, 1)))
         else:
             self.epoch_size = int(epoch_size)
-
-        if self.miss_ids.size == 0 or self.norm_ids.size == 0:
-            self.missed_frac = 0.0
 
         self._epoch = 0
 
@@ -311,24 +359,37 @@ class DistributedStratifiedMissedSampler(Sampler[int]):
 
         total = self.epoch_size * self.num_replicas
 
-        if self.missed_frac <= 0.0:
-            ids = np.arange(self.dataset_size, dtype=np.int64)
-            g.shuffle(ids)
-            if ids.size < total:
-                reps = int(math.ceil(total / ids.size))
-                ids = np.tile(ids, reps)
-            ids = ids[:total]
+        # if any bucket is empty, spill its share to background
+        fm, fd, fb = self.frac_missed, self.frac_detected, self.frac_background
+        if self.missed_ids.size == 0 and fm > 0:
+            fb += fm
+            fm = 0.0
+        if self.detected_ids.size == 0 and fd > 0:
+            fb += fd
+            fd = 0.0
+        if self.background_ids.size == 0 and fb > 0:
+            # last resort: use all indices
+            self.background_ids = np.arange(self.dataset_size, dtype=np.int64)
+
+        # re-normalize after spill
+        s = fm + fd + fb
+        if s <= 0:
+            fm, fd, fb = 0.0, 0.0, 1.0
         else:
-            nm = int(round(total * self.missed_frac))
-            nn = total - nm
+            fm, fd, fb = fm / s, fd / s, fb / s
 
-            miss = g.choice(self.miss_ids, size=nm, replace=True)
-            norm = g.choice(self.norm_ids, size=nn, replace=True)
+        nm = int(round(total * fm))
+        nd = int(round(total * fd))
+        nb = total - nm - nd
 
-            ids = np.concatenate([miss, norm], axis=0)
-            g.shuffle(ids)
+        ids_m = g.choice(self.missed_ids, size=nm, replace=True) if nm > 0 else np.empty((0,), np.int64)
+        ids_d = g.choice(self.detected_ids, size=nd, replace=True) if nd > 0 else np.empty((0,), np.int64)
+        ids_b = g.choice(self.background_ids, size=nb, replace=True) if nb > 0 else np.empty((0,), np.int64)
 
-        shard = ids[self.rank: ids.size: self.num_replicas]
+        ids = np.concatenate([ids_m, ids_d, ids_b], axis=0)
+        g.shuffle(ids)
+
+        shard = ids[self.rank : ids.size : self.num_replicas]
         shard = shard[: self.epoch_size]
         return iter(shard.tolist())
 
@@ -362,9 +423,11 @@ def update_confusion_from_logits(
 
 
 def fbeta_from_counts(tp: int, fp: int, fn: int, beta: float) -> float:
-    tp = float(tp); fp = float(fp); fn = float(fn)
+    tp = float(tp)
+    fp = float(fp)
+    fn = float(fn)
     prec = tp / max(tp + fp, 1.0)
-    rec  = tp / max(tp + fn, 1.0)
+    rec = tp / max(tp + fn, 1.0)
     b2 = float(beta) ** 2
     denom = (b2 * prec + rec)
     if denom <= 0:
@@ -457,7 +520,7 @@ class TrainerIdea8:
         tp_sum = fp_sum = fn_sum = 0
 
         for i, batch in enumerate(loader, 1):
-            xb, yb, rb, _missed = batch
+            xb, yb, rb, _missed, _detected = batch
             xb = xb.to(self.device, non_blocking=True)
             yb = yb.to(self.device, non_blocking=True)
             rb = rb.to(self.device, non_blocking=True)
@@ -468,7 +531,9 @@ class TrainerIdea8:
             valid = valid_mask_from_real(rb_r)
 
             tp, fp, fn = update_confusion_from_logits(logits, yb_r, valid, thr=thr)
-            tp_sum += tp; fp_sum += fp; fn_sum += fn
+            tp_sum += tp
+            fp_sum += fp
+            fn_sum += fn
 
             if max_batches > 0 and i >= max_batches:
                 break
@@ -509,7 +574,7 @@ class TrainerIdea8:
         val_every: int,
         base_lrs: Tuple[float, float, float],
         weight_decay: float,
-        # idea3 schedule knobs
+        # schedule knobs
         ramp_kind: str,
         ramp_start_epoch: int,
         ramp_end_epoch: int,
@@ -578,7 +643,7 @@ class TrainerIdea8:
             tp_sum = fp_sum = fn_sum = 0
 
             for b, batch in enumerate(train_loader, 1):
-                xb, yb, rb, _missed = batch
+                xb, yb, rb, _missed, _detected = batch
                 xb = xb.to(self.device, non_blocking=True)
                 yb = yb.to(self.device, non_blocking=True)
                 rb = rb.to(self.device, non_blocking=True)
@@ -591,7 +656,9 @@ class TrainerIdea8:
                     loss = masked_bce_with_logits(logits, yb_r, valid, pos_weight=float(warmup_pos_weight))
 
                 tp, fp, fn = update_confusion_from_logits(logits, yb_r, valid, thr=FIXED_THR)
-                tp_sum += tp; fp_sum += fp; fn_sum += fn
+                tp_sum += tp
+                fp_sum += fp
+                fn_sum += fn
 
                 opt.zero_grad(set_to_none=True)
                 scaler.scale(loss).backward()
@@ -610,7 +677,7 @@ class TrainerIdea8:
 
             if verbose >= 2 and self.is_main_process():
                 active = ddp_sum_float(valid_sum, self.device)
-                total  = ddp_sum_float(pix_sum, self.device)
+                total = ddp_sum_float(pix_sum, self.device)
                 masked_pct = 100.0 * (1.0 - (active / max(total, 1.0)))
 
                 tp_all = ddp_sum_i64(tp_sum, self.device)
@@ -644,7 +711,7 @@ class TrainerIdea8:
             tp_sum = fp_sum = fn_sum = 0
 
             for b, batch in enumerate(train_loader, 1):
-                xb, yb, rb, _missed = batch
+                xb, yb, rb, _missed, _detected = batch
                 xb = xb.to(self.device, non_blocking=True)
                 yb = yb.to(self.device, non_blocking=True)
                 rb = rb.to(self.device, non_blocking=True)
@@ -657,7 +724,9 @@ class TrainerIdea8:
                     loss = masked_bce_with_logits(logits, yb_r, valid, pos_weight=float(head_pos_weight))
 
                 tp, fp, fn = update_confusion_from_logits(logits, yb_r, valid, thr=FIXED_THR)
-                tp_sum += tp; fp_sum += fp; fn_sum += fn
+                tp_sum += tp
+                fp_sum += fp
+                fn_sum += fn
 
                 opt.zero_grad(set_to_none=True)
                 scaler.scale(loss).backward()
@@ -676,7 +745,7 @@ class TrainerIdea8:
 
             if verbose >= 2 and self.is_main_process():
                 active = ddp_sum_float(valid_sum, self.device)
-                total  = ddp_sum_float(pix_sum, self.device)
+                total = ddp_sum_float(pix_sum, self.device)
                 masked_pct = 100.0 * (1.0 - (active / max(total, 1.0)))
 
                 tp_all = ddp_sum_i64(tp_sum, self.device)
@@ -690,7 +759,7 @@ class TrainerIdea8:
                     f"F1={f1:.4f} F2={f2:.4f} | active_pix={active:.0f} masked_out={masked_pct:.2f}%"
                 )
 
-        # ---- Tail: masked BCE (no threshold search) ----
+        # ---- Tail: masked BCE ----
         freeze_all(raw_model)
         if hasattr(raw_model, "head"):
             for p in raw_model.head.parameters():
@@ -710,7 +779,7 @@ class TrainerIdea8:
             tp_sum = fp_sum = fn_sum = 0
 
             for b, batch in enumerate(train_loader, 1):
-                xb, yb, rb, _missed = batch
+                xb, yb, rb, _missed, _detected = batch
                 xb = xb.to(self.device, non_blocking=True)
                 yb = yb.to(self.device, non_blocking=True)
                 rb = rb.to(self.device, non_blocking=True)
@@ -723,7 +792,9 @@ class TrainerIdea8:
                     loss = masked_bce_with_logits(logits, yb_r, valid, pos_weight=float(tail_pos_weight))
 
                 tp, fp, fn = update_confusion_from_logits(logits, yb_r, valid, thr=FIXED_THR)
-                tp_sum += tp; fp_sum += fp; fn_sum += fn
+                tp_sum += tp
+                fp_sum += fp
+                fn_sum += fn
 
                 opt.zero_grad(set_to_none=True)
                 scaler.scale(loss).backward()
@@ -742,7 +813,7 @@ class TrainerIdea8:
 
             if verbose >= 2 and self.is_main_process():
                 active = ddp_sum_float(valid_sum, self.device)
-                total  = ddp_sum_float(pix_sum, self.device)
+                total = ddp_sum_float(pix_sum, self.device)
                 masked_pct = 100.0 * (1.0 - (active / max(total, 1.0)))
 
                 tp_all = ddp_sum_i64(tp_sum, self.device)
@@ -756,8 +827,8 @@ class TrainerIdea8:
                     f"F1={f1:.4f} F2={f2:.4f} | active_pix={active:.0f} masked_out={masked_pct:.2f}%"
                 )
 
-        # ---- Long: Idea 3 schedule (masked BCE -> masked FT) ----
-        best = {"auc": -1.0, "state": None, "thr": FIXED_THR, "ep": 0, "f2": 0.0}
+        # ---- Long: masked BCE -> masked FT ----
+        best = {"auc": -1.0, "state": None, "thr": FIXED_THR, "ep": 0, "f2": -1e9}
 
         for ep in range(1, max_epochs + 1):
             self._set_loader_epoch(train_loader, seed + 1000 + ep)
@@ -783,7 +854,7 @@ class TrainerIdea8:
             tp_sum = fp_sum = fn_sum = 0
 
             for i, batch in enumerate(train_loader, 1):
-                xb, yb, rb, _missed = batch
+                xb, yb, rb, _missed, _detected = batch
                 xb = xb.to(self.device, non_blocking=True)
                 yb = yb.to(self.device, non_blocking=True)
                 rb = rb.to(self.device, non_blocking=True)
@@ -798,16 +869,16 @@ class TrainerIdea8:
                     if lam <= 0.0:
                         loss = loss_bce
                     else:
-                        loss_ft = focal_tversky_masked(
-                            logits, yb_r, valid, alpha=float(ft_alpha), gamma=float(ft_gamma)
-                        )
+                        loss_ft = focal_tversky_masked(logits, yb_r, valid, alpha=float(ft_alpha), gamma=float(ft_gamma))
                         loss = (1.0 - lam) * loss_bce + lam * loss_ft
 
                 if not torch.isfinite(loss):
                     raise RuntimeError(f"NaN/Inf loss at ep={ep} iter={i}: {float(loss.item())}")
 
                 tp, fp, fn = update_confusion_from_logits(logits, yb_r, valid, thr=FIXED_THR)
-                tp_sum += tp; fp_sum += fp; fn_sum += fn
+                tp_sum += tp
+                fp_sum += fp
+                fn_sum += fn
 
                 opt.zero_grad(set_to_none=True)
                 scaler.scale(loss).backward()
@@ -827,7 +898,6 @@ class TrainerIdea8:
 
             train_loss = loss_sum / max(seen, 1)
 
-            # train metrics
             tp_all = ddp_sum_i64(tp_sum, self.device)
             fp_all = ddp_sum_i64(fp_sum, self.device)
             fn_all = ddp_sum_i64(fn_sum, self.device)
@@ -836,19 +906,17 @@ class TrainerIdea8:
 
             if self.is_main_process() and verbose >= 1:
                 active = ddp_sum_float(valid_sum, self.device)
-                total  = ddp_sum_float(pix_sum, self.device)
+                total = ddp_sum_float(pix_sum, self.device)
                 masked_pct = 100.0 * (1.0 - (active / max(total, 1.0)))
 
                 print(
                     f"[EP{ep:02d}] lam={lam:.3f} loss {train_loss:.4f} | thr={FIXED_THR:.3f} | "
                     f"F1={f1_tr:.4f} F2={f2_tr:.4f} | active_pix={active:.0f} masked_out={masked_pct:.2f}% | {time.time()-t0:.1f}s"
                 )
-                if self.is_main_process() and save_last_to:
+
+                if save_last_to:
                     Path(save_last_to).parent.mkdir(parents=True, exist_ok=True)
-                    torch.save(
-                        {"state": raw_model.state_dict(), "thr": FIXED_THR, "ep": int(ep)},
-                        save_last_to,
-                    )
+                    torch.save({"state": raw_model.state_dict(), "thr": FIXED_THR, "ep": int(ep)}, save_last_to)
 
             if (ep % val_every == 0) or (ep <= 3):
                 f1v, f2v, auc = self.eval_val_f1f2_auc(
@@ -863,19 +931,12 @@ class TrainerIdea8:
                 if self.is_main_process():
                     print(f"[VAL ep{ep}] AUC {auc:.3f} | thr={FIXED_THR:.3f} | F1={f1v:.4f} F2={f2v:.4f}")
 
-                # ---- robust metric values ----
-                auc_v = float(auc)
-                f2_v = float(f2v)
+                auc_v = float(auc) if np.isfinite(float(auc)) else -1e9
+                f2_v = float(f2v) if np.isfinite(float(f2v)) else -1e9
 
-                # NaN guard (prevents "never best" due to NaN comparisons)
-                if not np.isfinite(auc_v):
-                    auc_v = -1e9
-                if not np.isfinite(f2_v):
-                    f2_v = -1e9
-
-                # choose best criterion
                 score = auc_v if best_metric == "auc" else f2_v
                 best_score = best["auc"] if best_metric == "auc" else best.get("f2", -1e9)
+
                 if score > best_score:
                     best = {
                         "auc": auc_v,
@@ -897,7 +958,6 @@ class TrainerIdea8:
                             },
                             save_best_to,
                         )
-
 
         if best["state"] is not None:
             raw_model.load_state_dict(best["state"])
@@ -923,14 +983,15 @@ def cli():
     ap.add_argument("--num-workers", type=int, default=2)
     ap.add_argument("--pin-memory", action=argparse.BooleanOptionalAction, default=True)
 
-    # Idea 1 oversampling
-    ap.add_argument("--missed-frac", type=float, default=0.35,
-                    help="Target fraction of LSST-missed tiles in sampled stream (0..1).")
-    ap.add_argument("--epoch-size", type=int, default=0,
-                    help="Samples PER RANK per epoch for sampler (0 -> ceil(N/world_size)).")
+    # Mixture fractions (train stream)
+    ap.add_argument("--frac-missed", type=float, default=0.60)
+    ap.add_argument("--frac-detected", type=float, default=0.25)
+    ap.add_argument("--frac-background", type=float, default=0.15)
+    ap.add_argument("--epoch-size", type=int, default=0, help="Samples PER RANK per epoch (0 -> ceil(N/world_size)).")
 
-    # missed-tiling bbox margin
+    # bbox margin for mapping injections -> tiles
     ap.add_argument("--margin-pix", type=float, default=0.0)
+    ap.add_argument("--stack-col", type=str, default="stack_detection")
 
     # fixed threshold
     ap.add_argument("--fixed-thr", type=float, default=0.5)
@@ -959,7 +1020,6 @@ def cli():
     ap.add_argument("--weight-decay", type=float, default=1e-4)
     ap.add_argument("--long-batches", type=int, default=0)
 
-    # Idea 3 schedule (LONG only)
     ap.add_argument("--ramp-kind", type=str, default="linear", choices=["linear", "sigmoid"])
     ap.add_argument("--ramp-start-epoch", type=int, default=11)
     ap.add_argument("--ramp-end-epoch", type=int, default=40)
@@ -969,14 +1029,11 @@ def cli():
     ap.add_argument("--ft-alpha", type=float, default=0.45)
     ap.add_argument("--ft-gamma", type=float, default=1.3)
 
-    # metrics on val
-    ap.add_argument("--val-metric-batches", type=int, default=60,
-                    help="How many val batches to use for F1/F2 (0 = all).")
+    ap.add_argument("--val-metric-batches", type=int, default=60, help="0 = all")
 
-    ap.add_argument("--save-best-to", type=str, default="../checkpoints/Experiments/Best/idea8.pt")
-    ap.add_argument("--save-last-to", type=str, default="../checkpoints/Experiments/Last/idea8.pt")
-    ap.add_argument("--best-metric", type=str, default="auc", choices=["auc", "f2"],
-                    help="Which metric decides best checkpoint. thr is fixed anyway.")
+    ap.add_argument("--save-best-to", type=str, default="../checkpoints/Experiments/Best/idea8_mixture.pt")
+    ap.add_argument("--save-last-to", type=str, default="../checkpoints/Experiments/Last/idea8_mixture.pt")
+    ap.add_argument("--best-metric", type=str, default="auc", choices=["auc", "f2"])
 
     ap.add_argument("--verbose", type=int, default=2)
     return ap.parse_args()
@@ -1005,6 +1062,7 @@ def main():
     is_dist, rank, local_rank, world_size = init_distributed()
 
     import builtins
+
     if not is_main_process():
         builtins.print = lambda *a, **k: None
 
@@ -1019,40 +1077,72 @@ def main():
     tiles_tr = filter_tiles_by_panels(base_ds, idx_tr_set)
     tiles_va = filter_tiles_by_panels(base_ds, idx_va_set)
 
-    missed_mask_base = build_missed_tile_mask_from_csv(
+    # Build BASE masks from CSV bboxes:
+    touched_any_base = build_tile_mask_from_csv(
         args.train_csv,
         base_ds,
         tile=int(args.tile),
         margin_pix=float(args.margin_pix),
-        stack_col="stack_detection",
+        stack_col=str(args.stack_col),
+        stack_value=None,
+    )
+    missed_base = build_tile_mask_from_csv(
+        args.train_csv,
+        base_ds,
+        tile=int(args.tile),
+        margin_pix=float(args.margin_pix),
+        stack_col=str(args.stack_col),
+        stack_value=0,
+    )
+    detected_base = build_tile_mask_from_csv(
+        args.train_csv,
+        base_ds,
+        tile=int(args.tile),
+        margin_pix=float(args.margin_pix),
+        stack_col=str(args.stack_col),
+        stack_value=1,
     )
 
-    train_ds = TileSubsetWithRealAndMissed(
+    train_ds = TileSubsetWithRealAndFlags(
         base_ds,
         tiles_tr,
         train_h5=args.train_h5,
         real_labels_key=args.real_labels_key,
-        missed_mask_base=missed_mask_base,
+        missed_mask_base=missed_base,
+        detected_mask_base=detected_base,
     )
-    # val also includes real_labels for masking metrics
-    val_ds = TileSubsetWithRealAndMissed(
+    val_ds = TileSubsetWithRealAndFlags(
         base_ds,
         tiles_va,
         train_h5=args.train_h5,
         real_labels_key=args.real_labels_key,
-        missed_mask_base=missed_mask_base,  # unused for val metrics, but needed for shape
+        missed_mask_base=missed_base,
+        detected_mask_base=detected_base,
     )
 
-    # Build missed/non-missed lists in TRAIN dataset local indexing (0..len(train_ds)-1)
+    # Build TRAIN-local bucket ids.
+    # Background = tiles in train split NOT touched by any injection bbox.
     missed_local: List[int] = []
-    normal_local: List[int] = []
+    detected_local: List[int] = []
+    background_local: List[int] = []
+
     base_indices = train_ds.base_tile_indices
     for j in range(len(train_ds)):
         bidx = int(base_indices[j])
-        (missed_local if bool(missed_mask_base[bidx]) else normal_local).append(j)
+        if bool(missed_base[bidx]):
+            missed_local.append(j)
+        elif bool(detected_base[bidx]):
+            detected_local.append(j)
+        else:
+            # If it is touched_any but not in missed/detected due to CSV quirks, treat as detected-like.
+            if bool(touched_any_base[bidx]):
+                detected_local.append(j)
+            else:
+                background_local.append(j)
 
     missed_local = np.asarray(missed_local, dtype=np.int64)
-    normal_local = np.asarray(normal_local, dtype=np.int64)
+    detected_local = np.asarray(detected_local, dtype=np.int64)
+    background_local = np.asarray(background_local, dtype=np.int64)
 
     if is_main_process():
         print(f"Train tiles: {len(train_ds)} | Val tiles: {len(val_ds)}")
@@ -1061,34 +1151,44 @@ def main():
                 print(f"real_labels present: {args.real_labels_key in f}")
         except Exception as e:
             print(f"WARNING: could not inspect H5 for real_labels: {e}")
-        print(f"Missed BASE tiles (from CSV): {int(missed_mask_base.sum())} / {len(missed_mask_base)}")
-        print(f"Missed TRAIN tiles: {missed_local.size} / {len(train_ds)}")
-        print(f"Sampler missed_frac target: {float(args.missed_frac):.3f}")
+        print(f"TRAIN bucket sizes: missed={missed_local.size} detected={detected_local.size} background={background_local.size}")
+        fm, fd, fb = float(args.frac_missed), float(args.frac_detected), float(args.frac_background)
+        s = fm + fd + fb
+        if s > 0:
+            fm, fd, fb = fm / s, fd / s, fb / s
+        print(f"TRAIN mixture target: missed={fm:.3f} detected={fd:.3f} background={fb:.3f}")
 
-    # Sampler: Idea 1 oversampling
+    # Samplers
     epoch_size = None if int(args.epoch_size) <= 0 else int(args.epoch_size)
     use_ddp = bool(is_dist and world_size > 1)
+
     if use_ddp:
-        train_sampler = DistributedStratifiedMissedSampler(
+        train_sampler = DistributedMixtureSampler(
             dataset_size=len(train_ds),
-            miss_ids=missed_local,
-            norm_ids=normal_local,
+            missed_ids=missed_local,
+            detected_ids=detected_local,
+            background_ids=background_local,
             num_replicas=world_size,
             rank=rank,
             seed=int(args.seed),
-            missed_frac=float(args.missed_frac),
+            frac_missed=float(args.frac_missed),
+            frac_detected=float(args.frac_detected),
+            frac_background=float(args.frac_background),
             epoch_size=epoch_size,
         )
         val_sampler = DistributedSampler(val_ds, num_replicas=world_size, rank=rank, shuffle=False)
     else:
-        train_sampler = DistributedStratifiedMissedSampler(
+        train_sampler = DistributedMixtureSampler(
             dataset_size=len(train_ds),
-            miss_ids=missed_local,
-            norm_ids=normal_local,
+            missed_ids=missed_local,
+            detected_ids=detected_local,
+            background_ids=background_local,
             num_replicas=1,
             rank=0,
             seed=int(args.seed),
-            missed_frac=float(args.missed_frac),
+            frac_missed=float(args.frac_missed),
+            frac_detected=float(args.frac_detected),
+            frac_background=float(args.frac_background),
             epoch_size=epoch_size,
         )
         val_sampler = None
@@ -1125,49 +1225,37 @@ def main():
         val_loader=val_loader,
         seed=int(args.seed),
         init_head_prior=float(args.init_head_prior),
-
         warmup_epochs=int(args.warmup_epochs),
         warmup_batches=int(args.warmup_batches),
         warmup_lr=float(args.warmup_lr),
         warmup_pos_weight=float(args.warmup_pos_weight),
-
         head_epochs=int(args.head_epochs),
         head_batches=int(args.head_batches),
         head_lr=float(args.head_lr),
         head_pos_weight=float(args.head_pos_weight),
-
         tail_epochs=int(args.tail_epochs),
         tail_batches=int(args.tail_batches),
         tail_lr=float(args.tail_lr),
         tail_pos_weight=float(args.tail_pos_weight),
-
         max_epochs=int(args.max_epochs),
         val_every=int(args.val_every),
         base_lrs=(float(args.base_lrs[0]), float(args.base_lrs[1]), float(args.base_lrs[2])),
         weight_decay=float(args.weight_decay),
-
         ramp_kind=str(args.ramp_kind),
         ramp_start_epoch=int(args.ramp_start_epoch),
         ramp_end_epoch=int(args.ramp_end_epoch),
         sigmoid_k=float(args.sigmoid_k),
-
         bce_pos_weight_long=float(args.bce_pos_weight_long),
         ft_alpha=float(args.ft_alpha),
         ft_gamma=float(args.ft_gamma),
-
         fixed_thr=float(args.fixed_thr),
         val_metric_batches=int(args.val_metric_batches),
-
         save_best_to=str(args.save_best_to),
         save_last_to=str(args.save_last_to),
         best_metric=str(args.best_metric),
         long_batches=int(args.long_batches),
         verbose=int(args.verbose),
     )
-
-    if is_main_process():
-        print("Final threshold (fixed):", thr)
-        print("Summary:", summary)
 
     if dist.is_available() and dist.is_initialized():
         dist.destroy_process_group()

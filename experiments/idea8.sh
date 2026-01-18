@@ -71,7 +71,9 @@ torchrun --standalone --nnodes=1 --nproc_per_node=1 \
   --batch-size 256 \
   --num-workers "${SLURM_CPUS_PER_TASK:-2}" \
   --seed 1337 \
-  --missed-frac 0.45 \
+  --frac-missed 0.60 \
+  --frac-detected 0.25 \
+  --frac-background 0.15 \
   --margin-pix 0.0 \
   --fixed-thr 0.5 \
   --ft-alpha 0.45 \
@@ -82,6 +84,8 @@ torchrun --standalone --nnodes=1 --nproc_per_node=1 \
   --max-epochs 60 \
   --val-every 25 \
   --val-metric-batches 60 \
-  --save-best-to "../checkpoints/Experiments/Best/idea8.pt" \
-  --save-last-to "../checkpoints/Experiments/Last/idea8.pt"
+  --best-metric f2 \
+  --save-best-to "../checkpoints/Experiments/Best/idea8_mixture.pt" \
+  --save-last-to "../checkpoints/Experiments/Last/idea8_mixture.pt"
+
 
