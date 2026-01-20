@@ -255,11 +255,12 @@ def sigma_psf_constvar(calexp, x, y, *, use_kernel_image=False):
 
 
 # ---- Switchable wrapper (drop-in replacement for your old psf_fit_flux_sigma) ----
-def psf_fit_flux_sigma(calexp, x, y, *, estimator="wls", use_kernel_image=False):
+def psf_fit_flux_sigma(calexp, x, y, *, L_pix=None, theta_deg=None, estimator="trail_matched", use_kernel_image=False):
     """
     estimator:
       - "wls"      : inverse-variance weighted LS (recommended statistically)
-      - "constvar" : constant-variance approximation (Bosch-style)
+      - "constvar" : constant-variance approximation
+        - "trail_matched": optimal trail-matched
     use_kernel_image:
       - False: psf.computeImage(...)
       - True : psf.computeKernelImage(...) if available, else falls back to computeImage
@@ -269,16 +270,20 @@ def psf_fit_flux_sigma(calexp, x, y, *, estimator="wls", use_kernel_image=False)
     elif estimator == "constvar":
         return sigma_psf_constvar(calexp, x, y, use_kernel_image=use_kernel_image)
     elif estimator == "trail_matched":
-        return sigmaF_trail_matched(calexp, x, y, L_pix=5.0, theta_deg=0.0, use_kernel_image=use_kernel_image)[0]
+        if L_pix is None:
+            raise ValueError("L_pix must be provided for 'trail_matched' estimator.")
+        if theta_deg is None:
+            raise ValueError("theta_deg must be provided for 'trail_matched' estimator.")
+        return sigmaF_trail_matched(calexp, x, y, L_pix=L_pix, theta_deg=theta_deg, use_kernel_image=use_kernel_image)[0]
     else:
         raise ValueError(f"Unknown estimator={estimator!r}. Use 'wls', 'constvar' or 'trail_matched'.")
 
-def mag_to_snr(mag, calexp, x, y, *, estimator="wls", use_kernel_image=False):
+def mag_to_snr(mag, calexp, x, y, *, estimator="wls", use_kernel_image=False, l_pix=None, theta_p=None):
     F = calexp.getPhotoCalib().magnitudeToInstFlux(mag)
-    sigmaF = psf_fit_flux_sigma(calexp, x, y, estimator=estimator, use_kernel_image=use_kernel_image)
+    sigmaF = psf_fit_flux_sigma(calexp, x, y, estimator=estimator, use_kernel_image=use_kernel_image, L_pix=l_pix, theta_deg=theta_p)
     return F / sigmaF
 
-def snr_to_mag(snr, calexp, x, y, *, estimator="wls", use_kernel_image=False):
-    sigmaF = psf_fit_flux_sigma(calexp, x, y, estimator=estimator, use_kernel_image=use_kernel_image)
+def snr_to_mag(snr, calexp, x, y, *, estimator="wls", use_kernel_image=False, l_pix=None, theta_p=None):
+    sigmaF = psf_fit_flux_sigma(calexp, x, y, estimator=estimator, use_kernel_image=use_kernel_image, L_pix=l_pix, theta_deg=theta_p)
     F = snr * sigmaF
     return calexp.getPhotoCalib().instFluxToMagnitude(F)

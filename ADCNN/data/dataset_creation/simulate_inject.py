@@ -79,30 +79,34 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
         inject_length = rng.uniform(*trail_length)
         x = inject_length / (24 * theta_p)
         upper_limit_mag = psf_depth - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x)) if mag[1] == 0 else mag[1]
+        angle = rng.uniform(*beta)
         use_kernel = (psf_template == "kernel")
         if mag_mode == "snr":
             snr = rng.uniform(mag[0], upper_limit_mag)
-            psf_magnitude = snr_to_mag(snr, calexp, x_pos, y_pos, estimator=snr_estimator, use_kernel_image=use_kernel)
+            psf_magnitude = snr_to_mag(snr, calexp, x_pos, y_pos, estimator=snr_estimator, use_kernel_image=use_kernel,
+                                       l_pix=inject_length, theta_p=angle)
             magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
             surface_brightness = magnitude + 2.5 * np.log10(inject_length)
         elif mag_mode == "psf_mag":
             psf_magnitude = rng.uniform(mag[0], upper_limit_mag)
-            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos, estimator=snr_estimator, use_kernel_image=use_kernel)
+            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos, estimator=snr_estimator, use_kernel_image=use_kernel,
+                             l_pix=inject_length, theta_p=angle)
             magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
             surface_brightness = magnitude + 2.5 * np.log10(inject_length)
         elif mag_mode == "surface_brightness":
             surface_brightness = rng.uniform(mag[0], mag[1])
             magnitude = surface_brightness - 2.5 * np.log10(inject_length)
             psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
-            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos)
+            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos, estimator=snr_estimator, use_kernel_image=use_kernel,
+                             l_pix=inject_length, theta_p=angle)
         elif mag_mode == "integrated_mag":
             magnitude = rng.uniform(mag[0], mag[1])
             psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
-            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos)
+            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos, estimator=snr_estimator, use_kernel_image=use_kernel,
+                             l_pix=inject_length, theta_p=angle)
             surface_brightness = magnitude + 2.5 * np.log10(inject_length)
         else:
             raise ValueError(f"Unknown mag_mode: {mag_mode}")
-        angle = rng.uniform(*beta)
         injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, info.id,
                                        int(ref.dataId["detector"]), magnitude, psf_magnitude, snr, str(filter_name.bandLabel),
                                        x_pos, y_pos])
@@ -430,9 +434,9 @@ def main():
     ap.add_argument("--mag-min", type=float, default=19)
     ap.add_argument("--mag-max", type=float, default=24)
     ap.add_argument("--mag-mode", choices=["psf_mag", "snr", "surface_brightness", "integrated_mag"], default="psf_mag")
-    ap.add_argument("--snr-estimator", choices=["wls", "constvar"], default="wls",
-                    help="SNR proxy estimator: wls=inverse-variance weighted LS; constvar=constant-variance approximation")
-    ap.add_argument("--psf-template", choices=["image", "kernel"], default="image",
+    ap.add_argument("--snr-estimator", choices=["wls", "constvar, trail_matched"], default="trail_matched",
+                    help="SNR proxy estimator: wls=inverse-variance weighted LS; constvar=constant-variance approximation; trail_matched=integrated across the trail")
+    ap.add_argument("--psf-template", choices=["image", "kernel"], default="kernel",
                     help="PSF template source: image=computeImage; kernel=computeKernelImage (if available)")
     ap.add_argument("--beta-min", type=float, default=0)
     ap.add_argument("--beta-max", type=float, default=180)
