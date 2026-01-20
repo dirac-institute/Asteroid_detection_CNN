@@ -50,7 +50,7 @@ def inject(postISRCCD, injection_catalog):
     return inject_res.output_exposure
 
 
-def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode="psf_mag"):
+def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode="psf_mag", snr_estimator="wls", psf_template="image"):
     rng = np.random.default_rng(seed)
     injection_catalog = Table(
         names=('injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit', 'detector',
@@ -79,14 +79,15 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
         inject_length = rng.uniform(*trail_length)
         x = inject_length / (24 * theta_p)
         upper_limit_mag = psf_depth - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x)) if mag[1] == 0 else mag[1]
+        use_kernel = (psf_template == "kernel")
         if mag_mode == "snr":
             snr = rng.uniform(mag[0], upper_limit_mag)
-            psf_magnitude = snr_to_mag(snr, calexp, x_pos, y_pos)
+            psf_magnitude = snr_to_mag(snr, calexp, x_pos, y_pos, estimator=snr_estimator, use_kernel_image=use_kernel)
             magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
             surface_brightness = magnitude + 2.5 * np.log10(inject_length)
         elif mag_mode == "psf_mag":
             psf_magnitude = rng.uniform(mag[0], upper_limit_mag)
-            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos)
+            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos, estimator=snr_estimator, use_kernel_image=use_kernel)
             magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
             surface_brightness = magnitude + 2.5 * np.log10(inject_length)
         elif mag_mode == "surface_brightness":
@@ -233,14 +234,14 @@ def footprints_to_label_mask(src_cat, dimensions, dtype=np.uint16):
                 lab[y, x0:x1+1] = label  # overwrite is fine for ignore-mask use
     return lab
 
-def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=None, debug=False, mag_mode="psf_mag"):
+def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=None, debug=False, mag_mode="psf_mag", snr_estimator="wls", psf_template="image"):
     try:
         if seed is None:
             seed = np.random.randint(0,10000)
         butler = Butler(repo, collections=coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
         calexp = butler.get("preliminary_visit_image", dataId=ref.dataId)
-        injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode)
+        injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode, snr_estimator=snr_estimator, psf_template=psf_template)
         pre_injection_Src = butler.get("single_visit_star_footprints", dataId=ref.dataId)
         injected_calexp, post_injection_Src = characterizeCalibrate(inject(calexp, injection_catalog))
         mask = np.zeros((dimensions.y, dimensions.x), dtype=int)
@@ -277,10 +278,11 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
 
 
 def worker(args):
-    idx, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta, source_type, global_seed, mag_mode = args
+    idx, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta, source_type, global_seed, mag_mode, snr_estimator, psf_template = args
     seed = (int(global_seed) * 1_000_003 + int(dataId["visit"]) * 1_003 + int(dataId["detector"])) & 0xFFFFFFFF
     try:
-        res = one_detector_injection(number, trail_length, magnitude, beta, repo, coll, dims, source_type, dataId, seed, mag_mode=mag_mode)
+        res = one_detector_injection(number, trail_length, magnitude, beta, repo, coll, dims, source_type, dataId, seed,
+                                     mag_mode=mag_mode, snr_estimator=snr_estimator, psf_template=psf_template)
         if res[0] is False:
             return ("err", res[1], res[2], res[3])
         _, img, mask, real_labels, catalog = res
@@ -304,7 +306,8 @@ def worker(args):
 
 
 def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitude, beta, where, parallel=4,
-                           random_subset=0, train_test_split=0, seed=123, chunks=None, test_only=False, bad_visits_file=None, mag_mode="psf_mag"):
+                           random_subset=0, train_test_split=0, seed=123, chunks=None, test_only=False, bad_visits_file=None, mag_mode="psf_mag",
+                           snr_estimator="wls", psf_template="image"):
     butler = Butler(repo, collections=coll)
     h5train_path = os.path.join(save_path, "train.h5")
     h5test_path = os.path.join(save_path, "test.h5")
@@ -374,14 +377,14 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             count = count_test
             count_test += 1
             tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
-                          "preliminary_visit_image", seed, mag_mode])
+                          "preliminary_visit_image", seed, mag_mode, snr_estimator, psf_template])
         elif not test_only:
             h5path = h5train_path
             csvpath = os.path.join(save_path, "train.csv")
             count = count_train
             count_train += 1
             tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
-                          "preliminary_visit_image", seed, mag_mode])
+                          "preliminary_visit_image", seed, mag_mode, snr_estimator, psf_template])
     if parallel > 1:
         completed = 0
         total_tasks = len(tasks)
@@ -427,6 +430,10 @@ def main():
     ap.add_argument("--mag-min", type=float, default=19)
     ap.add_argument("--mag-max", type=float, default=24)
     ap.add_argument("--mag-mode", choices=["psf_mag", "snr", "surface_brightness", "integrated_mag"], default="psf_mag")
+    ap.add_argument("--snr-estimator", choices=["wls", "constvar"], default="wls",
+                    help="SNR proxy estimator: wls=inverse-variance weighted LS; constvar=constant-variance approximation")
+    ap.add_argument("--psf-template", choices=["image", "kernel"], default="image",
+                    help="PSF template source: image=computeImage; kernel=computeKernelImage (if available)")
     ap.add_argument("--beta-min", type=float, default=0)
     ap.add_argument("--beta-max", type=float, default=180)
     ap.add_argument("--number", type=int, default=20)

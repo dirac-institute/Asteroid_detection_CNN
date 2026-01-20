@@ -49,59 +49,120 @@ def draw_one_line(mask, origin, angle, length, true_value=1, line_thickness=500)
     mask[one_line_mask != 0] = true_value
     return mask
 
-def psf_fit_flux_sigma(calexp, x, y):
+import numpy as np
+import lsst.geom as geom
+
+def _get_psf_stamp_and_var(calexp, x, y, use_kernel_image=False):
+    """
+    Returns (p_cut, v_cut) where:
+      - p_cut is the PSF template stamp (float64)
+      - v_cut is the variance stamp aligned to p_cut (float64)
+    The stamp is clipped to image bounds.
+    """
     psf = calexp.getPsf()
     var_full = calexp.variance.array.astype(np.float64)
 
-    p = psf.computeImage(geom.Point2D(x, y)).array.astype(np.float64)
-    ph, pw = p.shape
+    # PSF template
+    if use_kernel_image and hasattr(psf, "computeKernelImage"):
+        p = psf.computeKernelImage(geom.Point2D(x, y)).array.astype(np.float64)
+    else:
+        p = psf.computeImage(geom.Point2D(x, y)).array.astype(np.float64)
 
-    # center of stamp in full-image coords
+    ph, pw = p.shape
     cx = int(round(x))
     cy = int(round(y))
 
-    # stamp bounds in full image
-    x0 = cx - pw//2
-    y0 = cy - ph//2
+    x0 = cx - pw // 2
+    y0 = cy - ph // 2
     x1 = x0 + pw
     y1 = y0 + ph
 
     H, W = var_full.shape
-    # clip to image bounds
     ix0 = max(x0, 0); iy0 = max(y0, 0)
     ix1 = min(x1, W); iy1 = min(y1, H)
 
-    # corresponding bounds in PSF stamp coords
     px0 = ix0 - x0; py0 = iy0 - y0
     px1 = px0 + (ix1 - ix0); py1 = py0 + (iy1 - iy0)
 
     p_cut = p[py0:py1, px0:px1]
     v_cut = var_full[iy0:iy1, ix0:ix1]
+    return p_cut, v_cut
 
-    # normalize PSF cut to sum=1 (important if clipping happened)
+
+def sigma_psf_wls(calexp, x, y, *, use_kernel_image=False):
+    """
+    1-sigma uncertainty of PSF amplitude using inverse-variance weighted LS:
+        Var(F) = 1 / sum_i (phi_i^2 / V_i)
+    where phi is PSF template normalized to sum(phi)=1.
+    """
+    p_cut, v_cut = _get_psf_stamp_and_var(calexp, x, y, use_kernel_image=use_kernel_image)
+
     s = p_cut.sum()
     if not np.isfinite(s) or s <= 0:
-        p = None
-        v = None
-    else:
-        p = p_cut / s
-        v = v_cut
-    if p is None:
         return np.nan
-    good = np.isfinite(v) & (v > 0) & np.isfinite(p)
-    denom = np.sum((p[good]**2) / v[good])
-    if denom <= 0:
+    phi = p_cut / s
+
+    good = np.isfinite(v_cut) & (v_cut > 0) & np.isfinite(phi)
+    denom = np.sum((phi[good] ** 2) / v_cut[good])
+    if not np.isfinite(denom) or denom <= 0:
         return np.nan
     return float(np.sqrt(1.0 / denom))
 
-def mag_to_snr (mag, calexp, x, y):
-    F = calexp.getPhotoCalib().magnitudeToInstFlux(mag)
-    sigmaF = psf_fit_flux_sigma(calexp, x, y)
-    snr = F / sigmaF
-    return snr
 
-def snr_to_mag(snr, calexp, x, y):
-    sigmaF = psf_fit_flux_sigma(calexp, x, y)
+def sigma_psf_constvar(calexp, x, y, *, use_kernel_image=False):
+    """
+    1-sigma uncertainty of PSF amplitude under a constant-variance (unweighted LS) approximation.
+    This matches the Bosch-style expression:
+        alpha = sum_i phi_i^2
+        Var(F) = sum_i (phi_i^2 * V_i) / alpha^2
+    where phi is PSF template normalized to sum(phi)=1.
+
+    NOTE: Equivalent to sigma_psf_wls only if V_i is constant across the PSF stamp.
+    """
+    p_cut, v_cut = _get_psf_stamp_and_var(calexp, x, y, use_kernel_image=use_kernel_image)
+
+    s = p_cut.sum()
+    if not np.isfinite(s) or s <= 0:
+        return np.nan
+    phi = p_cut / s
+
+    good = np.isfinite(v_cut) & (v_cut > 0) & np.isfinite(phi)
+    if not np.any(good):
+        return np.nan
+
+    alpha = np.sum(phi[good] ** 2)
+    if not np.isfinite(alpha) or alpha <= 0:
+        return np.nan
+
+    varF = np.sum((phi[good] ** 2) * v_cut[good]) / (alpha ** 2)
+    if not np.isfinite(varF) or varF <= 0:
+        return np.nan
+    return float(np.sqrt(varF))
+
+
+# ---- Switchable wrapper (drop-in replacement for your old psf_fit_flux_sigma) ----
+def psf_fit_flux_sigma(calexp, x, y, *, estimator="wls", use_kernel_image=False):
+    """
+    estimator:
+      - "wls"      : inverse-variance weighted LS (recommended statistically)
+      - "constvar" : constant-variance approximation (Bosch-style)
+    use_kernel_image:
+      - False: psf.computeImage(...)
+      - True : psf.computeKernelImage(...) if available, else falls back to computeImage
+    """
+    if estimator == "wls":
+        return sigma_psf_wls(calexp, x, y, use_kernel_image=use_kernel_image)
+    elif estimator == "constvar":
+        return sigma_psf_constvar(calexp, x, y, use_kernel_image=use_kernel_image)
+    else:
+        raise ValueError(f"Unknown estimator={estimator!r}. Use 'wls' or 'constvar'.")
+
+def mag_to_snr(mag, calexp, x, y, *, estimator="wls", use_kernel_image=False):
+    F = calexp.getPhotoCalib().magnitudeToInstFlux(mag)
+    sigmaF = psf_fit_flux_sigma(calexp, x, y, estimator=estimator, use_kernel_image=use_kernel_image)
+    return F / sigmaF
+
+def snr_to_mag(snr, calexp, x, y, *, estimator="wls", use_kernel_image=False):
+    sigmaF = psf_fit_flux_sigma(calexp, x, y, estimator=estimator, use_kernel_image=use_kernel_image)
     F = snr * sigmaF
-    mag = calexp.getPhotoCalib().instFluxToMagnitude(F)
-    return mag
+    return calexp.getPhotoCalib().instFluxToMagnitude(F)
