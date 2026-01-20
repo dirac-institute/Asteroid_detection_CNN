@@ -1031,8 +1031,8 @@ def cli():
 
     ap.add_argument("--val-metric-batches", type=int, default=60, help="0 = all")
 
-    ap.add_argument("--save-best-to", type=str, default="../checkpoints/Experiments/Best/idea8_mixture.pt")
-    ap.add_argument("--save-last-to", type=str, default="../checkpoints/Experiments/Last/idea8_mixture.pt")
+    ap.add_argument("--save-best-to", type=str, default="../checkpoints/Experiments/Best/idea8.pt")
+    ap.add_argument("--save-last-to", type=str, default="../checkpoints/Experiments/Last/idea8.pt")
     ap.add_argument("--best-metric", type=str, default="auc", choices=["auc", "f2"])
 
     ap.add_argument("--verbose", type=int, default=2)
