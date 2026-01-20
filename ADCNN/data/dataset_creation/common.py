@@ -52,6 +52,120 @@ def draw_one_line(mask, origin, angle, length, true_value=1, line_thickness=500)
 import numpy as np
 import lsst.geom as geom
 
+def _extract_var_stamp(calexp, cx, cy, h, w):
+    var_full = calexp.variance.array.astype(np.float64)
+    H, W = var_full.shape
+    x0 = cx - w//2; y0 = cy - h//2
+    x1 = x0 + w;    y1 = y0 + h
+    ix0 = max(x0, 0); iy0 = max(y0, 0)
+    ix1 = min(x1, W); iy1 = min(y1, H)
+    return var_full[iy0:iy1, ix0:ix1], (ix0, iy0, ix1, iy1), (x0, y0)
+
+def _add_shifted(acc, psf_img, dx, dy):
+    """
+    Add psf_img shifted by (dx,dy) pixels into acc, with clipping. dx,dy can be fractional.
+    Uses simple bilinear sampling via integer rounding (fast, good enough for this test).
+    """
+    # For a first test, integer shifts are fine; fractional can be added later if needed.
+    sx = int(round(dx))
+    sy = int(round(dy))
+
+    ph, pw = psf_img.shape
+    ah, aw = acc.shape
+
+    # center align
+    # acc is the target stamp centered on (cx,cy), psf_img is centered by PSF rendering
+    # We'll paste psf_img into acc with shift (sx,sy).
+    x0 = (aw - pw)//2 + sx
+    y0 = (ah - ph)//2 + sy
+    x1 = x0 + pw
+    y1 = y0 + ph
+
+    ax0 = max(x0, 0); ay0 = max(y0, 0)
+    ax1 = min(x1, aw); ay1 = min(y1, ah)
+
+    if ax0 >= ax1 or ay0 >= ay1:
+        return
+
+    px0 = ax0 - x0; py0 = ay0 - y0
+    px1 = px0 + (ax1 - ax0); py1 = py0 + (ay1 - ay0)
+
+    acc[ay0:ay1, ax0:ax1] += psf_img[py0:py1, px0:px1]
+
+
+def sigmaF_trail_matched(calexp, x, y, L_pix, theta_deg, *,
+                         n_samples=41, use_kernel_image=False):
+    """
+    Compute 1-sigma flux uncertainty for an optimal *trail-matched* filter:
+      T = (PSF convolved with a line segment of length L and angle theta), normalized to sum(T)=1
+      sigmaF = (sum(T^2 / V))^(-1/2)
+
+    Returns (sigmaF, NEA_trail, stamp_shape)
+      where NEA_trail = 1/sum(T^2) for constant variance (useful diagnostic)
+    """
+    psf = calexp.getPsf()
+
+    # PSF image at position
+    if use_kernel_image and hasattr(psf, "computeKernelImage"):
+        psf_img = psf.computeKernelImage(geom.Point2D(float(x), float(y))).array.astype(np.float64)
+    else:
+        psf_img = psf.computeImage(geom.Point2D(float(x), float(y))).array.astype(np.float64)
+
+    # normalize PSF to unit flux
+    s = psf_img.sum()
+    if not np.isfinite(s) or s <= 0:
+        return np.nan, np.nan, psf_img.shape
+    psf_img = psf_img / s
+
+    # choose a stamp size big enough to hold the trail+PSF
+    # (pad PSF stamp by ~L in both directions)
+    ph, pw = psf_img.shape
+    pad = int(np.ceil(L_pix)) + 4
+    ah = ph + 2*pad
+    aw = pw + 2*pad
+
+    # build trailed template by averaging shifted PSFs along the line
+    T = np.zeros((ah, aw), dtype=np.float64)
+
+    theta = np.deg2rad(theta_deg)
+    ux = np.cos(theta)
+    uy = np.sin(theta)
+
+    # sample positions along the line segment (centered at 0)
+    # spacing so endpoints included
+    s_vals = np.linspace(-0.5*L_pix, 0.5*L_pix, int(n_samples))
+
+    for sv in s_vals:
+        _add_shifted(T, psf_img, dx=sv*ux, dy=sv*uy)
+
+    # normalize to unit integrated flux (trail template)
+    Ts = T.sum()
+    if not np.isfinite(Ts) or Ts <= 0:
+        return np.nan, np.nan, T.shape
+    T /= Ts
+
+    # variance stamp at (x,y) with same bbox as T centered on rounded pixel
+    cx = int(round(x)); cy = int(round(y))
+    V, (ix0, iy0, ix1, iy1), (x0, y0) = _extract_var_stamp(calexp, cx, cy, ah, aw)
+
+    # clip T to the same region as V (if near edges)
+    # compute overlap indices
+    # T coords corresponding to V region
+    tx0 = ix0 - x0
+    ty0 = iy0 - y0
+    tx1 = tx0 + (ix1 - ix0)
+    ty1 = ty0 + (iy1 - iy0)
+    Tcut = T[ty0:ty1, tx0:tx1]
+
+    good = np.isfinite(V) & (V > 0) & np.isfinite(Tcut)
+    denom = np.sum((Tcut[good]**2) / V[good])
+    if not np.isfinite(denom) or denom <= 0:
+        return np.nan, np.nan, T.shape
+
+    sigmaF = float(np.sqrt(1.0 / denom))
+    nea_trail = float(1.0 / np.sum(Tcut[good]**2))  # constant-variance diagnostic
+    return sigmaF, nea_trail, T.shape
+
 def _get_psf_stamp_and_var(calexp, x, y, use_kernel_image=False):
     """
     Returns (p_cut, v_cut) where:
@@ -154,8 +268,10 @@ def psf_fit_flux_sigma(calexp, x, y, *, estimator="wls", use_kernel_image=False)
         return sigma_psf_wls(calexp, x, y, use_kernel_image=use_kernel_image)
     elif estimator == "constvar":
         return sigma_psf_constvar(calexp, x, y, use_kernel_image=use_kernel_image)
+    elif estimator == "trail_matched":
+        return sigmaF_trail_matched(calexp, x, y, L_pix=5.0, theta_deg=0.0, use_kernel_image=use_kernel_image)[0]
     else:
-        raise ValueError(f"Unknown estimator={estimator!r}. Use 'wls' or 'constvar'.")
+        raise ValueError(f"Unknown estimator={estimator!r}. Use 'wls', 'constvar' or 'trail_matched'.")
 
 def mag_to_snr(mag, calexp, x, y, *, estimator="wls", use_kernel_image=False):
     F = calexp.getPhotoCalib().magnitudeToInstFlux(mag)
