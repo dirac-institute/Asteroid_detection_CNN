@@ -83,9 +83,25 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
         use_kernel = (psf_template == "kernel")
         if mag_mode == "snr":
             snr = rng.uniform(mag[0], upper_limit_mag)
-            psf_magnitude = snr_to_mag(snr, calexp, x_pos, y_pos, estimator=snr_estimator, use_kernel_image=use_kernel,
-                                       l_pix=inject_length, theta_p=angle)
-            magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
+            if snr_estimator == "trail_matched":
+                # snr_to_mag returns INTEGRATED magnitude (because sigmaF is for the trail template)
+                integrated_mag = snr_to_mag(
+                    snr, calexp, x_pos, y_pos,
+                    estimator=snr_estimator, use_kernel_image=use_kernel,
+                    l_pix=inject_length, theta_p=angle
+                )
+                magnitude = integrated_mag  # integrated trail mag
+                # derive PSF_mag for bookkeeping (PSF_mag is brighter than integrated_mag)
+                psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
+            else:
+                # wls/constvar are POINT-SOURCE estimators -> snr_to_mag returns PSF_mag
+                psf_magnitude = snr_to_mag(
+                    snr, calexp, x_pos, y_pos,
+                    estimator=snr_estimator, use_kernel_image=use_kernel,
+                    l_pix=inject_length, theta_p=angle
+                )
+                # convert PSF_mag -> integrated_mag (your existing correction)
+                magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
             surface_brightness = magnitude + 2.5 * np.log10(inject_length)
         elif mag_mode == "psf_mag":
             psf_magnitude = rng.uniform(mag[0], upper_limit_mag)
@@ -434,7 +450,7 @@ def main():
     ap.add_argument("--mag-min", type=float, default=19)
     ap.add_argument("--mag-max", type=float, default=24)
     ap.add_argument("--mag-mode", choices=["psf_mag", "snr", "surface_brightness", "integrated_mag"], default="psf_mag")
-    ap.add_argument("--snr-estimator", choices=["wls", "constvar, trail_matched"], default="trail_matched",
+    ap.add_argument("--snr-estimator", choices=["wls", "constvar", "trail_matched"], default="trail_matched",
                     help="SNR proxy estimator: wls=inverse-variance weighted LS; constvar=constant-variance approximation; trail_matched=integrated across the trail")
     ap.add_argument("--psf-template", choices=["image", "kernel"], default="kernel",
                     help="PSF template source: image=computeImage; kernel=computeKernelImage (if available)")
