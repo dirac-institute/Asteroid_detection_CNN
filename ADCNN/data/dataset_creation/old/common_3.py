@@ -62,34 +62,6 @@ def sky_to_pixel(calexp, ra_deg: float, dec_deg: float) -> Tuple[float, float]:
     return float(x), float(y)
 
 
-def psf_fwhm_arcsec_from_calexp(
-    calexp,
-    x: float,
-    y: float,
-    *,
-    use_kernel_image: bool = False,
-) -> float:
-    """
-    Estimate PSF FWHM (arcsec) from the PSF image at (x,y) using second moments.
-    Assumes an equivalent circular Gaussian for sigma->FWHM conversion.
-    """
-    psf_img = _compute_psf_image(calexp, x, y, use_kernel_image=use_kernel_image)
-    if psf_img is None:
-        return np.nan
-
-    s = float(np.sum(psf_img))
-    if not np.isfinite(s) or s <= 0:
-        return np.nan
-
-    psf_unit = (psf_img / s).astype(np.float64)
-    sigma_pix = _estimate_sigma_from_psf(psf_unit)  # pixels
-    if not np.isfinite(sigma_pix) or sigma_pix <= 0:
-        return np.nan
-
-    fwhm_pix = 2.354820045 * sigma_pix
-    pixel_scale = calexp.wcs.getPixelScale().asArcseconds()  # arcsec / pix
-    return float(fwhm_pix * pixel_scale)
-
 # ======================================================================================
 # Drawing helper
 # ======================================================================================
@@ -127,7 +99,7 @@ def draw_one_line(
 
 
 # ======================================================================================
-# SNR conversion helpers
+# SNR conversion helpers (Stack PSF-flux SNR, with centroid-jitter marginalization)
 # ======================================================================================
 
 def mag_to_snr(
@@ -140,18 +112,64 @@ def mag_to_snr(
     l_pix: float,
     theta_deg: float,
     pad_sigma: float = 5.0,
+    centroid_jitter: bool = True,
+    jitter_grid_step: float = 0.25,
+    jitter_nsig: float = 3.0,
+    iters: int = 2,
 ) -> float:
-    F = calexp.getPhotoCalib().magnitudeToInstFlux(mag)
+    """
+    Predict Stack's PSF-flux SNR (stack_snr) for a *trailed* source with given magnitude.
+
+    If centroid_jitter=True, we self-consistently account for centroid uncertainty by
+    fixed-point iteration:
+        - compute SNR assuming perfect centroid (no jitter) -> snr0
+        - recompute sigmaF using expected overlap averaged over centroid jitter at snr0 -> snr1
+        - repeat a couple of times (usually 1-2 is enough)
+    """
+    F = float(calexp.getPhotoCalib().magnitudeToInstFlux(mag))
+
+    # Start with "no jitter" to get an initial snr guess
     sigmaF = psf_fit_flux_sigma(
         calexp=calexp,
         x=float(x),
         y=float(y),
         L_pix=float(l_pix),
         theta_deg=float(theta_deg),
+        snr_target=10.0,  # dummy; unused when centroid_jitter=False
         use_kernel_image=use_kernel_image,
         pad_sigma=pad_sigma,
+        centroid_jitter=False,
+        jitter_grid_step=jitter_grid_step,
+        jitter_nsig=jitter_nsig,
     )
-    return float(F) / float(sigmaF)
+    if not np.isfinite(sigmaF) or sigmaF <= 0:
+        return float("nan")
+    snr = F / sigmaF
+
+    if not centroid_jitter:
+        return float(snr)
+
+    # Fixed-point refinement
+    iters = max(int(iters), 1)
+    for _ in range(iters):
+        sigmaF = psf_fit_flux_sigma(
+            calexp=calexp,
+            x=float(x),
+            y=float(y),
+            L_pix=float(l_pix),
+            theta_deg=float(theta_deg),
+            snr_target=float(snr),
+            use_kernel_image=use_kernel_image,
+            pad_sigma=pad_sigma,
+            centroid_jitter=True,
+            jitter_grid_step=jitter_grid_step,
+            jitter_nsig=jitter_nsig,
+        )
+        if not np.isfinite(sigmaF) or sigmaF <= 0:
+            return float("nan")
+        snr = F / sigmaF
+
+    return float(snr)
 
 
 def snr_to_mag(
@@ -164,21 +182,34 @@ def snr_to_mag(
     l_pix: float,
     theta_deg: float,
     pad_sigma: float = 5.0,
+    centroid_jitter: bool = True,
+    jitter_grid_step: float = 0.25,
+    jitter_nsig: float = 3.0,
 ) -> float:
     """
-    Convert *target stack PSF-flux SNR* to magnitude for a trailed source,
-    using a physics-based PSF-template mismatch correction (no numerical fitting).
+    Convert target Stack PSF-flux SNR (stack_snr) to magnitude for a trailed source.
+
+    centroid_jitter=True means: pick a magnitude such that the *expected* stack_snr
+    (marginalized over centroid jitter) equals the requested snr.
     """
+    snr = float(snr)
     sigmaF = psf_fit_flux_sigma(
         calexp=calexp,
         x=float(x),
         y=float(y),
         L_pix=float(l_pix),
         theta_deg=float(theta_deg),
+        snr_target=snr,
         use_kernel_image=use_kernel_image,
         pad_sigma=pad_sigma,
+        centroid_jitter=centroid_jitter,
+        jitter_grid_step=jitter_grid_step,
+        jitter_nsig=jitter_nsig,
     )
-    F = float(snr) * float(sigmaF)
+    if not np.isfinite(sigmaF) or sigmaF <= 0:
+        return float("nan")
+
+    F = snr * float(sigmaF)
     return float(calexp.getPhotoCalib().instFluxToMagnitude(F))
 
 
@@ -189,56 +220,55 @@ def psf_fit_flux_sigma(
     *,
     L_pix: float,
     theta_deg: float,
+    snr_target: float,
     use_kernel_image: bool = False,
     pad_sigma: float = 5.0,
+    centroid_jitter: bool = True,
+    jitter_grid_step: float = 0.25,
+    jitter_nsig: float = 3.0,
 ) -> float:
     """
-    Predict sigmaF such that:
-      F = stack_snr * sigmaF
+    Predict sigmaF such that:  F = stack_snr * sigmaF
 
     Model:
       Stack PSF-flux estimator ~ weighted LS with PSF template phi
       True source image = F * T  (T is PSF⊗line unit-flux template)
 
-    Expected PSF SNR:
+    Expected PSF SNR (evaluated at some centroid):
       SNR_psf = F * sum(phi*T/V) / sqrt(sum(phi^2/V))
 
     Solve for sigmaF:
       sigmaF = sqrt(sum(phi^2/V)) / sum(phi*T/V)
 
-    Fixes implemented vs your previous version:
-      (A) Use a *larger common stamp* for phi/T/V: size depends on L and PSF sigma (avoid truncation).
-      (B) Use denser sampling along the trail in the intermediate regime (reduce phase bias).
-      (D) Keep pixel-wise variance weighting (as you already do).
+    If centroid_jitter=True, we replace overlap = sum(phi*T/V) with its expectation
+    over centroid offsets (Δx,Δy), using a simple anisotropic Gaussian jitter model
+    whose scales depend on (PSF sigma, trail length, snr_target).
     """
-    # Get a native PSF image (for sigma estimate)
+    # Native PSF for sigma estimate
     psf_img_native = _compute_psf_image(calexp, x, y, use_kernel_image=use_kernel_image)
     if psf_img_native is None:
-        return np.nan
+        return float("nan")
+
     psf_sum = float(psf_img_native.sum())
     if not np.isfinite(psf_sum) or psf_sum <= 0:
-        return np.nan
+        return float("nan")
     psf_unit_native = (psf_img_native / psf_sum).astype(np.float64)
 
     sigma_pix = _estimate_sigma_from_psf(psf_unit_native)
     if not np.isfinite(sigma_pix) or sigma_pix <= 0:
-        return np.nan
+        return float("nan")
 
-    # (A) Choose a large stamp size to avoid truncating PSF wings and trail extent
-    #R = int(math.ceil(pad_sigma * sigma_pix))
-    #S = int(math.ceil(L_pix)) + 2 * R + 1
-    R = int(math.ceil(pad_sigma * sigma_pix))
-    R = max(R, 20)   # hard floor to avoid sigma-underestimate truncation
-    S = int(math.ceil(L_pix)) + 2*R + 1
-
-    # Make it odd and at least a reasonable minimum
+    # Large common stamp (Fix A)
+    R = int(math.ceil(float(pad_sigma) * sigma_pix))
+    R = max(R, 20)  # hard floor to avoid truncation if sigma estimate is too small
+    S = int(math.ceil(float(L_pix))) + 2 * R + 1
     if S < 33:
         S = 33
     if S % 2 == 0:
         S += 1
     out_shape = (S, S)
 
-    # Get phi (PSF template) and aligned variance on the same large stamp
+    # phi and variance on same stamp
     phi_cut, v_cut = _get_psf_stamp_and_var(
         calexp,
         x=float(x),
@@ -247,14 +277,14 @@ def psf_fit_flux_sigma(
         out_shape=out_shape,
     )
     if phi_cut is None or v_cut is None:
-        return np.nan
+        return float("nan")
 
     s = float(np.nansum(phi_cut))
     if not np.isfinite(s) or s <= 0:
-        return np.nan
-    phi = (phi_cut / s).astype(np.float64)  # unit integrated flux PSF template on large stamp
+        return float("nan")
+    phi = (phi_cut / s).astype(np.float64)
 
-    # Build trail template on the same large stamp (no cut-back to PSF size)
+    # trail template on same stamp (Fix A + B)
     T = _trail_template_for_stamp(
         calexp=calexp,
         x=float(x),
@@ -265,23 +295,143 @@ def psf_fit_flux_sigma(
         use_kernel_image=use_kernel_image,
     )
     if T is None:
-        return np.nan
+        return float("nan")
 
     good = np.isfinite(v_cut) & (v_cut > 0) & np.isfinite(phi) & np.isfinite(T)
     if not np.any(good):
-        return np.nan
+        return float("nan")
 
-    denom_phi = np.sum((phi[good] ** 2) / v_cut[good])
-    overlap = np.sum((phi[good] * T[good]) / v_cut[good])
+    denom_phi = float(np.sum((phi[good] ** 2) / v_cut[good]))
+    if not np.isfinite(denom_phi) or denom_phi <= 0:
+        return float("nan")
 
-    if not np.isfinite(denom_phi) or denom_phi <= 0 or not np.isfinite(overlap) or overlap <= 0:
-        return np.nan
+    if centroid_jitter:
+        overlap = _expected_overlap_centroid_jitter(
+            phi=phi,
+            T=T,
+            v=v_cut,
+            sigma_psf=float(sigma_pix),
+            L_pix=float(L_pix),
+            theta_deg=float(theta_deg),
+            snr_target=float(snr_target),
+            nsig=float(jitter_nsig),
+            grid_step=float(jitter_grid_step),
+        )
+    else:
+        overlap = float(np.sum((phi[good] * T[good]) / v_cut[good]))
 
-    return float(np.sqrt(denom_phi)) / float(overlap)
+    if not np.isfinite(overlap) or overlap <= 0:
+        return float("nan")
+
+    return float(math.sqrt(denom_phi) / overlap)
 
 
 # ======================================================================================
-# Internal helpers
+# Centroid-jitter marginalization (new)
+# ======================================================================================
+
+def _centroid_sigmas_pixels(sigma_psf: float, L_pix: float, snr: float) -> tuple[float, float]:
+    """
+    Simple CRLB-inspired centroid jitter model (pixels), anisotropic for trails.
+
+    Parallel width uses second-moment of a uniform line segment: L/sqrt(12).
+    """
+    snr = max(float(snr), 1e-3)
+    sigma_psf = float(sigma_psf)
+    L_pix = float(L_pix)
+
+    sigma_para = math.sqrt(max(sigma_psf**2 + (L_pix**2) / 12.0, 1e-12)) / snr
+    sigma_perp = max(sigma_psf, 1e-6) / snr
+
+    # Small floors to avoid degeneracies / pixelization
+    sigma_para = max(sigma_para, 0.03)
+    sigma_perp = max(sigma_perp, 0.03)
+    return sigma_para, sigma_perp
+
+
+def _overlap_with_shift(phi: np.ndarray, T: np.ndarray, v: np.ndarray, dx: float, dy: float) -> float:
+    """
+    overlap(dx,dy) = sum( phi_shifted * T / v )
+    with phi shifted by (dx,dy) pixels.
+    """
+    ph, pw = phi.shape
+    M = np.array([[1.0, 0.0, float(dx)],
+                  [0.0, 1.0, float(dy)]], dtype=np.float32)
+
+    phi_s = cv2.warpAffine(
+        phi.astype(np.float32),
+        M,
+        dsize=(pw, ph),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=0.0,
+    ).astype(np.float64)
+
+    good = np.isfinite(v) & (v > 0) & np.isfinite(phi_s) & np.isfinite(T)
+    if not np.any(good):
+        return float("nan")
+    return float(np.sum((phi_s[good] * T[good]) / v[good]))
+
+
+def _expected_overlap_centroid_jitter(
+    *,
+    phi: np.ndarray,
+    T: np.ndarray,
+    v: np.ndarray,
+    sigma_psf: float,
+    L_pix: float,
+    theta_deg: float,
+    snr_target: float,
+    nsig: float = 3.0,
+    grid_step: float = 0.25,
+) -> float:
+    """
+    Approximate E[overlap] over centroid offsets with a small weighted grid in (parallel,perp),
+    then rotate into (dx,dy).
+
+    This is NOT "fitting": it just propagates centroid uncertainty into expected PSF-flux SNR.
+    """
+    sigma_para, sigma_perp = _centroid_sigmas_pixels(float(sigma_psf), float(L_pix), float(snr_target))
+
+    grid_step = max(float(grid_step), 0.05)
+    nsig = max(float(nsig), 1.0)
+
+    r_para = max(nsig * sigma_para, grid_step)
+    r_perp = max(nsig * sigma_perp, grid_step)
+
+    n_para = int(math.ceil(2 * r_para / grid_step)) + 1
+    n_perp = int(math.ceil(2 * r_perp / grid_step)) + 1
+
+    para_vals = (np.arange(n_para) - n_para // 2) * grid_step
+    perp_vals = (np.arange(n_perp) - n_perp // 2) * grid_step
+
+    theta = math.radians(float(theta_deg))
+    ux = math.cos(theta)
+    uy = math.sin(theta)
+    vx = -uy
+    vy = ux
+
+    w_sum = 0.0
+    ov_sum = 0.0
+
+    for dp in para_vals:
+        for dq in perp_vals:
+            w = math.exp(-0.5 * ((dp / sigma_para) ** 2 + (dq / sigma_perp) ** 2))
+            dx = dp * ux + dq * vx
+            dy = dp * uy + dq * vy
+
+            ov = _overlap_with_shift(phi, T, v, dx=dx, dy=dy)
+            if np.isfinite(ov):
+                ov_sum += w * ov
+                w_sum += w
+
+    if w_sum <= 0:
+        return float("nan")
+    return float(ov_sum / w_sum)
+
+
+# ======================================================================================
+# Internal helpers (existing)
 # ======================================================================================
 
 def _compute_psf_image(calexp, x: float, y: float, *, use_kernel_image: bool) -> Optional[np.ndarray]:
@@ -302,15 +452,14 @@ def _estimate_sigma_from_psf(phi_unit: np.ndarray) -> float:
     yy, xx = np.mgrid[0:H, 0:W]
     tot = float(phi_unit.sum())
     if not np.isfinite(tot) or tot <= 0:
-        return np.nan
+        return float("nan")
     cy = float((yy * phi_unit).sum() / tot)
     cx = float((xx * phi_unit).sum() / tot)
     dy = yy - cy
     dx = xx - cx
-    # average of xx and yy second moments
     m2 = float(((dx * dx + dy * dy) * phi_unit).sum() / tot / 2.0)
     if not np.isfinite(m2) or m2 <= 0:
-        return np.nan
+        return float("nan")
     return float(math.sqrt(m2))
 
 
@@ -348,18 +497,16 @@ def _get_psf_stamp_and_var(
     out_shape: Tuple[int, int],
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     """
-    Returns (p_cut, v_cut) aligned with each other on an arbitrary out_shape stamp centered at (x,y):
-      - p_cut: PSF template stamp (float64), center-cropped/padded to out_shape
-      - v_cut: variance stamp from calexp.variance for the same bbox (float64), with NaNs outside bounds
+    Returns (p_cut, v_cut) aligned with each other on an out_shape stamp centered at (x,y):
+      - p_cut: PSF image on out_shape (center-crop/pad)
+      - v_cut: variance on same bbox; NaNs outside image bounds
     """
     psf_img = _compute_psf_image(calexp, x, y, use_kernel_image=use_kernel_image)
     if psf_img is None:
         return None, None
 
-    # PSF stamp on desired shape (centered)
     p_cut = _center_crop_pad(psf_img.astype(np.float64), out_shape)
 
-    # Variance stamp for the same bbox in the exposure
     var_full = calexp.variance.array.astype(np.float64)
     Himg, Wimg = var_full.shape
 
@@ -400,12 +547,7 @@ def _trail_template_for_stamp(
     use_kernel_image: bool,
 ) -> Optional[np.ndarray]:
     """
-    Build a unit-flux trailed template T (PSF convolved with a uniform line) on `out_shape`.
-    Uses a sum of subpixel-shifted PSF images along the trail.
-
-    Changes vs your previous version:
-      - builds directly on the *final* out_shape (no cut-back to PSF stamp size)  [Fix A]
-      - denser sampling for intermediate lengths (20–50 px regime)               [Fix B]
+    Build a unit-flux trailed template T on out_shape by summing subpixel-shifted PSFs.
     """
     psf_img = _compute_psf_image(calexp, x, y, use_kernel_image=use_kernel_image)
     if psf_img is None:
@@ -423,14 +565,12 @@ def _trail_template_for_stamp(
     ux = math.cos(theta)
     uy = math.sin(theta)
 
-    # (B) Increase sampling density in the transition regime
-    # Old: 0.25 px for most; New: 0.2 px above 10px (reduces phase bias mid-L)
-    #step = 0.1 if L_pix <= 10 else 0.2
-    step = 0.15 if L_pix <= 50 else 0.10
-    n = int(math.ceil(L_pix / step)) + 1
-    n = max(n, 21)  # keep a minimum for stability
+    # Sampling along the trail (Fix B)
+    step = 0.15 if float(L_pix) <= 50.0 else 0.10
+    n = int(math.ceil(float(L_pix) / step)) + 1
+    n = max(n, 21)
 
-    s_vals = np.linspace(-0.5 * L_pix, 0.5 * L_pix, n)
+    s_vals = np.linspace(-0.5 * float(L_pix), 0.5 * float(L_pix), n)
 
     for sv in s_vals:
         _add_shifted_into_center(acc=T, psf_img=psf_unit, dx=float(sv * ux), dy=float(sv * uy))
@@ -438,7 +578,7 @@ def _trail_template_for_stamp(
     Ts = float(T.sum())
     if not np.isfinite(Ts) or Ts <= 0:
         return None
-    T /= Ts  # unit integrated flux trail template
+    T /= Ts
     return T
 
 
@@ -449,14 +589,13 @@ def _add_shifted_into_center(
     dy: float,
 ) -> None:
     """
-    Add psf_img shifted by (dx,dy) pixels into `acc` (centered paste), with clipping.
-    Uses cv2.warpAffine for sub-pixel shift + bilinear interpolation.
+    Add psf_img shifted by (dx,dy) into acc (centered paste) using warpAffine.
     """
     ph, pw = psf_img.shape
     ah, aw = acc.shape
 
-    M = np.array([[1.0, 0.0, dx],
-                  [0.0, 1.0, dy]], dtype=np.float32)
+    M = np.array([[1.0, 0.0, float(dx)],
+                  [0.0, 1.0, float(dy)]], dtype=np.float32)
 
     shifted = cv2.warpAffine(
         psf_img.astype(np.float32),
@@ -467,7 +606,6 @@ def _add_shifted_into_center(
         borderValue=0.0,
     ).astype(np.float64)
 
-    # paste centered
     x0 = (aw - pw) // 2
     y0 = (ah - ph) // 2
     x1 = x0 + pw
