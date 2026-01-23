@@ -1215,7 +1215,7 @@ def main():
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = UNetResSEASPP(in_ch=1, out_ch=1).to(device)
+    model = UNetResSEASPP(in_ch=1, out_ch=1, widths=(64,128,256,512,1024)).to(device)
 
     trainer = TrainerIdea8(init_distributed=init_distributed, is_main_process=is_main_process, device=device, use_amp=True)
 
