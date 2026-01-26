@@ -2,9 +2,9 @@ import math, numpy as np, torch, h5py
 import torch.nn.functional as F
 from .models.unet_res_se import UNetResSEASPP
 
-def load_model(ckpt_path):
+def load_model(ckpt_path, widths=(32,64,128,256,512)):
     ckpt = torch.load(ckpt_path)
-    model = UNetResSEASPP(in_ch=1, out_ch=1)
+    model = UNetResSEASPP(in_ch=1, out_ch=1, widths=widths)
     model.load_state_dict(ckpt["state"])
     model.eval()
     print("Loaded model from:", ckpt_path)
