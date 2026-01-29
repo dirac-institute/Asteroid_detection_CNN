@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import math
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
-import numpy as np
 import cv2
-
+import numpy as np
 import lsst.geom as geom
-from lsst.daf.butler import Butler
 
 
 # ======================================================================================
@@ -19,76 +16,6 @@ from lsst.daf.butler import Butler
 def ensure_dir(p: str | Path) -> None:
     Path(p).mkdir(parents=True, exist_ok=True)
 
-
-@contextmanager
-def suppress_stdout():
-    import sys, io
-    old = sys.stdout
-    try:
-        sys.stdout = io.StringIO()
-        yield
-    finally:
-        sys.stdout = old
-
-
-# ======================================================================================
-# Sky-motion geometry
-# ======================================================================================
-
-def vsky_and_pa(ra_rate_cosdec_deg_day: float, dec_rate_deg_day: float) -> Tuple[float, float]:
-    """
-    Inputs are Sorcha-like components (east=x, north=y) in deg/day.
-    Returns:
-      vsky_deg_day, position angle in degrees East of North.
-    """
-    x = float(ra_rate_cosdec_deg_day)
-    y = float(dec_rate_deg_day)
-    vsky = math.hypot(x, y)
-    pa = (math.degrees(math.atan2(x, y)) + 360.0) % 360.0
-    return vsky, pa
-
-
-def detectors_covering_point(butler: Butler, visit: int, ra_deg: float, dec_deg: float):
-    where = (
-        f"instrument='LSSTCam' AND visit={int(visit)} "
-        f"AND visit_detector_region.region OVERLAPS POINT({ra_deg:.9f}, {dec_deg:.9f})"
-    )
-    return list(butler.registry.queryDatasets("calexp", where=where, findFirst=True))
-
-
-def sky_to_pixel(calexp, ra_deg: float, dec_deg: float) -> Tuple[float, float]:
-    sp = geom.SpherePoint(geom.Angle(ra_deg, geom.degrees), geom.Angle(dec_deg, geom.degrees))
-    x, y = calexp.wcs.skyToPixel(sp)
-    return float(x), float(y)
-
-
-def psf_fwhm_arcsec_from_calexp(
-    calexp,
-    x: float,
-    y: float,
-    *,
-    use_kernel_image: bool = False,
-) -> float:
-    """
-    Estimate PSF FWHM (arcsec) from the PSF image at (x,y) using second moments.
-    Assumes an equivalent circular Gaussian for sigma->FWHM conversion.
-    """
-    psf_img = _compute_psf_image(calexp, x, y, use_kernel_image=use_kernel_image)
-    if psf_img is None:
-        return np.nan
-
-    s = float(np.sum(psf_img))
-    if not np.isfinite(s) or s <= 0:
-        return np.nan
-
-    psf_unit = (psf_img / s).astype(np.float64)
-    sigma_pix = _estimate_sigma_from_psf(psf_unit)  # pixels
-    if not np.isfinite(sigma_pix) or sigma_pix <= 0:
-        return np.nan
-
-    fwhm_pix = 2.354820045 * sigma_pix
-    pixel_scale = calexp.wcs.getPixelScale().asArcseconds()  # arcsec / pix
-    return float(fwhm_pix * pixel_scale)
 
 # ======================================================================================
 # Drawing helper
@@ -127,6 +54,46 @@ def draw_one_line(
 
 
 # ======================================================================================
+# PSF helper
+# ======================================================================================
+
+def psf_fwhm_arcsec_from_calexp(
+    calexp,
+    x: float,
+    y: float,
+    *,
+    use_kernel_image: bool = False,
+) -> float:
+    """
+    Estimate PSF FWHM (arcsec) from the PSF image at (x,y) using second moments.
+    Assumes an equivalent circular Gaussian for sigma->FWHM conversion.
+    """
+    psf_img = _compute_psf_image(calexp, x, y, use_kernel_image=use_kernel_image)
+    if psf_img is None:
+        return np.nan
+
+    s = float(np.sum(psf_img))
+    if not np.isfinite(s) or s <= 0:
+        return np.nan
+
+    psf_unit = (psf_img / s).astype(np.float64)
+    sigma_pix = _estimate_sigma_from_psf(psf_unit)  # pixels
+    if not np.isfinite(sigma_pix) or sigma_pix <= 0:
+        return np.nan
+
+    fwhm_pix = 2.354820045 * sigma_pix
+    pixel_scale = calexp.wcs.getPixelScale().asArcseconds()  # arcsec / pix
+    return float(fwhm_pix * pixel_scale)
+
+
+def start_to_midpoint(x0: float, y0: float, l_pix: float, theta_deg: float) -> tuple[float, float]:
+    th = math.radians(theta_deg)
+    xm = x0 + 0.5 * l_pix * math.cos(th)
+    ym = y0 + 0.5 * l_pix * math.sin(th)
+    return xm, ym
+
+
+# ======================================================================================
 # SNR conversion helpers
 # ======================================================================================
 
@@ -140,18 +107,30 @@ def mag_to_snr(
     l_pix: float,
     theta_deg: float,
     pad_sigma: float = 5.0,
+    step: float = 0.15,
 ) -> float:
-    F = calexp.getPhotoCalib().magnitudeToInstFlux(mag)
+    """
+    Predict *stack-like* SNR for a trail of length l_pix at (x,y):
+        snr_stack ≈ (F / sigmaF_model) * C(L)
+    """
+    F = float(calexp.getPhotoCalib().magnitudeToInstFlux(mag))
+    xm, ym = start_to_midpoint(float(x), float(y), float(l_pix), float(theta_deg))
+
     sigmaF = psf_fit_flux_sigma(
         calexp=calexp,
-        x=float(x),
-        y=float(y),
+        x=xm,
+        y=ym,
         L_pix=float(l_pix),
         theta_deg=float(theta_deg),
         use_kernel_image=use_kernel_image,
         pad_sigma=pad_sigma,
+        step=step,
     )
-    return float(F) / float(sigmaF)
+    if not np.isfinite(sigmaF) or sigmaF <= 0:
+        return float("nan")
+
+    snr_model = F / float(sigmaF)
+    return float(snr_model * empirical_stack_snr_correction(l_pix))
 
 
 def snr_to_mag(
@@ -164,23 +143,37 @@ def snr_to_mag(
     l_pix: float,
     theta_deg: float,
     pad_sigma: float = 5.0,
+    step: float = 0.15,
 ) -> float:
     """
-    Convert *target stack PSF-flux SNR* to magnitude for a trailed source,
-    using a physics-based PSF-template mismatch correction (no numerical fitting).
+    Convert target *stack SNR* to magnitude using the stack-like model:
+        F ≈ stack_snr * sigmaF_model / C(L)
     """
+    C = empirical_stack_snr_correction(l_pix)
+    if not np.isfinite(C) or C <= 0:
+        return float("nan")
+
+    xm, ym = start_to_midpoint(float(x), float(y), float(l_pix), float(theta_deg))
     sigmaF = psf_fit_flux_sigma(
         calexp=calexp,
-        x=float(x),
-        y=float(y),
+        x=xm,
+        y=ym,
         L_pix=float(l_pix),
         theta_deg=float(theta_deg),
         use_kernel_image=use_kernel_image,
         pad_sigma=pad_sigma,
+        step=step,
     )
-    F = float(snr) * float(sigmaF)
+    if not np.isfinite(sigmaF) or sigmaF <= 0:
+        return float("nan")
+
+    F = float(snr) * float(sigmaF) / float(C)
     return float(calexp.getPhotoCalib().instFluxToMagnitude(F))
 
+
+# ======================================================================================
+# Core model: sigmaF for PSF-flux estimator on a trailed source
+# ======================================================================================
 
 def psf_fit_flux_sigma(
     calexp,
@@ -191,54 +184,38 @@ def psf_fit_flux_sigma(
     theta_deg: float,
     use_kernel_image: bool = False,
     pad_sigma: float = 5.0,
+    step: float = 0.15,
 ) -> float:
     """
-    Predict sigmaF such that:
-      F = stack_snr * sigmaF
+    Predict sigmaF for the *PSF-flux estimator* applied to a trailed source:
+        sigmaF = sqrt(sum(phi^2 / V)) / sum(phi*T / V)
 
-    Model:
-      Stack PSF-flux estimator ~ weighted LS with PSF template phi
-      True source image = F * T  (T is PSF⊗line unit-flux template)
-
-    Expected PSF SNR:
-      SNR_psf = F * sum(phi*T/V) / sqrt(sum(phi^2/V))
-
-    Solve for sigmaF:
-      sigmaF = sqrt(sum(phi^2/V)) / sum(phi*T/V)
-
-    Fixes implemented vs your previous version:
-      (A) Use a *larger common stamp* for phi/T/V: size depends on L and PSF sigma (avoid truncation).
-      (B) Use denser sampling along the trail in the intermediate regime (reduce phase bias).
-      (D) Keep pixel-wise variance weighting (as you already do).
+    phi: PSF template (unit integrated flux)
+    T:   trail template (PSF convolved with uniform line; unit integrated flux)
+    V:   per-pixel variance from calexp.variance
     """
-    # Get a native PSF image (for sigma estimate)
     psf_img_native = _compute_psf_image(calexp, x, y, use_kernel_image=use_kernel_image)
     if psf_img_native is None:
-        return np.nan
+        return float("nan")
+
     psf_sum = float(psf_img_native.sum())
     if not np.isfinite(psf_sum) or psf_sum <= 0:
-        return np.nan
-    psf_unit_native = (psf_img_native / psf_sum).astype(np.float64)
+        return float("nan")
 
+    psf_unit_native = (psf_img_native / psf_sum).astype(np.float64)
     sigma_pix = _estimate_sigma_from_psf(psf_unit_native)
     if not np.isfinite(sigma_pix) or sigma_pix <= 0:
-        return np.nan
+        return float("nan")
 
-    # (A) Choose a large stamp size to avoid truncating PSF wings and trail extent
-    #R = int(math.ceil(pad_sigma * sigma_pix))
-    #S = int(math.ceil(L_pix)) + 2 * R + 1
+    # stamp size
     R = int(math.ceil(pad_sigma * sigma_pix))
-    R = max(R, 20)   # hard floor to avoid sigma-underestimate truncation
-    S = int(math.ceil(L_pix)) + 2*R + 1
-
-    # Make it odd and at least a reasonable minimum
-    if S < 33:
-        S = 33
+    R = max(R, 20)
+    S = int(math.ceil(float(L_pix))) + 2 * R + 1
+    S = max(S, 33)
     if S % 2 == 0:
         S += 1
     out_shape = (S, S)
 
-    # Get phi (PSF template) and aligned variance on the same large stamp
     phi_cut, v_cut = _get_psf_stamp_and_var(
         calexp,
         x=float(x),
@@ -247,14 +224,13 @@ def psf_fit_flux_sigma(
         out_shape=out_shape,
     )
     if phi_cut is None or v_cut is None:
-        return np.nan
+        return float("nan")
 
     s = float(np.nansum(phi_cut))
     if not np.isfinite(s) or s <= 0:
-        return np.nan
-    phi = (phi_cut / s).astype(np.float64)  # unit integrated flux PSF template on large stamp
+        return float("nan")
+    phi = (phi_cut / s).astype(np.float64)
 
-    # Build trail template on the same large stamp (no cut-back to PSF size)
     T = _trail_template_for_stamp(
         calexp=calexp,
         x=float(x),
@@ -263,21 +239,21 @@ def psf_fit_flux_sigma(
         theta_deg=float(theta_deg),
         out_shape=out_shape,
         use_kernel_image=use_kernel_image,
+        step=float(step),
     )
     if T is None:
-        return np.nan
+        return float("nan")
 
     good = np.isfinite(v_cut) & (v_cut > 0) & np.isfinite(phi) & np.isfinite(T)
     if not np.any(good):
-        return np.nan
+        return float("nan")
 
-    denom_phi = np.sum((phi[good] ** 2) / v_cut[good])
-    overlap = np.sum((phi[good] * T[good]) / v_cut[good])
-
+    denom_phi = float(np.sum((phi[good] ** 2) / v_cut[good]))
+    overlap = float(np.sum((phi[good] * T[good]) / v_cut[good]))
     if not np.isfinite(denom_phi) or denom_phi <= 0 or not np.isfinite(overlap) or overlap <= 0:
-        return np.nan
+        return float("nan")
 
-    return float(np.sqrt(denom_phi)) / float(overlap)
+    return float(np.sqrt(denom_phi) / overlap)
 
 
 # ======================================================================================
@@ -295,9 +271,7 @@ def _compute_psf_image(calexp, x: float, y: float, *, use_kernel_image: bool) ->
 
 
 def _estimate_sigma_from_psf(phi_unit: np.ndarray) -> float:
-    """
-    Estimate circular sigma (pixels) from second moments of a unit-flux PSF image.
-    """
+    """Estimate circular sigma (pixels) from second moments of a unit-flux PSF image."""
     H, W = phi_unit.shape
     yy, xx = np.mgrid[0:H, 0:W]
     tot = float(phi_unit.sum())
@@ -307,7 +281,6 @@ def _estimate_sigma_from_psf(phi_unit: np.ndarray) -> float:
     cx = float((xx * phi_unit).sum() / tot)
     dy = yy - cy
     dx = xx - cx
-    # average of xx and yy second moments
     m2 = float(((dx * dx + dy * dy) * phi_unit).sum() / tot / 2.0)
     if not np.isfinite(m2) or m2 <= 0:
         return np.nan
@@ -315,9 +288,7 @@ def _estimate_sigma_from_psf(phi_unit: np.ndarray) -> float:
 
 
 def _center_crop_pad(img: np.ndarray, out_shape: Tuple[int, int]) -> np.ndarray:
-    """
-    Return array of shape out_shape by center-cropping or zero-padding img.
-    """
+    """Return array of shape out_shape by center-cropping or zero-padding img."""
     H, W = out_shape
     out = np.zeros((H, W), dtype=np.float64)
 
@@ -348,18 +319,16 @@ def _get_psf_stamp_and_var(
     out_shape: Tuple[int, int],
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     """
-    Returns (p_cut, v_cut) aligned with each other on an arbitrary out_shape stamp centered at (x,y):
-      - p_cut: PSF template stamp (float64), center-cropped/padded to out_shape
-      - v_cut: variance stamp from calexp.variance for the same bbox (float64), with NaNs outside bounds
+    Returns (p_cut, v_cut) aligned on out_shape stamp centered at (x,y):
+      - p_cut: PSF template stamp (float64), center-cropped/padded
+      - v_cut: variance stamp from calexp.variance (float64), NaNs outside bounds
     """
     psf_img = _compute_psf_image(calexp, x, y, use_kernel_image=use_kernel_image)
     if psf_img is None:
         return None, None
 
-    # PSF stamp on desired shape (centered)
     p_cut = _center_crop_pad(psf_img.astype(np.float64), out_shape)
 
-    # Variance stamp for the same bbox in the exposure
     var_full = calexp.variance.array.astype(np.float64)
     Himg, Wimg = var_full.shape
 
@@ -389,57 +358,16 @@ def _get_psf_stamp_and_var(
     return p_cut, v_cut
 
 
-def _trail_template_for_stamp(
-    calexp,
-    x: float,
-    y: float,
-    *,
-    L_pix: float,
-    theta_deg: float,
-    out_shape: Tuple[int, int],
-    use_kernel_image: bool,
-) -> Optional[np.ndarray]:
-    """
-    Build a unit-flux trailed template T (PSF convolved with a uniform line) on `out_shape`.
-    Uses a sum of subpixel-shifted PSF images along the trail.
-
-    Changes vs your previous version:
-      - builds directly on the *final* out_shape (no cut-back to PSF stamp size)  [Fix A]
-      - denser sampling for intermediate lengths (20–50 px regime)               [Fix B]
-    """
-    psf_img = _compute_psf_image(calexp, x, y, use_kernel_image=use_kernel_image)
-    if psf_img is None:
-        return None
-
-    s = float(psf_img.sum())
-    if not np.isfinite(s) or s <= 0:
-        return None
-    psf_unit = (psf_img / s).astype(np.float64)
-
-    H, W = out_shape
-    T = np.zeros((H, W), dtype=np.float64)
-
-    theta = math.radians(float(theta_deg))
-    ux = math.cos(theta)
-    uy = math.sin(theta)
-
-    # (B) Increase sampling density in the transition regime
-    # Old: 0.25 px for most; New: 0.2 px above 10px (reduces phase bias mid-L)
-    #step = 0.1 if L_pix <= 10 else 0.2
-    step = 0.15 if L_pix <= 50 else 0.10
-    n = int(math.ceil(L_pix / step)) + 1
-    n = max(n, 21)  # keep a minimum for stability
-
-    s_vals = np.linspace(-0.5 * L_pix, 0.5 * L_pix, n)
-
-    for sv in s_vals:
-        _add_shifted_into_center(acc=T, psf_img=psf_unit, dx=float(sv * ux), dy=float(sv * uy))
-
-    Ts = float(T.sum())
-    if not np.isfinite(Ts) or Ts <= 0:
-        return None
-    T /= Ts  # unit integrated flux trail template
-    return T
+def _psf_centroid(psf_img: np.ndarray) -> tuple[float, float]:
+    ph, pw = psf_img.shape
+    yy, xx = np.mgrid[0:ph, 0:pw]
+    w = np.maximum(psf_img.astype(np.float64), 0.0)
+    tot = float(w.sum())
+    if not np.isfinite(tot) or tot <= 0:
+        return (pw - 1) / 2.0, (ph - 1) / 2.0
+    cx = float((xx * w).sum() / tot)
+    cy = float((yy * w).sum() / tot)
+    return cx, cy
 
 
 def _add_shifted_into_center(
@@ -447,36 +375,47 @@ def _add_shifted_into_center(
     psf_img: np.ndarray,
     dx: float,
     dy: float,
+    *,
+    psf_cx: float | None = None,
+    psf_cy: float | None = None,
+    interp=cv2.INTER_LINEAR,
 ) -> None:
-    """
-    Add psf_img shifted by (dx,dy) pixels into `acc` (centered paste), with clipping.
-    Uses cv2.warpAffine for sub-pixel shift + bilinear interpolation.
-    """
-    ph, pw = psf_img.shape
+    """Centroid-aware subpixel placement of PSF into acc."""
     ah, aw = acc.shape
+    ph, pw = psf_img.shape
 
-    M = np.array([[1.0, 0.0, dx],
-                  [0.0, 1.0, dy]], dtype=np.float32)
+    acc_cx = (aw - 1) / 2.0
+    acc_cy = (ah - 1) / 2.0
+
+    if psf_cx is None or psf_cy is None:
+        psf_cx, psf_cy = _psf_centroid(psf_img)
+
+    target_cx = acc_cx + float(dx)
+    target_cy = acc_cy + float(dy)
+
+    x0 = int(np.floor(target_cx - psf_cx))
+    y0 = int(np.floor(target_cy - psf_cy))
+
+    fx = float(target_cx - (x0 + psf_cx))
+    fy = float(target_cy - (y0 + psf_cy))
+
+    M = np.array([[1.0, 0.0, fx],
+                  [0.0, 1.0, fy]], dtype=np.float32)
 
     shifted = cv2.warpAffine(
         psf_img.astype(np.float32),
         M,
         dsize=(pw, ph),
-        flags=cv2.INTER_LINEAR,
+        flags=interp,
         borderMode=cv2.BORDER_CONSTANT,
         borderValue=0.0,
     ).astype(np.float64)
 
-    # paste centered
-    x0 = (aw - pw) // 2
-    y0 = (ah - ph) // 2
     x1 = x0 + pw
     y1 = y0 + ph
 
-    ax0 = max(x0, 0)
-    ay0 = max(y0, 0)
-    ax1 = min(x1, aw)
-    ay1 = min(y1, ah)
+    ax0 = max(x0, 0); ay0 = max(y0, 0)
+    ax1 = min(x1, aw); ay1 = min(y1, ah)
     if ax0 >= ax1 or ay0 >= ay1:
         return
 
@@ -487,3 +426,68 @@ def _add_shifted_into_center(
 
     acc[ay0:ay1, ax0:ax1] += shifted[py0:py1, px0:px1]
 
+
+def _trail_template_for_stamp(
+    calexp,
+    x: float,
+    y: float,
+    *,
+    L_pix: float,
+    theta_deg: float,
+    out_shape: Tuple[int, int],
+    use_kernel_image: bool,
+    step: float = 0.15,
+) -> Optional[np.ndarray]:
+    """Build unit-flux trailed template T = PSF ⊗ (uniform line segment)."""
+    psf_img = _compute_psf_image(calexp, x, y, use_kernel_image=use_kernel_image)
+    if psf_img is None:
+        return None
+
+    s = float(psf_img.sum())
+    if not np.isfinite(s) or s <= 0:
+        return None
+
+    psf_unit = (psf_img / s).astype(np.float64)
+    psf_cx, psf_cy = _psf_centroid(psf_unit)
+
+    H, W = out_shape
+    T = np.zeros((H, W), dtype=np.float64)
+
+    theta = math.radians(float(theta_deg))
+    ux = math.cos(theta)
+    uy = math.sin(theta)
+
+    step = float(step)
+    if step <= 0:
+        raise ValueError("step must be > 0")
+
+    n = max(int(math.ceil(float(L_pix) / step)) + 1, 21)
+    s_vals = np.linspace(-0.5 * float(L_pix), 0.5 * float(L_pix), n)
+
+    for sv in s_vals:
+        _add_shifted_into_center(
+            acc=T,
+            psf_img=psf_unit,
+            dx=float(sv * ux),
+            dy=float(sv * uy),
+            psf_cx=psf_cx,
+            psf_cy=psf_cy,
+        )
+
+    np.maximum(T, 0.0, out=T)
+    Ts = float(T.sum())
+    if not np.isfinite(Ts) or Ts <= 0:
+        return None
+    T /= Ts
+    return T
+
+
+def empirical_stack_snr_correction(L_pix: float) -> float:
+    # Fit A (power-saturation)
+    a  = 1.12746468
+    b  = 0.16618154
+    L0 = 26.68594499
+    p  = 5.01963910
+    L = max(float(L_pix), 0.0)
+    x = (L / L0) ** p if L0 > 0 else 0.0
+    return a + b * (x / (1.0 + x))

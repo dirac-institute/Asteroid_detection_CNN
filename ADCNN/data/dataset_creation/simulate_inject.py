@@ -2,7 +2,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from common import *
+from common import ensure_dir, draw_one_line, psf_fwhm_arcsec_from_calexp, mag_to_snr, snr_to_mag
 
 from astroML.crossmatch import crossmatch_angular
 from lsst.daf.butler import Butler
@@ -31,6 +31,8 @@ def characterizeCalibrate(postISRCCD):
     char_config = CharacterizeImageTask.ConfigClass()
     char_config.doApCorr = True
     char_config.doDeblend = True
+    #char_config.doApCorr = False
+    #char_config.doDeblend = False
     char_task = CharacterizeImageTask(config=char_config)
     char_result = char_task.run(postISRCCD)
 
@@ -61,11 +63,12 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
     filter_name = calexp.filter
     m5 = {"u": 23.7, "g": 24.97, "r": 24.52, "i": 24.13, "z": 23.56, "y": 22.55}
     psf_depth = m5[filter_name.bandLabel]
-    a, b = 0.67, 1.16
+    #a, b = 0.67, 1.16
+    a, b = 0.42, 0
     for k in range(n_inject):
         inject_length = rng.uniform(*trail_length)
         # Conservative margin: assume R>=20 and S = ceil(L)+2R+1
-        R = 20
+        R = 30
         S = int(np.ceil(inject_length)) + 2*R + 1
         half = S // 2 + 2  # +2 pixels slack
         x_pos = rng.uniform(half, dimensions.x - 1 - half)
