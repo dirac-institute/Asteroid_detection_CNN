@@ -79,9 +79,9 @@ torchrun --standalone --nnodes=1 --nproc_per_node=1 \
   --ft-alpha 0.45 \
   --ft-gamma 1.3 \
   --ramp-kind linear \
-  --ramp-start-epoch 11 \
-  --ramp-end-epoch 40 \
-  --max-epochs 60 \
+  --ramp-start-epoch 10 \
+  --ramp-end-epoch 95 \
+  --max-epochs 100 \
   --val-every 25 \
   --val-metric-batches 60 \
   --best-metric f2 \
