@@ -633,7 +633,7 @@ class TrainerIdea8:
             p.requires_grad = True
 
         opt = torch.optim.Adam([p for p in raw_model.parameters() if p.requires_grad], lr=warmup_lr, weight_decay=0.0)
-        if resume_epoch is not None:
+        if resume_epoch is None:
             for ep in range(1, warmup_epochs + 1):
                 self._set_loader_epoch(train_loader, seed + 100 + ep)
                 model.train()
@@ -1266,7 +1266,7 @@ def main():
         best_metric=str(args.best_metric),
         long_batches=int(args.long_batches),
         verbose=int(args.verbose),
-        resume_epoch = args.resume_epoch
+        resume_epoch = args.resume_epoch,
 
     )
 

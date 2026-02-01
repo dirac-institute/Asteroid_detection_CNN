@@ -87,6 +87,6 @@ torchrun --standalone --nnodes=1 --nproc_per_node=1 \
   --best-metric f2 \
   --save-best-to "../checkpoints/Experiments/Best/idea8_mixture.pt" \
   --save-last-to "../checkpoints/Experiments/Last/idea8_mixture.pt" \
-  --resume-epoch 80
+  --resume-epoch 75
 
 
