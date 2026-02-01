@@ -9,7 +9,7 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=30G
 #SBATCH --time=5-00:00:00
-#SBATCH --output=/sdf/home/m/mrakovci/logs/%x.out
+#SBATCH --output=/sdf/home/m/mrakovci/logs/%x_new.out
 
 set -euo pipefail
 mkdir -p /sdf/home/m/mrakovci/logs
@@ -86,6 +86,7 @@ torchrun --standalone --nnodes=1 --nproc_per_node=1 \
   --val-metric-batches 60 \
   --best-metric f2 \
   --save-best-to "../checkpoints/Experiments/Best/idea8_mixture.pt" \
-  --save-last-to "../checkpoints/Experiments/Last/idea8_mixture.pt"
+  --save-last-to "../checkpoints/Experiments/Last/idea8_mixture.pt" \
+  --resume-epoch 80
 
 

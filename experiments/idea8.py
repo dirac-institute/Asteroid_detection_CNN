@@ -591,6 +591,7 @@ class TrainerIdea8:
         best_metric: str,
         long_batches: int = 0,
         verbose: int = 2,
+        resume_epoch: int = None,
     ):
         (
             _H5TiledDataset,
@@ -632,205 +633,208 @@ class TrainerIdea8:
             p.requires_grad = True
 
         opt = torch.optim.Adam([p for p in raw_model.parameters() if p.requires_grad], lr=warmup_lr, weight_decay=0.0)
+        if resume_epoch is not None:
+            for ep in range(1, warmup_epochs + 1):
+                self._set_loader_epoch(train_loader, seed + 100 + ep)
+                model.train()
+                seen = 0
+                loss_sum = 0.0
+                valid_sum = 0.0
+                pix_sum = 0.0
+                tp_sum = fp_sum = fn_sum = 0
 
-        for ep in range(1, warmup_epochs + 1):
-            self._set_loader_epoch(train_loader, seed + 100 + ep)
-            model.train()
-            seen = 0
-            loss_sum = 0.0
-            valid_sum = 0.0
-            pix_sum = 0.0
-            tp_sum = fp_sum = fn_sum = 0
+                for b, batch in enumerate(train_loader, 1):
+                    xb, yb, rb, _missed, _detected = batch
+                    xb = xb.to(self.device, non_blocking=True)
+                    yb = yb.to(self.device, non_blocking=True)
+                    rb = rb.to(self.device, non_blocking=True)
 
-            for b, batch in enumerate(train_loader, 1):
-                xb, yb, rb, _missed, _detected = batch
-                xb = xb.to(self.device, non_blocking=True)
-                yb = yb.to(self.device, non_blocking=True)
-                rb = rb.to(self.device, non_blocking=True)
+                    with amp.autocast("cuda", enabled=self.amp):
+                        logits = model(xb)
+                        yb_r = resize_masks_to(logits, yb)
+                        rb_r = resize_masks_to(logits, rb)
+                        valid = valid_mask_from_real(rb_r)
+                        loss = masked_bce_with_logits(logits, yb_r, valid, pos_weight=float(warmup_pos_weight))
 
-                with amp.autocast("cuda", enabled=self.amp):
-                    logits = model(xb)
-                    yb_r = resize_masks_to(logits, yb)
-                    rb_r = resize_masks_to(logits, rb)
-                    valid = valid_mask_from_real(rb_r)
-                    loss = masked_bce_with_logits(logits, yb_r, valid, pos_weight=float(warmup_pos_weight))
+                    tp, fp, fn = update_confusion_from_logits(logits, yb_r, valid, thr=FIXED_THR)
+                    tp_sum += tp
+                    fp_sum += fp
+                    fn_sum += fn
 
-                tp, fp, fn = update_confusion_from_logits(logits, yb_r, valid, thr=FIXED_THR)
-                tp_sum += tp
-                fp_sum += fp
-                fn_sum += fn
+                    opt.zero_grad(set_to_none=True)
+                    scaler.scale(loss).backward()
+                    scaler.unscale_(opt)
+                    torch.nn.utils.clip_grad_norm_(raw_model.parameters(), 1.0)
+                    scaler.step(opt)
+                    scaler.update()
 
-                opt.zero_grad(set_to_none=True)
-                scaler.scale(loss).backward()
-                scaler.unscale_(opt)
-                torch.nn.utils.clip_grad_norm_(raw_model.parameters(), 1.0)
-                scaler.step(opt)
-                scaler.update()
+                    loss_sum += float(loss.item()) * xb.size(0)
+                    seen += xb.size(0)
+                    valid_sum += float(valid.sum().item())
+                    pix_sum += float(valid.numel())
 
-                loss_sum += float(loss.item()) * xb.size(0)
-                seen += xb.size(0)
-                valid_sum += float(valid.sum().item())
-                pix_sum += float(valid.numel())
+                    if b >= warmup_batches:
+                        break
 
-                if b >= warmup_batches:
-                    break
+                if verbose >= 2 and self.is_main_process() and warmup_epochs > 0:
+                    active = ddp_sum_float(valid_sum, self.device)
+                    total = ddp_sum_float(pix_sum, self.device)
+                    masked_pct = 100.0 * (1.0 - (active / max(total, 1.0)))
 
-            if verbose >= 2 and self.is_main_process():
-                active = ddp_sum_float(valid_sum, self.device)
-                total = ddp_sum_float(pix_sum, self.device)
-                masked_pct = 100.0 * (1.0 - (active / max(total, 1.0)))
+                    tp_all = ddp_sum_i64(tp_sum, self.device)
+                    fp_all = ddp_sum_i64(fp_sum, self.device)
+                    fn_all = ddp_sum_i64(fn_sum, self.device)
+                    f1 = fbeta_from_counts(tp_all, fp_all, fn_all, beta=1.0)
+                    f2 = fbeta_from_counts(tp_all, fp_all, fn_all, beta=2.0)
 
-                tp_all = ddp_sum_i64(tp_sum, self.device)
-                fp_all = ddp_sum_i64(fp_sum, self.device)
-                fn_all = ddp_sum_i64(fn_sum, self.device)
-                f1 = fbeta_from_counts(tp_all, fp_all, fn_all, beta=1.0)
-                f2 = fbeta_from_counts(tp_all, fp_all, fn_all, beta=2.0)
-
-                print(
+                    print(
                     f"[WARMUP] ep{ep} loss {loss_sum / max(seen,1):.4f} | thr={FIXED_THR:.3f} | "
                     f"F1={f1:.4f} F2={f2:.4f} | active_pix={active:.0f} masked_out={masked_pct:.2f}%"
                 )
 
-        # ---- Head: masked BCE ----
-        freeze_all(raw_model)
-        if hasattr(raw_model, "head"):
-            for p in raw_model.head.parameters():
-                p.requires_grad = True
-        for g in ["u4", "u3", "aspp"]:
-            _unfreeze_if_exists(raw_model, g)
+            # ---- Head: masked BCE ----
+            freeze_all(raw_model)
+            if hasattr(raw_model, "head"):
+                for p in raw_model.head.parameters():
+                    p.requires_grad = True
+            for g in ["u4", "u3", "aspp"]:
+                _unfreeze_if_exists(raw_model, g)
 
-        opt = torch.optim.Adam([p for p in raw_model.parameters() if p.requires_grad], lr=head_lr, weight_decay=1e-4)
+            opt = torch.optim.Adam([p for p in raw_model.parameters() if p.requires_grad], lr=head_lr, weight_decay=1e-4)
 
-        for ep in range(1, head_epochs + 1):
-            self._set_loader_epoch(train_loader, seed + 200 + ep)
-            model.train()
-            seen = 0
-            loss_sum = 0.0
-            valid_sum = 0.0
-            pix_sum = 0.0
-            tp_sum = fp_sum = fn_sum = 0
+            for ep in range(1, head_epochs + 1):
+                self._set_loader_epoch(train_loader, seed + 200 + ep)
+                model.train()
+                seen = 0
+                loss_sum = 0.0
+                valid_sum = 0.0
+                pix_sum = 0.0
+                tp_sum = fp_sum = fn_sum = 0
 
-            for b, batch in enumerate(train_loader, 1):
-                xb, yb, rb, _missed, _detected = batch
-                xb = xb.to(self.device, non_blocking=True)
-                yb = yb.to(self.device, non_blocking=True)
-                rb = rb.to(self.device, non_blocking=True)
+                for b, batch in enumerate(train_loader, 1):
+                    xb, yb, rb, _missed, _detected = batch
+                    xb = xb.to(self.device, non_blocking=True)
+                    yb = yb.to(self.device, non_blocking=True)
+                    rb = rb.to(self.device, non_blocking=True)
 
-                with amp.autocast("cuda", enabled=self.amp):
-                    logits = model(xb)
-                    yb_r = resize_masks_to(logits, yb)
-                    rb_r = resize_masks_to(logits, rb)
-                    valid = valid_mask_from_real(rb_r)
-                    loss = masked_bce_with_logits(logits, yb_r, valid, pos_weight=float(head_pos_weight))
+                    with amp.autocast("cuda", enabled=self.amp):
+                        logits = model(xb)
+                        yb_r = resize_masks_to(logits, yb)
+                        rb_r = resize_masks_to(logits, rb)
+                        valid = valid_mask_from_real(rb_r)
+                        loss = masked_bce_with_logits(logits, yb_r, valid, pos_weight=float(head_pos_weight))
 
-                tp, fp, fn = update_confusion_from_logits(logits, yb_r, valid, thr=FIXED_THR)
-                tp_sum += tp
-                fp_sum += fp
-                fn_sum += fn
+                    tp, fp, fn = update_confusion_from_logits(logits, yb_r, valid, thr=FIXED_THR)
+                    tp_sum += tp
+                    fp_sum += fp
+                    fn_sum += fn
 
-                opt.zero_grad(set_to_none=True)
-                scaler.scale(loss).backward()
-                scaler.unscale_(opt)
-                torch.nn.utils.clip_grad_norm_(raw_model.parameters(), 1.0)
-                scaler.step(opt)
-                scaler.update()
+                    opt.zero_grad(set_to_none=True)
+                    scaler.scale(loss).backward()
+                    scaler.unscale_(opt)
+                    torch.nn.utils.clip_grad_norm_(raw_model.parameters(), 1.0)
+                    scaler.step(opt)
+                    scaler.update()
 
-                loss_sum += float(loss.item()) * xb.size(0)
-                seen += xb.size(0)
-                valid_sum += float(valid.sum().item())
-                pix_sum += float(valid.numel())
+                    loss_sum += float(loss.item()) * xb.size(0)
+                    seen += xb.size(0)
+                    valid_sum += float(valid.sum().item())
+                    pix_sum += float(valid.numel())
 
-                if b >= head_batches:
-                    break
+                    if b >= head_batches:
+                        break
 
-            if verbose >= 2 and self.is_main_process():
-                active = ddp_sum_float(valid_sum, self.device)
-                total = ddp_sum_float(pix_sum, self.device)
-                masked_pct = 100.0 * (1.0 - (active / max(total, 1.0)))
+                if verbose >= 2 and self.is_main_process() and head_epochs > 0:
+                    active = ddp_sum_float(valid_sum, self.device)
+                    total = ddp_sum_float(pix_sum, self.device)
+                    masked_pct = 100.0 * (1.0 - (active / max(total, 1.0)))
 
-                tp_all = ddp_sum_i64(tp_sum, self.device)
-                fp_all = ddp_sum_i64(fp_sum, self.device)
-                fn_all = ddp_sum_i64(fn_sum, self.device)
-                f1 = fbeta_from_counts(tp_all, fp_all, fn_all, beta=1.0)
-                f2 = fbeta_from_counts(tp_all, fp_all, fn_all, beta=2.0)
+                    tp_all = ddp_sum_i64(tp_sum, self.device)
+                    fp_all = ddp_sum_i64(fp_sum, self.device)
+                    fn_all = ddp_sum_i64(fn_sum, self.device)
+                    f1 = fbeta_from_counts(tp_all, fp_all, fn_all, beta=1.0)
+                    f2 = fbeta_from_counts(tp_all, fp_all, fn_all, beta=2.0)
 
-                print(
+                    print(
                     f"[HEAD] ep{ep} loss {loss_sum / max(seen,1):.4f} | thr={FIXED_THR:.3f} | "
                     f"F1={f1:.4f} F2={f2:.4f} | active_pix={active:.0f} masked_out={masked_pct:.2f}%"
                 )
 
-        # ---- Tail: masked BCE ----
-        freeze_all(raw_model)
-        if hasattr(raw_model, "head"):
-            for p in raw_model.head.parameters():
-                p.requires_grad = True
-        for g in ["u4", "u3", "aspp"]:
-            _unfreeze_if_exists(raw_model, g)
+            # ---- Tail: masked BCE ----
+            freeze_all(raw_model)
+            if hasattr(raw_model, "head"):
+                for p in raw_model.head.parameters():
+                    p.requires_grad = True
+            for g in ["u4", "u3", "aspp"]:
+                _unfreeze_if_exists(raw_model, g)
 
-        opt = torch.optim.Adam([p for p in raw_model.parameters() if p.requires_grad], lr=tail_lr, weight_decay=1e-4)
+            opt = torch.optim.Adam([p for p in raw_model.parameters() if p.requires_grad], lr=tail_lr, weight_decay=1e-4)
 
-        for ep in range(1, tail_epochs + 1):
-            self._set_loader_epoch(train_loader, seed + 300 + ep)
-            model.train()
-            seen = 0
-            loss_sum = 0.0
-            valid_sum = 0.0
-            pix_sum = 0.0
-            tp_sum = fp_sum = fn_sum = 0
+            for ep in range(1, tail_epochs + 1):
+                self._set_loader_epoch(train_loader, seed + 300 + ep)
+                model.train()
+                seen = 0
+                loss_sum = 0.0
+                valid_sum = 0.0
+                pix_sum = 0.0
+                tp_sum = fp_sum = fn_sum = 0
 
-            for b, batch in enumerate(train_loader, 1):
-                xb, yb, rb, _missed, _detected = batch
-                xb = xb.to(self.device, non_blocking=True)
-                yb = yb.to(self.device, non_blocking=True)
-                rb = rb.to(self.device, non_blocking=True)
+                for b, batch in enumerate(train_loader, 1):
+                    xb, yb, rb, _missed, _detected = batch
+                    xb = xb.to(self.device, non_blocking=True)
+                    yb = yb.to(self.device, non_blocking=True)
+                    rb = rb.to(self.device, non_blocking=True)
 
-                with amp.autocast("cuda", enabled=self.amp):
-                    logits = model(xb)
-                    yb_r = resize_masks_to(logits, yb)
-                    rb_r = resize_masks_to(logits, rb)
-                    valid = valid_mask_from_real(rb_r)
-                    loss = masked_bce_with_logits(logits, yb_r, valid, pos_weight=float(tail_pos_weight))
+                    with amp.autocast("cuda", enabled=self.amp):
+                        logits = model(xb)
+                        yb_r = resize_masks_to(logits, yb)
+                        rb_r = resize_masks_to(logits, rb)
+                        valid = valid_mask_from_real(rb_r)
+                        loss = masked_bce_with_logits(logits, yb_r, valid, pos_weight=float(tail_pos_weight))
 
-                tp, fp, fn = update_confusion_from_logits(logits, yb_r, valid, thr=FIXED_THR)
-                tp_sum += tp
-                fp_sum += fp
-                fn_sum += fn
+                    tp, fp, fn = update_confusion_from_logits(logits, yb_r, valid, thr=FIXED_THR)
+                    tp_sum += tp
+                    fp_sum += fp
+                    fn_sum += fn
 
-                opt.zero_grad(set_to_none=True)
-                scaler.scale(loss).backward()
-                scaler.unscale_(opt)
-                torch.nn.utils.clip_grad_norm_(raw_model.parameters(), 1.0)
-                scaler.step(opt)
-                scaler.update()
+                    opt.zero_grad(set_to_none=True)
+                    scaler.scale(loss).backward()
+                    scaler.unscale_(opt)
+                    torch.nn.utils.clip_grad_norm_(raw_model.parameters(), 1.0)
+                    scaler.step(opt)
+                    scaler.update()
 
-                loss_sum += float(loss.item()) * xb.size(0)
-                seen += xb.size(0)
-                valid_sum += float(valid.sum().item())
-                pix_sum += float(valid.numel())
+                    loss_sum += float(loss.item()) * xb.size(0)
+                    seen += xb.size(0)
+                    valid_sum += float(valid.sum().item())
+                    pix_sum += float(valid.numel())
 
-                if b >= tail_batches:
-                    break
+                    if b >= tail_batches:
+                        break
 
-            if verbose >= 2 and self.is_main_process():
-                active = ddp_sum_float(valid_sum, self.device)
-                total = ddp_sum_float(pix_sum, self.device)
-                masked_pct = 100.0 * (1.0 - (active / max(total, 1.0)))
+                if verbose >= 2 and self.is_main_process() and tail_epochs > 0:
+                    active = ddp_sum_float(valid_sum, self.device)
+                    total = ddp_sum_float(pix_sum, self.device)
+                    masked_pct = 100.0 * (1.0 - (active / max(total, 1.0)))
 
-                tp_all = ddp_sum_i64(tp_sum, self.device)
-                fp_all = ddp_sum_i64(fp_sum, self.device)
-                fn_all = ddp_sum_i64(fn_sum, self.device)
-                f1 = fbeta_from_counts(tp_all, fp_all, fn_all, beta=1.0)
-                f2 = fbeta_from_counts(tp_all, fp_all, fn_all, beta=2.0)
+                    tp_all = ddp_sum_i64(tp_sum, self.device)
+                    fp_all = ddp_sum_i64(fp_sum, self.device)
+                    fn_all = ddp_sum_i64(fn_sum, self.device)
+                    f1 = fbeta_from_counts(tp_all, fp_all, fn_all, beta=1.0)
+                    f2 = fbeta_from_counts(tp_all, fp_all, fn_all, beta=2.0)
 
-                print(
+                    print(
                     f"[TAIL] ep{ep} loss {loss_sum / max(seen,1):.4f} | thr={FIXED_THR:.3f} | "
                     f"F1={f1:.4f} F2={f2:.4f} | active_pix={active:.0f} masked_out={masked_pct:.2f}%"
                 )
-
+        if resume_epoch is not None:
+            start_epoch = int(resume_epoch) + 1
+        else:
+            start_epoch = 1
         # ---- Long: masked BCE -> masked FT ----
         best = {"auc": -1.0, "state": None, "thr": FIXED_THR, "ep": 0, "f2": -1e9}
 
-        for ep in range(1, max_epochs + 1):
+        for ep in range(start_epoch, max_epochs + 1):
             self._set_loader_epoch(train_loader, seed + 1000 + ep)
 
             _ = apply_phase(raw_model, ep)
@@ -1034,6 +1038,13 @@ def cli():
     ap.add_argument("--save-best-to", type=str, default="../checkpoints/Experiments/Best/idea8.pt")
     ap.add_argument("--save-last-to", type=str, default="../checkpoints/Experiments/Last/idea8.pt")
     ap.add_argument("--best-metric", type=str, default="auc", choices=["auc", "f2"])
+    ap.add_argument(
+        "--resume-epoch",
+        type=int,
+        default=None,
+        help="If set, skip warmup/head/tail and start long training at this epoch. "
+             "Loads weights from --save-last-to by default."
+    )
 
     ap.add_argument("--verbose", type=int, default=2)
     return ap.parse_args()
@@ -1255,6 +1266,8 @@ def main():
         best_metric=str(args.best_metric),
         long_batches=int(args.long_batches),
         verbose=int(args.verbose),
+        resume_epoch = args.resume_epoch
+
     )
 
     if dist.is_available() and dist.is_initialized():
