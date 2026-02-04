@@ -147,7 +147,7 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
             surface_brightness = magnitude + 2.5 * np.log10(length)
         else:
             raise ValueError(f"Unknown mag_mode: {mag_mode}")
-        injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, info.id,
+        injection_catalog.add_row([k, ra_pos, dec_pos, "Trail" if inject_length > 0 else "Star", inject_length, surface_brightness, angle, info.id,
                                        int(ref.dataId["detector"]), magnitude, psf_magnitude, snr, str(filter_name.bandLabel),
                                        x_pos, y_pos, stack_snr])
     return injection_catalog
