@@ -79,6 +79,7 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
         half = S // 2 + 2  # +2 pixels slack
         #x_pos = rng.uniform(half, dimensions.x - 1 - half)
         #y_pos = rng.uniform(half, dimensions.y - 1 - half)
+        angle = rng.uniform(*beta)
         x_pos, y_pos, stamp = _try_place_trail_no_overlap(
             rng,
             forbidden,
@@ -106,7 +107,6 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
         theta_p = fwhm_arcsec / pixelScale
         x = inject_length / theta_p
         upper_limit_mag = psf_depth - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x)) if mag[1] == 0 else mag[1]
-        angle = rng.uniform(*beta)
         if mag_mode == "snr":
             snr_edge = 5.0  # your definition of "edge of detection" (change if you want)
             snr_min = float(mag[0])
