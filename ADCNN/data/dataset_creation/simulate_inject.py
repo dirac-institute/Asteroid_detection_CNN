@@ -50,14 +50,20 @@ def inject(postISRCCD, injection_catalog):
     return inject_res.output_exposure
 
 
-def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode="psf_mag", psf_template="image"):
+def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode="psf_mag", psf_template="image", forbidden_mask=None):
     rng = np.random.default_rng(seed)
     injection_catalog = Table(
         names=('injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit', 'detector',
-               'integrated_mag', 'PSF_mag', 'SNR', 'physical_filter', 'x', 'y'),
+               'integrated_mag', 'PSF_mag', 'SNR', 'physical_filter', 'x', 'y', 'stack_model_SNR'),
         dtype=('int64', 'float64', 'float64', 'str', 'float64', 'float64', 'float64', 'int64', 'int64', 'float64',
-               'float64', 'float64', 'str', 'int64', 'int64'))
+               'float64', 'float64', 'str', 'int64', 'int64', 'int64'))
 
+    H, W = int(dimensions.y), int(dimensions.x)
+    if forbidden_mask is None:
+        forbidden = np.zeros((H, W), dtype=bool)
+    else:
+        # Make sure we can safely modify it locally
+        forbidden = forbidden_mask.astype(bool, copy=True)
     raw = calexp.wcs
     info = calexp.visitInfo
     filter_name = calexp.filter
@@ -71,8 +77,23 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
         R = 30
         S = int(np.ceil(inject_length)) + 2*R + 1
         half = S // 2 + 2  # +2 pixels slack
-        x_pos = rng.uniform(half, dimensions.x - 1 - half)
-        y_pos = rng.uniform(half, dimensions.y - 1 - half)
+        #x_pos = rng.uniform(half, dimensions.x - 1 - half)
+        #y_pos = rng.uniform(half, dimensions.y - 1 - half)
+        x_pos, y_pos, stamp = _try_place_trail_no_overlap(
+            rng,
+            forbidden,
+            dimensions,
+            trail_length_px=inject_length,
+            angle_deg=angle,
+            half_margin=half,
+            calexp=calexp,
+            psf_template=psf_template,
+            max_tries=2000,
+        )
+
+        # Mark these pixels as now-occupied so subsequent injections cannot overlap them
+        forbidden |= stamp
+
         sky_pos = raw.pixelToSky(x_pos, y_pos)
         ra_pos = sky_pos.getRa().asDegrees()
         dec_pos = sky_pos.getDec().asDegrees()
@@ -95,16 +116,19 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
             if snr_max <= snr_min:
                 raise ValueError(f"Bad SNR range: snr_min={snr_min} snr_max={snr_max}")
             snr = float(rng.uniform(snr_min, snr_max))
-            snr = max(snr, 0.1)
-            magnitude = snr_to_mag(snr, calexp, x_pos, y_pos, l_pix=inject_length, theta_deg=angle, use_kernel_image=use_kernel)
-            psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
+            snr = max(snr, 0.01)
+            psf_magnitude = snr_to_mag(snr, calexp, x_pos, y_pos, l_pix=inject_length, theta_deg=angle, use_kernel_image=use_kernel, snr_definition="detection")
+            magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
             surface_brightness = magnitude + 2.5 * np.log10(inject_length)
+            stack_snr = mag_to_snr(magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel, l_pix=inject_length, theta_deg=angle, snr_definition="measurement")
         elif mag_mode == "psf_mag":
             psf_magnitude = rng.uniform(mag[0], upper_limit_mag)
             magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
             surface_brightness = magnitude + 2.5 * np.log10(inject_length)
-            snr = mag_to_snr(magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel,
-                             l_pix=inject_length, theta_deg=angle)
+            stack_snr = mag_to_snr(magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel, l_pix=inject_length,
+                                   theta_deg=angle, snr_definition="measurement")
+            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel,
+                             l_pix=inject_length, theta_deg=angle, snr_definition="detection")
         elif mag_mode == "surface_brightness":
             surface_brightness = rng.uniform(mag[0], mag[1])
             magnitude = surface_brightness - 2.5 * np.log10(inject_length)
@@ -114,13 +138,16 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
         elif mag_mode == "integrated_mag":
             magnitude = rng.uniform(mag[0], mag[1])
             psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
-            snr = mag_to_snr(magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel, l_pix=inject_length, theta_deg=angle)
+            stack_snr = mag_to_snr(magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel, l_pix=inject_length,
+                                   theta_deg=angle, snr_definition="measurement")
+            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel,
+                             l_pix=inject_length, theta_deg=angle, snr_definition="detection")
             surface_brightness = magnitude + 2.5 * np.log10(inject_length)
         else:
             raise ValueError(f"Unknown mag_mode: {mag_mode}")
         injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, info.id,
                                        int(ref.dataId["detector"]), magnitude, psf_magnitude, snr, str(filter_name.bandLabel),
-                                       x_pos, y_pos])
+                                       x_pos, y_pos, stack_snr])
     return injection_catalog
 
 def stack_hits_by_footprints(
@@ -249,6 +276,102 @@ def footprints_to_label_mask(src_cat, dimensions, dtype=np.uint16):
                 lab[y, x0:x1+1] = label  # overwrite is fine for ignore-mask use
     return lab
 
+def build_forbidden_mask(calexp, pre_injection_src, dimensions):
+    """
+    Boolean mask of pixels where injections are NOT allowed.
+    Combines:
+      - calexp.mask planes (if present)
+      - footprint pixels of detected sources (pre-injection)
+    """
+    H, W = int(dimensions.y), int(dimensions.x)
+    forbid = np.zeros((H, W), dtype=bool)
+
+    # --- 1) calexp.mask planes ---
+    m = calexp.mask
+    plane_dict = m.getMaskPlaneDict()
+
+    # Use planes that typically mean "occupied" or should be avoided.
+    # Keep this list conservative; you can edit it anytime.
+    planes_to_avoid = [
+        "DETECTED",
+        "DETECTED_NEGATIVE",
+        "SAT",
+        "BAD",
+        "CR",
+        "NO_DATA",
+        "EDGE",
+    ]
+    for p in planes_to_avoid:
+        if p in plane_dict:
+            bit = m.getPlaneBitMask(p)
+            forbid |= (m.array & bit) != 0
+
+    # --- 2) existing source footprints (pre-injection) ---
+    # This is the most direct "do not overlap sources" mask.
+    if pre_injection_src is not None and len(pre_injection_src) > 0:
+        lab = footprints_to_label_mask(pre_injection_src, dimensions, dtype=np.uint16)
+        forbid |= (lab > 0)
+
+    return forbid
+
+
+def _try_place_trail_no_overlap(
+    rng,
+    forbidden,
+    dimensions,
+    *,
+    trail_length_px: float,
+    angle_deg: float,
+    half_margin: int,
+    calexp,
+    psf_template: str,
+    max_tries: int = 2000,
+):
+    """
+    Rejection-sample (x,y) uniformly, but accept only if the FULL stamped trail
+    does not intersect forbidden pixels.
+
+    Returns: (x, y, stamp_bool_mask)
+    """
+    H, W = int(dimensions.y), int(dimensions.x)
+
+    # Temporary buffer reused per try
+    tmp = np.zeros((H, W), dtype=np.uint8)
+
+    for _ in range(max_tries):
+        # Uniform over allowed bounding box
+        x = float(rng.uniform(half_margin, W - 1 - half_margin))
+        y = float(rng.uniform(half_margin, H - 1 - half_margin))
+
+        # Thickness from local PSF width (same idea you already use later)
+        use_kernel = (psf_template == "kernel")
+        try:
+            psf_width = int(calexp.psf.getLocalKernel(Point2D(x, y)).getWidth())
+        except Exception:
+            psf_width = 7  # safe-ish fallback
+        thickness = max(1, int(psf_width // 2))
+
+        # Build a candidate stamp mask for this proposed injection
+        tmp.fill(0)
+        draw_one_line(
+            tmp,
+            [x, y],
+            angle_deg,
+            trail_length_px,
+            true_value=1,
+            line_thickness=thickness,
+        )
+        stamp = (tmp != 0)
+
+        # Reject if ANY stamped pixel intersects forbidden
+        if (stamp & forbidden).any():
+            continue
+
+        # Accept
+        return x, y, stamp
+
+    raise RuntimeError(f"Could not place trail without overlap after {max_tries} tries")
+
 def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=None, debug=False, mag_mode="psf_mag", psf_template="image"):
     try:
         if seed is None:
@@ -256,8 +379,9 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
         butler = Butler(repo, collections=coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
         calexp = butler.get("preliminary_visit_image", dataId=ref.dataId)
-        injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode, psf_template=psf_template)
         pre_injection_Src = butler.get("single_visit_star_footprints", dataId=ref.dataId)
+        forbidden = build_forbidden_mask(calexp, pre_injection_Src, dimensions)
+        injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode, psf_template=psf_template, forbidden_mask=forbidden)
         injected_calexp, post_injection_Src = characterizeCalibrate(inject(calexp, injection_catalog))
         mask = np.zeros((dimensions.y, dimensions.x), dtype=int)
         for i, row in enumerate(injection_catalog):

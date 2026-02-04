@@ -108,24 +108,80 @@ def mag_to_snr(
     theta_deg: float,
     pad_sigma: float = 5.0,
     step: float = 0.15,
+    snr_definition: str = "detection"
 ) -> float:
     """
-    Predict *stack-like* SNR for a trail of length l_pix at (x,y):
-        snr_stack ≈ (F / sigmaF_model) * C(L)
+    Convert an input magnitude to a model SNR-equivalent value.
+
+    This function supports two distinct SNR interpretations that correspond
+    to different stages of the LSST pipeline:
+
+    - **measurement**: SNR is defined as a PSF-fit–like flux SNR, using a
+      trailed-PSF flux-variance model evaluated at the trail midpoint.
+      This corresponds to *post-detection photometric measurement*.
+
+    - **detection**: SNR is defined relative to the *source detection scale*,
+      using the exposure-level 5σ point-source depth (m5) derived from
+      exposure summary statistics. This corresponds to the SNR scale on which
+      the source detector thresholds operate, but is not an internally stored
+      detector threshold.
+
+    Parameters
+    ----------
+    mag : float
+        Input source magnitude (AB).
+    calexp : lsst.afw.image.Exposure
+        Calibrated exposure containing PSF, photoCalib, and summary statistics.
+    x, y : float
+        Pixel coordinates of the *start* of the trail.
+    use_kernel_image : bool, optional
+        If True, use the PSF kernel image instead of analytic PSF moments
+        when computing flux variance (measurement mode only).
+    l_pix : float
+        Trail length in pixels.
+    theta_deg : float
+        Trail position angle in degrees (east of north).
+    pad_sigma : float, optional
+        PSF padding radius in units of sigma (measurement mode).
+    step : float, optional
+        Sub-pixel sampling step size used in PSF integration (measurement mode).
+    snr_definition : {"measurement", "detection"}, optional
+        Definition of SNR to use:
+        - "measurement": PSF-fit flux SNR-equivalent.
+        - "detection": detection-threshold SNR-equivalent based on m5.
+
+    Returns
+    -------
+    float
+        Model SNR-equivalent value. This is *not* a detection probability.
+        Returns NaN if the flux variance cannot be estimated.
+
+    Notes
+    -----
+    In detection mode, the flux uncertainty is approximated as::
+
+        sigmaF ≈ F(m5) / 5
+
+    where F(m5) is the instrumental flux corresponding to the exposure-level
+    5σ point-source depth. This provides a consistent SNR scale for injection
+    studies but does not reproduce the exact local detector threshold.
     """
     F = float(calexp.getPhotoCalib().magnitudeToInstFlux(mag))
     xm, ym = start_to_midpoint(float(x), float(y), float(l_pix), float(theta_deg))
-
-    sigmaF = psf_fit_flux_sigma(
-        calexp=calexp,
-        x=xm,
-        y=ym,
-        L_pix=float(l_pix),
-        theta_deg=float(theta_deg),
-        use_kernel_image=use_kernel_image,
-        pad_sigma=pad_sigma,
-        step=step,
-    )
+    if snr_definition == "measurement":
+        sigmaF = psf_fit_flux_sigma(
+            calexp=calexp,
+            x=xm,
+            y=ym,
+            L_pix=float(l_pix),
+            theta_deg=float(theta_deg),
+            use_kernel_image=use_kernel_image,
+            pad_sigma=pad_sigma,
+            step=step,)
+    elif snr_definition == "detection":
+        sigmaF = calexp.getPhotoCalib().magnitudeToInstFlux(calexp.info.getSummaryStats().magLim)/5
+    else:
+        raise ValueError(f"Invalid snr_definition: {snr_definition}")
     if not np.isfinite(sigmaF) or sigmaF <= 0:
         return float("nan")
 
@@ -144,30 +200,82 @@ def snr_to_mag(
     theta_deg: float,
     pad_sigma: float = 5.0,
     step: float = 0.15,
+    snr_definition: str = "detection"
 ) -> float:
     """
-    Convert target *stack SNR* to magnitude using the stack-like model:
-        F ≈ stack_snr * sigmaF_model / C(L)
+    Convert a target SNR-equivalent value to a source magnitude.
+
+    This function inverts the same SNR model used in `mag_to_snr`, including
+    an empirical correction for trail-length–dependent stack SNR losses.
+
+    Parameters
+    ----------
+    snr : float
+        Target SNR-equivalent value.
+    calexp : lsst.afw.image.Exposure
+        Calibrated exposure containing PSF, photoCalib, and summary statistics.
+    x, y : float
+        Pixel coordinates of the *start* of the trail.
+    use_kernel_image : bool, optional
+        If True, use the PSF kernel image instead of analytic PSF moments
+        when computing flux variance (measurement mode only).
+    l_pix : float
+        Trail length in pixels.
+    theta_deg : float
+        Trail position angle in degrees (east of north).
+    pad_sigma : float, optional
+        PSF padding radius in units of sigma (measurement mode).
+    step : float, optional
+        Sub-pixel sampling step size used in PSF integration (measurement mode).
+    snr_definition : {"measurement", "detection"}, optional
+        Definition of SNR to use:
+        - "measurement": PSF-fit flux SNR-equivalent.
+        - "detection": detection-threshold SNR-equivalent based on m5.
+
+    Returns
+    -------
+    float
+        Source magnitude corresponding to the requested SNR-equivalent.
+        Returns NaN if the conversion fails. If in detection mode, the resulting
+        magnitude corresponds to PSF magnitude, and in measurement mode it corresponds
+        to the integrated magnitude of the injected trailed source.
+
+    Notes
+    -----
+    The inversion uses the model::
+
+        F ≈ SNR × sigmaF / C(L)
+
+    where:
+    - sigmaF is the modeled flux uncertainty (measurement or detection mode),
+    - C(L) is an empirical correction accounting for SNR loss due to trail length.
+
+    In detection mode, the result corresponds to the magnitude that would lie
+    on the *detection SNR scale*, not the PSF-fit measurement scale.
     """
-    C = empirical_stack_snr_correction(l_pix)
-    if not np.isfinite(C) or C <= 0:
-        return float("nan")
-
-    xm, ym = start_to_midpoint(float(x), float(y), float(l_pix), float(theta_deg))
-    sigmaF = psf_fit_flux_sigma(
-        calexp=calexp,
-        x=xm,
-        y=ym,
-        L_pix=float(l_pix),
-        theta_deg=float(theta_deg),
-        use_kernel_image=use_kernel_image,
-        pad_sigma=pad_sigma,
-        step=step,
-    )
-    if not np.isfinite(sigmaF) or sigmaF <= 0:
-        return float("nan")
-
-    F = float(snr) * float(sigmaF) / float(C)
+    if snr_definition == "measurement":
+        C = empirical_stack_snr_correction(l_pix)
+        if not np.isfinite(C) or C <= 0:
+            return float("nan")
+        sigmaF = psf_fit_flux_sigma(
+            calexp=calexp,
+            x=x,
+            y=y,
+            L_pix=float(l_pix),
+            theta_deg=float(theta_deg),
+            use_kernel_image=use_kernel_image,
+            pad_sigma=pad_sigma,
+            step=step,)
+        if not np.isfinite(sigmaF) or sigmaF <= 0:
+            return float("nan")
+        F = float(snr) * float(sigmaF) / float(C)
+    elif snr_definition == "detection":
+        sigmaF = calexp.getPhotoCalib().magnitudeToInstFlux(calexp.info.getSummaryStats().magLim)/5
+        if not np.isfinite(sigmaF) or sigmaF <= 0:
+            return float("nan")
+        F = float(snr) * float(sigmaF)
+    else:
+        raise ValueError(f"Invalid snr_definition: {snr_definition}")
     return float(calexp.getPhotoCalib().instFluxToMagnitude(F))
 
 
