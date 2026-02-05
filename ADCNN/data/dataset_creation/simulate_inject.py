@@ -176,6 +176,7 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
 def stack_hits_by_footprints(
     post_src,
     calexp_pre,
+    calexp_post,
     dimensions,
     truth_id_mask,
     injection_catalog,
@@ -191,7 +192,7 @@ def stack_hits_by_footprints(
     det_snr = np.full(N, np.nan)
     matched_fp_masks = [np.zeros((H, W), bool) for _ in range(N)]
 
-    mags = calexp_pre.photoCalib.instFluxToMagnitude(post_src, "base_PsfFlux")
+    mags = calexp_post.photoCalib.instFluxToMagnitude(post_src, "base_PsfFlux")
 
     ys, xs = np.nonzero(truth_id_mask)
     ids = truth_id_mask[ys, xs] - 1
@@ -413,6 +414,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
                                  line_thickness=int(psf_width/2))
         injection_catalog, matched_fp_mask = stack_hits_by_footprints(post_src=crossmatch_catalogs (pre_injection_Src, post_injection_Src),
                                                                        calexp_pre=calexp,
+                                                                       calexp_post=injected_calexp,
                                                                        dimensions=dimensions,
                                                                        truth_id_mask=mask,
                                                                        injection_catalog=injection_catalog,
