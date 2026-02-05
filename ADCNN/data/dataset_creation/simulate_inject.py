@@ -9,6 +9,7 @@ from lsst.daf.butler import Butler
 import numpy as np
 from astropy.table import Table
 from lsst.geom import Point2D
+import lsst.geom as geom
 from lsst.pipe.tasks.calibrate import CalibrateTask
 from lsst.pipe.tasks.characterizeImage import CharacterizeImageTask
 from lsst.source.injection.inject_exposure import ExposureInjectTask
@@ -49,14 +50,49 @@ def inject(postISRCCD, injection_catalog):
     inject_res = inject_task.run([injection_catalog], postISRCCD, postISRCCD.psf, postISRCCD.photoCalib, postISRCCD.wcs)
     return inject_res.output_exposure
 
+def estimate_m5_local_from_psf_var(calexp, x, y, snr=5.0):
+    """
+    Local m5 at (x,y) using:
+      alpha = sum(phi^2)
+      sigma_f = sqrt(sum(phi^2 * V)) / alpha
+      f_snr = snr * sigma_f
+      m_snr = instFluxToMagnitude(f_snr)
+    """
+    bbox = calexp.getBBox()
+    point = geom.Point2D(float(x), float(y))
+
+    psf = calexp.getPsf()
+    phi_img = psf.computeKernelImage(point)
+    phi = phi_img.array.astype(np.float64)
+
+    var_full = calexp.getMaskedImage().getVariance()
+    phi_bbox = phi_img.getBBox()
+    phi_bbox_clipped = phi_bbox.clippedTo(bbox)
+    V = var_full[phi_bbox_clipped].array.astype(np.float64)
+
+    if phi_bbox_clipped != phi_bbox:
+        dx0 = phi_bbox_clipped.getMinX() - phi_bbox.getMinX()
+        dy0 = phi_bbox_clipped.getMinY() - phi_bbox.getMinY()
+        dx1 = dx0 + phi_bbox_clipped.getWidth()
+        dy1 = dy0 + phi_bbox_clipped.getHeight()
+        phi = phi[dy0:dy1, dx0:dx1]
+
+    phi2 = phi * phi
+    alpha = float(np.sum(phi2))
+    if not np.isfinite(alpha) or alpha <= 0:
+        return np.nan
+
+    sigma_f = float(np.sqrt(np.sum(phi2 * V)) / alpha)
+    f_snr = snr * sigma_f
+    return float(calexp.getPhotoCalib().instFluxToMagnitude(f_snr))
 
 def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode="psf_mag", psf_template="image", forbidden_mask=None):
     rng = np.random.default_rng(seed)
     injection_catalog = Table(
         names=('injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit', 'detector',
-               'integrated_mag', 'PSF_mag', 'SNR', 'physical_filter', 'x', 'y', 'stack_model_SNR'),
+               'integrated_mag', 'PSF_mag', 'SNR', 'physical_filter', 'x', 'y', 'stack_model_SNR', 'm5_local'),
         dtype=('int64', 'float64', 'float64', 'str', 'float64', 'float64', 'float64', 'int64', 'int64', 'float64',
-               'float64', 'float64', 'str', 'int64', 'int64', 'float64'))
+               'float64', 'float64', 'str', 'int64', 'int64', 'float64', 'float64'))
 
     H, W = int(dimensions.y), int(dimensions.x)
     if forbidden_mask is None:
@@ -99,6 +135,7 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
         # Mark these pixels as now-occupied so subsequent injections cannot overlap them
         forbidden |= stamp
 
+        m5_local = estimate_m5_local_from_psf_var(calexp, x_pos, y_pos)
         sky_pos = raw.pixelToSky(x_pos, y_pos)
         ra_pos = sky_pos.getRa().asDegrees()
         dec_pos = sky_pos.getDec().asDegrees()
@@ -170,7 +207,7 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
             raise ValueError(f"Unknown mag_mode: {mag_mode}")
         injection_catalog.add_row([k, ra_pos, dec_pos, "Trail" if inject_length > 0 else "Star", inject_length, surface_brightness, angle, info.id,
                                        int(ref.dataId["detector"]), magnitude, psf_magnitude, snr, str(filter_name.bandLabel),
-                                       x_pos, y_pos, stack_snr])
+                                       x_pos, y_pos, stack_snr, m5_local])
     return injection_catalog
 
 def stack_hits_by_footprints(
