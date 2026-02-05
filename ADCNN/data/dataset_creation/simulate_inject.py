@@ -122,7 +122,7 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
             snr = float(rng.uniform(snr_min, snr_max))
             snr = max(snr, 0.01)
             psf_magnitude = snr_to_mag(snr, calexp, x_pos, y_pos, l_pix=length, theta_deg=angle, use_kernel_image=use_kernel, snr_definition="detection")
-            if trail_length > 0:
+            if inject_length > 0:
                 magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
                 surface_brightness = magnitude + 2.5 * np.log10(length)
             else:
@@ -131,7 +131,7 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
             stack_snr = mag_to_snr(magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel, l_pix=length, theta_deg=angle, snr_definition="measurement")
         elif mag_mode == "psf_mag":
             psf_magnitude = rng.uniform(mag[0], upper_limit_mag)
-            if trail_length > 0:
+            if inject_length > 0:
                 magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
                 surface_brightness = magnitude + 2.5 * np.log10(length)
             else:
@@ -143,7 +143,7 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
                              l_pix=length, theta_deg=angle, snr_definition="detection")
         elif mag_mode == "surface_brightness":
             surface_brightness = rng.uniform(mag[0], mag[1])
-            if trail_length > 0:
+            if inject_length > 0:
                 magnitude = surface_brightness - 2.5 * np.log10(length)
                 psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
             else:
@@ -155,7 +155,7 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
                                    theta_deg=angle, snr_definition="measurement")
         elif mag_mode == "integrated_mag":
             magnitude = rng.uniform(mag[0], mag[1])
-            if trail_length > 0:
+            if inject_length > 0:
                 psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
                 surface_brightness = magnitude + 2.5 * np.log10(length)
             else:
