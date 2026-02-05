@@ -75,6 +75,8 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
         inject_length = rng.uniform(*trail_length)
         if inject_length <= 0:
             length = 1.0
+        else:
+            length = inject_length
         # Conservative margin: assume R>=20 and S = ceil(L)+2R+1
         R = 30
         S = int(np.ceil(length)) + 2*R + 1
@@ -120,31 +122,48 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
             snr = float(rng.uniform(snr_min, snr_max))
             snr = max(snr, 0.01)
             psf_magnitude = snr_to_mag(snr, calexp, x_pos, y_pos, l_pix=length, theta_deg=angle, use_kernel_image=use_kernel, snr_definition="detection")
-            magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
-            surface_brightness = magnitude + 2.5 * np.log10(length)
+            if trail_length > 0:
+                magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
+                surface_brightness = magnitude + 2.5 * np.log10(length)
+            else:
+                magnitude = psf_magnitude
+                surface_brightness = magnitude
             stack_snr = mag_to_snr(magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel, l_pix=length, theta_deg=angle, snr_definition="measurement")
         elif mag_mode == "psf_mag":
             psf_magnitude = rng.uniform(mag[0], upper_limit_mag)
-            magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
-            surface_brightness = magnitude + 2.5 * np.log10(length)
+            if trail_length > 0:
+                magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
+                surface_brightness = magnitude + 2.5 * np.log10(length)
+            else:
+                magnitude = psf_magnitude
+                surface_brightness = magnitude
             stack_snr = mag_to_snr(magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel, l_pix=length,
                                    theta_deg=angle, snr_definition="measurement")
             snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel,
                              l_pix=length, theta_deg=angle, snr_definition="detection")
         elif mag_mode == "surface_brightness":
             surface_brightness = rng.uniform(mag[0], mag[1])
-            magnitude = surface_brightness - 2.5 * np.log10(length)
-            psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
+            if trail_length > 0:
+                magnitude = surface_brightness - 2.5 * np.log10(length)
+                psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
+            else:
+                magnitude = surface_brightness
+                psf_magnitude = magnitude
             snr = mag_to_snr(magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel,
                              l_pix=length, theta_deg=angle)
         elif mag_mode == "integrated_mag":
             magnitude = rng.uniform(mag[0], mag[1])
-            psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
-            stack_snr = mag_to_snr(magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel, l_pix=length,
-                                   theta_deg=angle, snr_definition="measurement")
+            if trail_length > 0:
+                psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
+                surface_brightness = magnitude + 2.5 * np.log10(length)
+            else:
+                psf_magnitude = magnitude
+                surface_brightness = magnitude
+
             snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel,
                              l_pix=length, theta_deg=angle, snr_definition="detection")
-            surface_brightness = magnitude + 2.5 * np.log10(length)
+            stack_snr = mag_to_snr(magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel, l_pix=length,
+                                   theta_deg=angle, snr_definition="measurement")
         else:
             raise ValueError(f"Unknown mag_mode: {mag_mode}")
         injection_catalog.add_row([k, ra_pos, dec_pos, "Trail" if inject_length > 0 else "Star", inject_length, surface_brightness, angle, info.id,
@@ -395,8 +414,8 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
                                                                        dimensions=dimensions,
                                                                        truth_id_mask=mask,
                                                                        injection_catalog=injection_catalog,
-                                                                       overlap_minpix=10,
-                                                                       overlap_frac=0.5,)
+                                                                       overlap_minpix=1,
+                                                                       overlap_frac=0.0,)
 
         real_labels = footprints_to_label_mask(pre_injection_Src, dimensions, dtype=np.uint16)
         if not debug:
