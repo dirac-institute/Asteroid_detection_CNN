@@ -154,7 +154,7 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
             snr_max = float(mag[1])
             if snr_max == 0.0:
                 snr_min, snr_max = snr_edge, snr_min
-            if snr_max <= snr_min:
+            if snr_max < snr_min:
                 raise ValueError(f"Bad SNR range: snr_min={snr_min} snr_max={snr_max}")
             snr = float(rng.uniform(snr_min, snr_max))
             snr = max(snr, 0.01)
