@@ -90,9 +90,9 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
     rng = np.random.default_rng(seed)
     injection_catalog = Table(
         names=('injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit', 'detector',
-               'integrated_mag', 'PSF_mag', 'SNR', 'physical_filter', 'x', 'y', 'stack_model_SNR', 'm5_local'),
+               'integrated_mag', 'PSF_mag', 'SNR', 'physical_filter', 'x', 'y', 'SNR_estimation', 'm5_local', 'm5_detector'),
         dtype=('int64', 'float64', 'float64', 'str', 'float64', 'float64', 'float64', 'int64', 'int64', 'float64',
-               'float64', 'float64', 'str', 'int64', 'int64', 'float64', 'float64'))
+               'float64', 'float64', 'str', 'int64', 'int64', 'float64', 'float64', 'float64'))
 
     H, W = int(dimensions.y), int(dimensions.x)
     if forbidden_mask is None:
@@ -207,7 +207,7 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
             raise ValueError(f"Unknown mag_mode: {mag_mode}")
         injection_catalog.add_row([k, ra_pos, dec_pos, "Trail" if inject_length > 0 else "Star", inject_length, surface_brightness, angle, info.id,
                                        int(ref.dataId["detector"]), magnitude, psf_magnitude, snr, str(filter_name.bandLabel),
-                                       x_pos, y_pos, stack_snr, m5_local])
+                                       x_pos, y_pos, stack_snr, m5_local, calexp.info.getSummaryStats().magLim])
     return injection_catalog
 
 def stack_hits_by_footprints(

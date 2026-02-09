@@ -167,26 +167,27 @@ def mag_to_snr(
     studies but does not reproduce the exact local detector threshold.
     """
     F = float(calexp.getPhotoCalib().magnitudeToInstFlux(mag))
-    xm, ym = start_to_midpoint(float(x), float(y), float(l_pix), float(theta_deg))
+    #xm, ym = start_to_midpoint(float(x), float(y), float(l_pix), float(theta_deg))
     if snr_definition == "measurement":
         sigmaF = psf_fit_flux_sigma(
             calexp=calexp,
-            x=xm,
-            y=ym,
+            x=x,
+            y=y,
             L_pix=float(l_pix),
             theta_deg=float(theta_deg),
             use_kernel_image=use_kernel_image,
             pad_sigma=pad_sigma,
             step=step,)
+        snr_model = F / float(sigmaF)
+        snr_model = float(snr_model * empirical_stack_snr_correction(l_pix))
     elif snr_definition == "detection":
         sigmaF = calexp.getPhotoCalib().magnitudeToInstFlux(calexp.info.getSummaryStats().magLim)/5
+        snr_model = F / float(sigmaF)
     else:
         raise ValueError(f"Invalid snr_definition: {snr_definition}")
     if not np.isfinite(sigmaF) or sigmaF <= 0:
         return float("nan")
-
-    snr_model = F / float(sigmaF)
-    return float(snr_model * empirical_stack_snr_correction(l_pix))
+    return snr_model
 
 
 def snr_to_mag(
