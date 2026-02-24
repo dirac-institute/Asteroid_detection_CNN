@@ -2,15 +2,14 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from common import ensure_dir  # and anything else you need
-from common import draw_one_line
-from common import mag_to_snr, snr_to_mag
+from common import ensure_dir, draw_one_line, psf_fwhm_arcsec_from_calexp, mag_to_snr, snr_to_mag
 
 from astroML.crossmatch import crossmatch_angular
 from lsst.daf.butler import Butler
 import numpy as np
 from astropy.table import Table
 from lsst.geom import Point2D
+import lsst.geom as geom
 from lsst.pipe.tasks.calibrate import CalibrateTask
 from lsst.pipe.tasks.characterizeImage import CharacterizeImageTask
 from lsst.source.injection.inject_exposure import ExposureInjectTask
@@ -33,6 +32,8 @@ def characterizeCalibrate(postISRCCD):
     char_config = CharacterizeImageTask.ConfigClass()
     char_config.doApCorr = True
     char_config.doDeblend = True
+    #char_config.doApCorr = False
+    #char_config.doDeblend = False
     char_task = CharacterizeImageTask(config=char_config)
     char_result = char_task.run(postISRCCD)
 
@@ -49,67 +50,170 @@ def inject(postISRCCD, injection_catalog):
     inject_res = inject_task.run([injection_catalog], postISRCCD, postISRCCD.psf, postISRCCD.photoCalib, postISRCCD.wcs)
     return inject_res.output_exposure
 
+def estimate_m5_local_from_psf_var(calexp, x, y, snr=5.0):
+    """
+    Local m5 at (x,y) using:
+      alpha = sum(phi^2)
+      sigma_f = sqrt(sum(phi^2 * V)) / alpha
+      f_snr = snr * sigma_f
+      m_snr = instFluxToMagnitude(f_snr)
+    """
+    bbox = calexp.getBBox()
+    point = geom.Point2D(float(x), float(y))
 
-def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode="psf_mag"):
+    psf = calexp.getPsf()
+    phi_img = psf.computeKernelImage(point)
+    phi = phi_img.array.astype(np.float64)
+
+    var_full = calexp.getMaskedImage().getVariance()
+    phi_bbox = phi_img.getBBox()
+    phi_bbox_clipped = phi_bbox.clippedTo(bbox)
+    V = var_full[phi_bbox_clipped].array.astype(np.float64)
+
+    if phi_bbox_clipped != phi_bbox:
+        dx0 = phi_bbox_clipped.getMinX() - phi_bbox.getMinX()
+        dy0 = phi_bbox_clipped.getMinY() - phi_bbox.getMinY()
+        dx1 = dx0 + phi_bbox_clipped.getWidth()
+        dy1 = dy0 + phi_bbox_clipped.getHeight()
+        phi = phi[dy0:dy1, dx0:dx1]
+
+    phi2 = phi * phi
+    alpha = float(np.sum(phi2))
+    if not np.isfinite(alpha) or alpha <= 0:
+        return np.nan
+
+    sigma_f = float(np.sqrt(np.sum(phi2 * V)) / alpha)
+    f_snr = snr * sigma_f
+    return float(calexp.getPhotoCalib().instFluxToMagnitude(f_snr))
+
+def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode="psf_mag", psf_template="image", forbidden_mask=None):
     rng = np.random.default_rng(seed)
     injection_catalog = Table(
         names=('injection_id', 'ra', 'dec', 'source_type', 'trail_length', 'mag', 'beta', 'visit', 'detector',
-               'integrated_mag', 'PSF_mag', 'SNR', 'physical_filter', 'x', 'y'),
+               'integrated_mag', 'PSF_mag', 'SNR', 'physical_filter', 'x', 'y', 'SNR_estimation', 'm5_local', 'm5_detector'),
         dtype=('int64', 'float64', 'float64', 'str', 'float64', 'float64', 'float64', 'int64', 'int64', 'float64',
-               'float64', 'float64', 'str', 'int64', 'int64'))
+               'float64', 'float64', 'str', 'int64', 'int64', 'float64', 'float64', 'float64'))
 
+    H, W = int(dimensions.y), int(dimensions.x)
+    if forbidden_mask is None:
+        forbidden = np.zeros((H, W), dtype=bool)
+    else:
+        # Make sure we can safely modify it locally
+        forbidden = forbidden_mask.astype(bool, copy=True)
     raw = calexp.wcs
     info = calexp.visitInfo
     filter_name = calexp.filter
-    #raw = butler.get(source_type + ".wcs", dataId=ref.dataId)
-    #info = butler.get(source_type + ".visitInfo", dataId=ref.dataId)
-    #filter_name = butler.get(source_type + ".filter", dataId=ref.dataId)
-    fwhm = {"u": 0.92, "g": 0.87, "r": 0.83, "i": 0.80, "z": 0.78, "y": 0.76}
     m5 = {"u": 23.7, "g": 24.97, "r": 24.52, "i": 24.13, "z": 23.56, "y": 22.55}
     psf_depth = m5[filter_name.bandLabel]
-    pixelScale = raw.getPixelScale().asArcseconds()
-    theta_p = fwhm[filter_name.bandLabel] * pixelScale
-    a, b = 0.67, 1.16
+    #a, b = 0.67, 1.16
+    a, b = 0.42, 0
     for k in range(n_inject):
-        x_pos = rng.uniform(1, dimensions.x - 1)
-        y_pos = rng.uniform(1, dimensions.y - 1)
+        inject_length = rng.uniform(*trail_length)
+        if inject_length <= 0:
+            length = 1.0
+        else:
+            length = inject_length
+        # Conservative margin: assume R>=20 and S = ceil(L)+2R+1
+        R = 30
+        S = int(np.ceil(length)) + 2*R + 1
+        half = S // 2 + 2  # +2 pixels slack
+        #x_pos = rng.uniform(half, dimensions.x - 1 - half)
+        #y_pos = rng.uniform(half, dimensions.y - 1 - half)
+        angle = rng.uniform(*beta)
+        x_pos, y_pos, stamp = _try_place_trail_no_overlap(
+            rng,
+            forbidden,
+            dimensions,
+            trail_length_px=length,
+            angle_deg=angle,
+            half_margin=half,
+            calexp=calexp,
+            psf_template=psf_template,
+            max_tries=2000,
+        )
+
+        # Mark these pixels as now-occupied so subsequent injections cannot overlap them
+        forbidden |= stamp
+
+        m5_local = estimate_m5_local_from_psf_var(calexp, x_pos, y_pos)
         sky_pos = raw.pixelToSky(x_pos, y_pos)
         ra_pos = sky_pos.getRa().asDegrees()
         dec_pos = sky_pos.getDec().asDegrees()
-        inject_length = rng.uniform(*trail_length)
-        x = inject_length / (24 * theta_p)
+        use_kernel = (psf_template == "kernel")
+        fwhm_arcsec = psf_fwhm_arcsec_from_calexp(calexp, x_pos, y_pos, use_kernel_image=use_kernel)
+        if not np.isfinite(fwhm_arcsec) or fwhm_arcsec <= 0:
+            fwhm_arcsec = {"u": 0.92, "g": 0.87, "r": 0.83, "i": 0.80, "z": 0.78, "y": 0.76}
+            fwhm_arcsec = fwhm_arcsec[filter_name.bandLabel]
+        pixelScale = raw.getPixelScale().asArcseconds()
+        theta_p = fwhm_arcsec / pixelScale
+        x = length / theta_p
         upper_limit_mag = psf_depth - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x)) if mag[1] == 0 else mag[1]
         if mag_mode == "snr":
-            snr = rng.uniform(mag[0], upper_limit_mag)
-            psf_magnitude = snr_to_mag(snr, calexp, x_pos, y_pos)
-            magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
-            surface_brightness = magnitude + 2.5 * np.log10(inject_length)
+            snr_edge = 5.0  # your definition of "edge of detection" (change if you want)
+            snr_min = float(mag[0])
+            snr_max = float(mag[1])
+            if snr_max == 0.0:
+                snr_min, snr_max = snr_edge, snr_min
+            if snr_max < snr_min:
+                raise ValueError(f"Bad SNR range: snr_min={snr_min} snr_max={snr_max}")
+            snr = float(rng.uniform(snr_min, snr_max))
+            snr = max(snr, 0.01)
+            psf_magnitude = snr_to_mag(snr, calexp, x_pos, y_pos, l_pix=length, theta_deg=angle, use_kernel_image=use_kernel, snr_definition="detection")
+            if inject_length > 0:
+                magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
+                surface_brightness = magnitude + 2.5 * np.log10(length)
+            else:
+                magnitude = psf_magnitude
+                surface_brightness = magnitude
+            stack_snr = mag_to_snr(magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel, l_pix=length, theta_deg=angle, snr_definition="measurement")
         elif mag_mode == "psf_mag":
             psf_magnitude = rng.uniform(mag[0], upper_limit_mag)
-            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos)
-            magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
-            surface_brightness = magnitude + 2.5 * np.log10(inject_length)
+            if inject_length > 0:
+                magnitude = psf_magnitude - 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
+                surface_brightness = magnitude + 2.5 * np.log10(length)
+            else:
+                magnitude = psf_magnitude
+                surface_brightness = magnitude
+            stack_snr = mag_to_snr(magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel, l_pix=length,
+                                   theta_deg=angle, snr_definition="measurement")
+            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel,
+                             l_pix=length, theta_deg=angle, snr_definition="detection")
         elif mag_mode == "surface_brightness":
             surface_brightness = rng.uniform(mag[0], mag[1])
-            magnitude = surface_brightness - 2.5 * np.log10(inject_length)
-            psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
-            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos)
+            if inject_length > 0:
+                magnitude = surface_brightness - 2.5 * np.log10(length)
+                psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
+            else:
+                magnitude = surface_brightness
+                psf_magnitude = magnitude
+            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel,
+                             l_pix=length, theta_deg=angle, snr_definition="detection")
+            stack_snr = mag_to_snr(magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel, l_pix=length,
+                                   theta_deg=angle, snr_definition="measurement")
         elif mag_mode == "integrated_mag":
             magnitude = rng.uniform(mag[0], mag[1])
-            psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
-            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos)
-            surface_brightness = magnitude + 2.5 * np.log10(inject_length)
+            if inject_length > 0:
+                psf_magnitude = magnitude + 1.25 * np.log10(1 + (a * x ** 2) / (1 + b * x))
+                surface_brightness = magnitude + 2.5 * np.log10(length)
+            else:
+                psf_magnitude = magnitude
+                surface_brightness = magnitude
+
+            snr = mag_to_snr(psf_magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel,
+                             l_pix=length, theta_deg=angle, snr_definition="detection")
+            stack_snr = mag_to_snr(magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel, l_pix=length,
+                                   theta_deg=angle, snr_definition="measurement")
         else:
             raise ValueError(f"Unknown mag_mode: {mag_mode}")
-        angle = rng.uniform(*beta)
-        injection_catalog.add_row([k, ra_pos, dec_pos, "Trail", inject_length, surface_brightness, angle, info.id,
+        injection_catalog.add_row([k, ra_pos, dec_pos, "Trail" if inject_length > 0 else "Star", inject_length, surface_brightness, angle, info.id,
                                        int(ref.dataId["detector"]), magnitude, psf_magnitude, snr, str(filter_name.bandLabel),
-                                       x_pos, y_pos])
+                                       x_pos, y_pos, stack_snr, m5_local, calexp.info.getSummaryStats().magLim])
     return injection_catalog
 
 def stack_hits_by_footprints(
     post_src,
     calexp_pre,
+    calexp_post,
     dimensions,
     truth_id_mask,
     injection_catalog,
@@ -125,7 +229,7 @@ def stack_hits_by_footprints(
     det_snr = np.full(N, np.nan)
     matched_fp_masks = [np.zeros((H, W), bool) for _ in range(N)]
 
-    mags = calexp_pre.photoCalib.instFluxToMagnitude(post_src, "base_PsfFlux")
+    mags = calexp_post.photoCalib.instFluxToMagnitude(post_src, "base_PsfFlux")
 
     ys, xs = np.nonzero(truth_id_mask)
     ids = truth_id_mask[ys, xs] - 1
@@ -233,15 +337,112 @@ def footprints_to_label_mask(src_cat, dimensions, dtype=np.uint16):
                 lab[y, x0:x1+1] = label  # overwrite is fine for ignore-mask use
     return lab
 
-def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=None, debug=False, mag_mode="psf_mag"):
+def build_forbidden_mask(calexp, pre_injection_src, dimensions):
+    """
+    Boolean mask of pixels where injections are NOT allowed.
+    Combines:
+      - calexp.mask planes (if present)
+      - footprint pixels of detected sources (pre-injection)
+    """
+    H, W = int(dimensions.y), int(dimensions.x)
+    forbid = np.zeros((H, W), dtype=bool)
+
+    # --- 1) calexp.mask planes ---
+    m = calexp.mask
+    plane_dict = m.getMaskPlaneDict()
+
+    # Use planes that typically mean "occupied" or should be avoided.
+    # Keep this list conservative; you can edit it anytime.
+    planes_to_avoid = [
+        "DETECTED",
+        "DETECTED_NEGATIVE",
+        "SAT",
+        "BAD",
+        "CR",
+        "NO_DATA",
+        "EDGE",
+    ]
+    for p in planes_to_avoid:
+        if p in plane_dict:
+            bit = m.getPlaneBitMask(p)
+            forbid |= (m.array & bit) != 0
+
+    # --- 2) existing source footprints (pre-injection) ---
+    # This is the most direct "do not overlap sources" mask.
+    if pre_injection_src is not None and len(pre_injection_src) > 0:
+        lab = footprints_to_label_mask(pre_injection_src, dimensions, dtype=np.uint16)
+        forbid |= (lab > 0)
+
+    return forbid
+
+
+def _try_place_trail_no_overlap(
+    rng,
+    forbidden,
+    dimensions,
+    *,
+    trail_length_px: float,
+    angle_deg: float,
+    half_margin: int,
+    calexp,
+    psf_template: str,
+    max_tries: int = 2000,
+):
+    """
+    Rejection-sample (x,y) uniformly, but accept only if the FULL stamped trail
+    does not intersect forbidden pixels.
+
+    Returns: (x, y, stamp_bool_mask)
+    """
+    H, W = int(dimensions.y), int(dimensions.x)
+
+    # Temporary buffer reused per try
+    tmp = np.zeros((H, W), dtype=np.uint8)
+
+    for _ in range(max_tries):
+        # Uniform over allowed bounding box
+        x = float(rng.uniform(half_margin, W - 1 - half_margin))
+        y = float(rng.uniform(half_margin, H - 1 - half_margin))
+
+        # Thickness from local PSF width (same idea you already use later)
+        use_kernel = (psf_template == "kernel")
+        try:
+            psf_width = int(calexp.psf.getLocalKernel(Point2D(x, y)).getWidth())
+        except Exception:
+            psf_width = 7  # safe-ish fallback
+        thickness = max(1, int(psf_width // 2))
+
+        # Build a candidate stamp mask for this proposed injection
+        tmp.fill(0)
+        draw_one_line(
+            tmp,
+            [x, y],
+            angle_deg,
+            trail_length_px,
+            true_value=1,
+            line_thickness=thickness,
+        )
+        stamp = (tmp != 0)
+
+        # Reject if ANY stamped pixel intersects forbidden
+        if (stamp & forbidden).any():
+            continue
+
+        # Accept
+        return x, y, stamp
+
+    raise RuntimeError(f"Could not place trail without overlap after {max_tries} tries")
+
+def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=None, debug=False, mag_mode="psf_mag", psf_template="image"):
     try:
         if seed is None:
             seed = np.random.randint(0,10000)
         butler = Butler(repo, collections=coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
         calexp = butler.get("preliminary_visit_image", dataId=ref.dataId)
-        injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode)
         pre_injection_Src = butler.get("single_visit_star_footprints", dataId=ref.dataId)
+        forbidden = build_forbidden_mask(calexp, pre_injection_Src, dimensions)
+        injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode, psf_template=psf_template, forbidden_mask=forbidden)
         injected_calexp, post_injection_Src = characterizeCalibrate(inject(calexp, injection_catalog))
         mask = np.zeros((dimensions.y, dimensions.x), dtype=int)
         for i, row in enumerate(injection_catalog):
@@ -250,11 +451,12 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
                                  line_thickness=int(psf_width/2))
         injection_catalog, matched_fp_mask = stack_hits_by_footprints(post_src=crossmatch_catalogs (pre_injection_Src, post_injection_Src),
                                                                        calexp_pre=calexp,
+                                                                       calexp_post=injected_calexp,
                                                                        dimensions=dimensions,
                                                                        truth_id_mask=mask,
                                                                        injection_catalog=injection_catalog,
-                                                                       overlap_minpix=10,
-                                                                       overlap_frac=0.5,)
+                                                                       overlap_minpix=1,
+                                                                       overlap_frac=0.0,)
 
         real_labels = footprints_to_label_mask(pre_injection_Src, dimensions, dtype=np.uint16)
         if not debug:
@@ -277,10 +479,11 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
 
 
 def worker(args):
-    idx, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta, source_type, global_seed, mag_mode = args
+    idx, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta, source_type, global_seed, mag_mode, psf_template = args
     seed = (int(global_seed) * 1_000_003 + int(dataId["visit"]) * 1_003 + int(dataId["detector"])) & 0xFFFFFFFF
     try:
-        res = one_detector_injection(number, trail_length, magnitude, beta, repo, coll, dims, source_type, dataId, seed, mag_mode=mag_mode)
+        res = one_detector_injection(number, trail_length, magnitude, beta, repo, coll, dims, source_type, dataId, seed,
+                                     mag_mode=mag_mode, psf_template=psf_template)
         if res[0] is False:
             return ("err", res[1], res[2], res[3])
         _, img, mask, real_labels, catalog = res
@@ -304,7 +507,8 @@ def worker(args):
 
 
 def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitude, beta, where, parallel=4,
-                           random_subset=0, train_test_split=0, seed=123, chunks=None, test_only=False, bad_visits_file=None, mag_mode="psf_mag"):
+                           random_subset=0, train_test_split=0, seed=123, chunks=None, test_only=False, bad_visits_file=None, mag_mode="psf_mag",
+                           psf_template="image"):
     butler = Butler(repo, collections=coll)
     h5train_path = os.path.join(save_path, "train.h5")
     h5test_path = os.path.join(save_path, "test.h5")
@@ -332,6 +536,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
         with h5py.File(h5train_path, "w") as f:
             f.create_dataset("images", shape=(len(refs) - len(test_index), dims.y, dims.x), dtype="float32", chunks=chunks)
             f.create_dataset("masks", shape=(len(refs) - len(test_index), dims.y, dims.x), dtype="bool", chunks=chunks)
+            f.create_dataset("real_labels", shape=(len(refs) - len(test_index), dims.y, dims.x), dtype="uint16", chunks=chunks)
     if len(test_index) > 0:
         with h5py.File(h5test_path, "w") as f:
             f.create_dataset(
@@ -373,14 +578,14 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             count = count_test
             count_test += 1
             tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
-                          "preliminary_visit_image", seed, mag_mode])
+                          "preliminary_visit_image", seed, mag_mode, psf_template])
         elif not test_only:
             h5path = h5train_path
             csvpath = os.path.join(save_path, "train.csv")
             count = count_train
             count_train += 1
             tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
-                          "preliminary_visit_image", seed, mag_mode])
+                          "preliminary_visit_image", seed, mag_mode, psf_template])
     if parallel > 1:
         completed = 0
         total_tasks = len(tasks)
@@ -426,6 +631,8 @@ def main():
     ap.add_argument("--mag-min", type=float, default=19)
     ap.add_argument("--mag-max", type=float, default=24)
     ap.add_argument("--mag-mode", choices=["psf_mag", "snr", "surface_brightness", "integrated_mag"], default="psf_mag")
+    ap.add_argument("--psf-template", choices=["image", "kernel"], default="kernel",
+                    help="PSF template source: image=computeImage; kernel=computeKernelImage (if available)")
     ap.add_argument("--beta-min", type=float, default=0)
     ap.add_argument("--beta-max", type=float, default=180)
     ap.add_argument("--number", type=int, default=20)
@@ -455,6 +662,7 @@ def main():
         test_only=args.test_only,
         seed=args.seed,
         bad_visits_file=args.bad_visits_file,
+        psf_template=args.psf_template,
     )
 
 if __name__ == "__main__":
