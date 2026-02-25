@@ -52,6 +52,8 @@ if [[ -z "$TEST_ONLY_FLAG" ]]; then
   rm -f "$OUT/train.h5" "$OUT/train.csv"
 fi
 
+export PYTHONPATH=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_SNR:$PYTHONPATH
+
 srun python3 -u inject_point_sources_lsstcam.py \
   --repo "$REPO" \
   --collections "$COLL" \
