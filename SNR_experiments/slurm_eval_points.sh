@@ -21,7 +21,7 @@ for arg in "$@"; do
   esac
 done
 
-source /cvmfs/sw.lsst.eu/almalinux-x86_64/lsst_distrib/w_2025_50/loadLSST.sh
+source /cvmfs/sw.lsst.eu/almalinux-x86_64/lsst_distrib/w_2026_02/loadLSST.sh
 setup lsst_distrib
 
 cd /sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_SNR/SNR_experiments/
