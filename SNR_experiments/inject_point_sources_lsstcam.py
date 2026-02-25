@@ -508,6 +508,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
 
     refs = list(set(butler.registry.queryDatasets("preliminary_visit_image", where=where, instrument="LSSTCam", findFirst=True)))
     refs = sorted(refs, key=lambda r: str(r.dataId["visit"]*1000+r.dataId["detector"]))
+    print ("Found datasets:", len(refs))
     if bad_visits_file is not None:
         bad_df = pd.read_csv(bad_visits_file)
         bad_set = set(zip(bad_df["visit"].astype(int), bad_df["detector"].astype(int)))
