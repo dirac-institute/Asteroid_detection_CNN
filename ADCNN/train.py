@@ -233,7 +233,7 @@ class Trainer:
                 model,
                 device_ids=[local_rank],
                 output_device=local_rank,
-                find_unused_parameters=False,
+                find_unused_parameters=True,
                 gradient_as_bucket_view=True,
             )
 
@@ -359,6 +359,7 @@ class Trainer:
             posw_warm = self._posw(dtype=torch.float32, value=float(warmup_pos_weight))
 
             for ep in range(1, int(warmup_epochs) + 1):
+                t0 = time.time()
                 self._set_loader_epoch(train_loader, seed + 100 + ep)
                 model.train()
 
@@ -380,6 +381,8 @@ class Trainer:
                         if not torch.isfinite(loss):
                             raise RuntimeError(f"Non-finite loss at warmup epoch {ep} iter {b}: {loss.item()}")
 
+                    if verbose == 1 and is_main_process():
+                        print(f"[WARMUP ep{ep} iter {b}] loss {loss.item():.4f}")
                     opt.zero_grad(set_to_none=True)
                     scaler.scale(loss).backward()
                     scaler.unscale_(opt)
@@ -400,19 +403,24 @@ class Trainer:
                 train_loss = float((loss_sum_t / seen_t.clamp_min(1)).item())
 
                 if verbose >= 2 and is_main_process():
-                    if ema is not None and ema_eval:
-                        ema.apply_to(raw_model)
-                        try:
+                    if ep == int(warmup_epochs):
+                        if ema is not None and ema_eval:
+                            ema.apply_to(raw_model)
+                            try:
+                                auc = masked_pixel_auc(
+                                    model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
+                                )
+                            finally:
+                                ema.restore(raw_model)
+                        else:
                             auc = masked_pixel_auc(
                                 model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
                             )
-                        finally:
-                            ema.restore(raw_model)
+                        dt = time.time() - t0
+                        print(f"[WARMUP ep{ep}] train_loss {train_loss:.4f} | val AUC {auc:.4f} | {dt:.1f}s")
                     else:
-                        auc = masked_pixel_auc(
-                            model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
-                        )
-                    print(f"[WARMUP ep{ep}] train_loss {train_loss:.4f} | val AUC {auc:.4f}")
+                        dt = time.time() - t0
+                        print(f"[WARMUP ep{ep}] train_loss {train_loss:.4f} | {dt:.1f}s")
 
             # Head
             freeze_all(raw_model)
@@ -430,6 +438,7 @@ class Trainer:
             posw_head = self._posw(dtype=torch.float32, value=float(head_pos_weight))
 
             for ep in range(1, int(head_epochs) + 1):
+                t0 = time.time()
                 self._set_loader_epoch(train_loader, seed + 200 + ep)
                 model.train()
 
@@ -458,6 +467,9 @@ class Trainer:
                     scaler.step(opt)
                     scaler.update()
 
+                    if verbose == 1 and is_main_process():
+                        print(f"[HEAD ep{ep} iter {b}] loss {loss.item():.4f}")
+
                     if ema is not None:
                         ema.update(raw_model)
 
@@ -470,19 +482,24 @@ class Trainer:
                 train_loss = float((loss_sum_t / seen_t.clamp_min(1)).item())
 
                 if verbose >= 2 and is_main_process():
-                    if ema is not None and ema_eval:
-                        ema.apply_to(raw_model)
-                        try:
+                    if ep == int(head_epochs):
+                        if ema is not None and ema_eval:
+                            ema.apply_to(raw_model)
+                            try:
+                                auc = masked_pixel_auc(
+                                    model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
+                                )
+                            finally:
+                                ema.restore(raw_model)
+                        else:
                             auc = masked_pixel_auc(
                                 model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
                             )
-                        finally:
-                            ema.restore(raw_model)
+                        dt = time.time() - t0
+                        print(f"[HEAD ep{ep}] train_loss {train_loss:.4f} | val AUC {auc:.4f} | {dt:.1f}s")
                     else:
-                        auc = masked_pixel_auc(
-                            model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
-                        )
-                    print(f"[HEAD ep{ep}] train_loss {train_loss:.4f} | val AUC {auc:.4f}")
+                        dt = time.time() - t0
+                        print(f"[HEAD ep{ep}] train_loss {train_loss:.4f} | {dt:.1f}s")
 
             # Tail
             freeze_all(raw_model)
@@ -500,6 +517,7 @@ class Trainer:
             posw_tail = self._posw(dtype=torch.float32, value=float(tail_pos_weight))
 
             for ep in range(1, int(tail_epochs) + 1):
+                t0 = time.time()
                 self._set_loader_epoch(train_loader, seed + 300 + ep)
                 model.train()
 
@@ -521,6 +539,9 @@ class Trainer:
                         if not torch.isfinite(loss):
                             raise RuntimeError(f"Non-finite loss at tail epoch {ep} iter {b}: {loss.item()}")
 
+                        if verbose == 1 and is_main_process():
+                            print(f"[TAIL ep{ep} iter {b}] loss {loss.item():.4f}")
+
                     opt.zero_grad(set_to_none=True)
                     scaler.scale(loss).backward()
                     scaler.unscale_(opt)
@@ -540,19 +561,24 @@ class Trainer:
                 train_loss = float((loss_sum_t / seen_t.clamp_min(1)).item())
 
                 if verbose >= 2 and is_main_process():
-                    if ema is not None and ema_eval:
-                        ema.apply_to(raw_model)
-                        try:
+                    if ep == int(tail_epochs):
+                        if ema is not None and ema_eval:
+                            ema.apply_to(raw_model)
+                            try:
+                                auc = masked_pixel_auc(
+                                    model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
+                                )
+                            finally:
+                                ema.restore(raw_model)
+                        else:
                             auc = masked_pixel_auc(
                                 model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
                             )
-                        finally:
-                            ema.restore(raw_model)
+                        dt = time.time() - t0
+                        print(f"[TAIL ep{ep}] train_loss {train_loss:.4f} | val AUC {auc:.4f} | {dt:.1f}s")
                     else:
-                        auc = masked_pixel_auc(
-                            model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
-                        )
-                    print(f"[TAIL ep{ep}] train_loss {train_loss:.4f} | val AUC {auc:.4f}")
+                        dt = time.time() - t0
+                        print(f"[TAIL ep{ep}] train_loss {train_loss:.4f} | {dt:.1f}s")
 
         # -------------------------
         # Long training
@@ -565,6 +591,7 @@ class Trainer:
         }
 
         for ep in range(int(start_epoch), int(max_epochs) + 1):
+            t0 = time.time()
             self._set_loader_epoch(train_loader, seed + 1000 + ep)
 
             # schedule freeze/unfreeze
@@ -601,7 +628,6 @@ class Trainer:
             assert long_sched is not None
 
             model.train()
-            t0 = time.time()
 
             lam = ramp_lambda(
                 ep,
@@ -639,6 +665,9 @@ class Trainer:
 
                     if not torch.isfinite(loss):
                         raise RuntimeError(f"Non-finite loss at long epoch {ep} iter {i}: {loss.item()}")
+
+                    if verbose == 1 and is_main_process():
+                        print(f"[LONG ep{ep} iter {i}] loss {loss.item():.4f} | lam {lam:.3f}")
 
                 long_opt.zero_grad(set_to_none=True)
                 scaler.scale(loss).backward()

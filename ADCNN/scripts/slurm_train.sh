@@ -54,7 +54,7 @@ export CUDA_LAUNCH_BLOCKING=0
 
 cd "ADCNN"
 
-torchrun \
+PYTHONUNBUFFERED=1 torchrun \
   --standalone \
   --nnodes=1 \
   --nproc_per_node="${NGPU}" \
