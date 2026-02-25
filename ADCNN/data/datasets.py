@@ -2,21 +2,41 @@ import math, h5py, numpy as np, torch
 from torch.utils.data import Dataset
 
 def robust_stats_mad(arr: np.ndarray) -> tuple[np.float32, np.float32]:
-    med = np.median(arr); mad = np.median(np.abs(arr - med))
+    med = np.median(arr)
+    # Protect against NaN median (e.g., all-NaN input)
+    if not np.isfinite(med):
+        med = 0.0
+    mad = np.median(np.abs(arr - med))
     sigma = 1.4826 * (mad + 1e-12)
-    return np.float32(med), np.float32(1.0 if not np.isfinite(sigma) or sigma <= 0 else sigma)
+    # Protect against non-finite or zero sigma
+    if not np.isfinite(sigma) or sigma <= 0:
+        sigma = 1.0
+    return np.float32(med), np.float32(sigma)
 
 class H5TiledDataset(Dataset):
     """Stream tiles from (N,H,W) images; per-image robust norm, k-sigma clip, pad edges."""
-    def __init__(self, h5_path, tile=128, k_sigma=5.0, crop_for_stats=512):
+    def __init__(self, h5_path, tile=128, k_sigma=5.0, crop_for_stats=512, precompute_stats=True):
         self.h5_path, self.tile, self.k_sigma, self.crop_for_stats = h5_path, int(tile), float(k_sigma), int(crop_for_stats)
         self._h5 = self._x = self._y = None
         self._stats_cache = {}
+        self.precompute_stats = bool(precompute_stats)
+
         with h5py.File(self.h5_path, "r") as f:
             self.N, self.H, self.W = f["images"].shape
             assert f["masks"].shape == (self.N, self.H, self.W)
+
         Hb = math.ceil(self.H/self.tile); Wb = math.ceil(self.W/self.tile)
         self.indices = [(i, r, c) for i in range(self.N) for r in range(Hb) for c in range(Wb)]
+
+        # Optionally precompute stats at init time for all panels
+        if self.precompute_stats and self.N <= 2000:  # Only if reasonable number of panels
+            self._precompute_all_stats()
+
+    def _precompute_all_stats(self):
+        """Precompute statistics for all panels to avoid per-tile branching."""
+        self._ensure()
+        for i in range(self.N):
+            _ = self._image_stats(i)  # Populate cache
 
     def _ensure(self):
         if self._h5 is None:
