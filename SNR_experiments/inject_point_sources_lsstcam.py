@@ -501,6 +501,20 @@ def worker(args):
         tb = traceback.format_exc()
         return ("err", idx, dataId, tb)
 
+import random
+
+def reservoir_sample(iterable, k: int, seed: int = 123):
+    """Keep a uniform random sample of size k from an iterable, without materializing it."""
+    rng = random.Random(int(seed))
+    sample = []
+    for i, item in enumerate(iterable, 1):
+        if i <= k:
+            sample.append(item)
+        else:
+            j = rng.randrange(i)
+            if j < k:
+                sample[j] = item
+    return sample
 
 def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitude, beta, where, parallel=4,
                            random_subset=0, train_test_split=0, seed=123, chunks=None, test_only=False, bad_visits_file=None, mag_mode="psf_mag",
@@ -509,9 +523,34 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
     h5train_path = os.path.join(save_path, "train.h5")
     h5test_path = os.path.join(save_path, "test.h5")
 
-    refs = list(set(butler.registry.queryDatasets("preliminary_visit_image", where=where, instrument="LSSTCam", findFirst=True)))
-    refs = sorted(refs, key=lambda r: str(r.dataId["visit"]*1000+r.dataId["detector"]))
-    print ("Found datasets:", len(refs))
+    good_iter = butler.registry.queryDatasets(
+        "single_visit_star_footprints",
+        instrument="LSSTCam",
+        where=where,
+        collections=coll,
+        findFirst=True,
+    )
+
+    k = int(random_subset) if int(random_subset) > 0 else None
+
+    if k is None:
+        good_sample = list(good_iter)
+    else:
+        good_sample = reservoir_sample(good_iter, k=k, seed=seed)
+    refs = []
+    for r in good_sample:
+        pi = butler.registry.findDataset(
+            "preliminary_visit_image",
+            dataId=r.dataId,
+            collections=coll,
+        )
+        if pi is not None:
+            refs.append(pi)
+
+    # Stable order (optional)
+    refs = sorted(refs, key=lambda r: (int(r.dataId["visit"]), int(r.dataId["detector"])))
+    print("Selected datasets:", len(refs))
+
     if bad_visits_file is not None:
         bad_df = pd.read_csv(bad_visits_file)
         bad_set = set(zip(bad_df["visit"].astype(int), bad_df["detector"].astype(int)))
