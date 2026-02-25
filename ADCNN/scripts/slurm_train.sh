@@ -1,6 +1,5 @@
 #!/bin/bash
 #SBATCH --job-name=ADCNN
-#SBATCH --mail-type=END,FAIL,REQUEUE
 #SBATCH --account kipac:kipac
 #SBATCH --partition ada
 #SBATCH --nodes=1
