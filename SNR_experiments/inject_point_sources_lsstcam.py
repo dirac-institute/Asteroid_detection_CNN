@@ -440,7 +440,10 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
         butler = Butler(repo, collections=coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
         calexp = butler.get("preliminary_visit_image", dataId=ref.dataId)
-        pre_injection_Src = butler.get("single_visit_star_footprints", dataId=ref.dataId)
+        try:
+            pre_injection_Src = butler.get("single_visit_star_footprints", dataId=ref.dataId)
+        except Exception:
+            calexp, pre_injection_Src = characterizeCalibrate(calexp)
         forbidden = build_forbidden_mask(calexp, pre_injection_Src, dimensions)
         injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode, psf_template=psf_template, forbidden_mask=forbidden)
         injected_calexp, post_injection_Src = characterizeCalibrate(inject(calexp, injection_catalog))
@@ -523,13 +526,13 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                                   replace=False) if 0 < train_test_split < 1 else []
     if test_only:
         total_tasks = len(test_index)
-    dims = butler.get("preliminary_visit_image.dimensions", dataId=refs[0].dataId)
     manager = Manager()
     lock = manager.Lock()
     count_train = 0
     count_test = 0
     tasks = []
     for i, ref in enumerate(refs):
+        dims = butler.get("preliminary_visit_image.dimensions", dataId=refs[i].dataId)
         if i in test_index:
             h5path = h5test_path
             csvpath = os.path.join(save_path, "test.csv")
