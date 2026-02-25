@@ -60,4 +60,4 @@ PYTHONUNBUFFERED=1 torchrun \
   -m main \
   --train-h5 "${DATA_DIR}/train.h5" \
   --epochs 50 \
-  --batch 64
+  --batch 256

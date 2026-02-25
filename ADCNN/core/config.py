@@ -85,7 +85,7 @@ class TrainConfig:
     ft_gamma: float = 1.3
 
     # Validation AUC control
-    auc_batches: int = 12
+    auc_batches: int = 0
     auc_bins: int = 256
 
     # EMA defaults (can be overridden via CLI)

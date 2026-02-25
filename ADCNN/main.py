@@ -331,6 +331,10 @@ class DistributedMixtureSampler(Sampler[int]):
 def run(cfg: Config, args: argparse.Namespace):
     is_dist, rank, local_rank, world_size = init_distributed()
 
+    global_bs = cfg.loader.batch_size
+
+    per_gpu_batch_size = global_bs // world_size
+
     # silence non-main prints
     if not is_main_process():
         builtins.print = lambda *a, **k: None
@@ -461,7 +465,7 @@ def run(cfg: Config, args: argparse.Namespace):
 
     train_loader = DataLoader(
         train_ds,
-        batch_size=cfg.loader.batch_size,
+        batch_size=per_gpu_batch_size,
         shuffle=False,
         sampler=train_sampler,
         num_workers=cfg.loader.num_workers,
@@ -472,7 +476,7 @@ def run(cfg: Config, args: argparse.Namespace):
     )
     val_loader = DataLoader(
         val_ds,
-        batch_size=cfg.loader.batch_size,
+        batch_size=per_gpu_batch_size,
         shuffle=False,
         sampler=val_sampler,
         num_workers=cfg.loader.num_workers,
