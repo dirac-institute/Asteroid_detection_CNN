@@ -58,10 +58,16 @@ def masked_bce_with_logits(
     pos_weight_t must already be a tensor on correct device/dtype.
     Recommended: keep pos_weight_t float32 on device (no per-batch .to()).
     """
+    logits_f = logits.float()
     t = targets.float().clamp(0.0, 1.0)
-    loss_map = F.binary_cross_entropy_with_logits(logits, t, pos_weight=pos_weight_t, reduction="none")
-    num = (loss_map * valid).sum()
-    den = valid.sum().clamp_min(1.0)
+    v = valid.float()
+
+    pw = pos_weight_t.float()
+    loss_map = F.binary_cross_entropy_with_logits(
+        logits_f, t, pos_weight=pw, reduction="none"
+    )
+    num = (loss_map * v).sum()
+    den = v.sum().clamp_min(1.0)
     return num / den
 
 
