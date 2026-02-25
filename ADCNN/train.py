@@ -403,7 +403,7 @@ class Trainer:
                 train_loss = float((loss_sum_t / seen_t.clamp_min(1)).item())
 
                 auc = None
-                if verbose >= 2 and ep == int(head_epochs):
+                if verbose >= 2 and ep == int(warmup_epochs):
                     if ema is not None and ema_eval:
                         ema.apply_to(raw_model)
                         try:
@@ -572,7 +572,7 @@ class Trainer:
                 train_loss = float((loss_sum_t / seen_t.clamp_min(1)).item())
 
                 auc = None
-                if verbose >= 2 and ep == int(head_epochs):
+                if verbose >= 2 and ep == int(tail_epochs):
                     # IMPORTANT: must be called on ALL ranks because it does all_reduce internally
                     if ema is not None and ema_eval:
                         ema.apply_to(raw_model)
