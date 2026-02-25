@@ -502,9 +502,17 @@ def worker(args):
         return ("err", idx, dataId, tb)
 
 import random
+from typing import List, Sequence
+
+from lsst.daf.butler import Butler
+
+
+def _key_from_dataId(d):
+    return (int(d["visit"]), int(d["detector"]))
+
 
 def reservoir_sample(iterable, k: int, seed: int = 123):
-    """Keep a uniform random sample of size k from an iterable, without materializing it."""
+    """Uniform sample of size k from an iterable without materializing it."""
     rng = random.Random(int(seed))
     sample = []
     for i, item in enumerate(iterable, 1):
@@ -516,6 +524,91 @@ def reservoir_sample(iterable, k: int, seed: int = 123):
                 sample[j] = item
     return sample
 
+
+def select_good_refs_random_check(
+    *,
+    repo: str,
+    collections: str | Sequence[str],
+    where: str,
+    instrument: str = "LSSTCam",
+    k: int = 200,
+    seed: int = 123,
+    pool_size: int = 5000,
+    max_checks: int = 200000,
+    verbose: bool = True,
+) -> List:
+    """
+    Deterministically:
+      1) build a random pool of `pool_size` preliminary_visit_image refs (reservoir sample)
+      2) shuffle the pool with `seed`
+      3) iterate, accept refs that satisfy:
+           - single_visit_star_footprints exists
+           - preliminary_visit_image.photoCalib component loads and is not None
+      4) stop when `k` good refs collected or `max_checks` reached
+
+    Notes:
+      - Fully deterministic given (repo, collections, where, instrument, seed, pool_size, max_checks)
+      - Serial IO (no parallelism)
+    """
+    b = Butler(repo, collections=collections)
+
+    # Step 1: sample from all preliminary_visit_image refs (no full materialization)
+    all_pvi_iter = b.registry.queryDatasets(
+        "preliminary_visit_image",
+        instrument=instrument,
+        where=where,
+        collections=collections,
+        findFirst=True,
+    )
+    pool = reservoir_sample(all_pvi_iter, k=int(pool_size), seed=int(seed))
+
+    # Step 2: deterministic shuffle order
+    rng = random.Random(int(seed))
+    rng.shuffle(pool)
+
+    good = []
+    seen = set()
+
+    checks = 0
+    for pvi in pool:
+        if len(good) >= int(k) or checks >= int(max_checks):
+            break
+        checks += 1
+
+        key = _key_from_dataId(pvi.dataId)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        # A) require star footprints to exist (fast registry check)
+        svsf = b.registry.findDataset(
+            "single_visit_star_footprints",
+            dataId=pvi.dataId,
+            collections=collections,
+        )
+        if svsf is None:
+            continue
+
+        # B) require photoCalib to load and not be None
+        try:
+            pc = b.get(pvi.makeComponentRef("photoCalib"))
+        except Exception:
+            continue
+        if pc is None:
+            continue
+
+        good.append(pvi)
+
+        if verbose and (len(good) % 25 == 0 or len(good) == k):
+            print(f"good={len(good)}/{k} checks={checks}", flush=True)
+
+    good = sorted(good, key=lambda r: _key_from_dataId(r.dataId))
+
+    if verbose:
+        print(f"Selected good refs: {len(good)} (requested k={k}), from pool_size={pool_size}, checks={checks}", flush=True)
+
+    return good
+
 def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitude, beta, where, parallel=4,
                            random_subset=0, train_test_split=0, seed=123, chunks=None, test_only=False, bad_visits_file=None, mag_mode="psf_mag",
                            psf_template="image"):
@@ -523,41 +616,18 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
     h5train_path = os.path.join(save_path, "train.h5")
     h5test_path = os.path.join(save_path, "test.h5")
 
-    good_iter = butler.registry.queryDatasets(
-        "single_visit_star_footprints",
-        instrument="LSSTCam",
-        where=where,
+    refs = select_good_refs_random_check(
+        repo=repo,
         collections=coll,
-        findFirst=True,
+        where=where,
+        instrument="LSSTCam",
+        k=int(random_subset) if int(random_subset) > 0 else 200,
+        seed=seed,
+        pool_size=5000,  # increase if acceptance rate is low
+        max_checks=200000,  # safety cap
     )
-
-    k = int(random_subset) if int(random_subset) > 0 else None
-
-    if k is None:
-        good_sample = list(good_iter)
-    else:
-        good_sample = reservoir_sample(good_iter, k=k, seed=seed)
-    refs = []
-    for r in good_sample:
-        pi = butler.registry.findDataset(
-            "preliminary_visit_image",
-            dataId=r.dataId,
-            collections=coll,
-        )
-        if pi is not None:
-            refs.append(pi)
-
-    # Stable order (optional)
-    refs = sorted(refs, key=lambda r: (int(r.dataId["visit"]), int(r.dataId["detector"])))
     print("Selected datasets:", len(refs))
 
-    if bad_visits_file is not None:
-        bad_df = pd.read_csv(bad_visits_file)
-        bad_set = set(zip(bad_df["visit"].astype(int), bad_df["detector"].astype(int)))
-        refs = [r for r in refs if (int(r.dataId["visit"]), int(r.dataId["detector"])) not in bad_set]
-    if random_subset > 0:
-        rng_subset = np.random.default_rng(seed)
-        refs = list(rng_subset.choice(refs, random_subset, replace=False))
     global total_tasks
     total_tasks = len(refs)  # Needed for progress display
     rng_split = np.random.default_rng(seed + 1)
