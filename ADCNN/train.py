@@ -379,14 +379,16 @@ class Trainer:
                     rb = rb.to(self.device, non_blocking=True)
 
                     with amp.autocast("cuda", enabled=self.amp, dtype=torch.bfloat16):
+                        logits = model(xb)
+                        yb_r = resize_masks_to(logits, yb)
+                        rb_r = resize_masks_to(logits, rb)
+
                         # NaN check 0/3
                         if is_main_process() and ep == 1 and b == 1:
                             uniq = torch.unique(rb_r.detach().to(torch.int32))
                             print("rb unique sample:", uniq[:20].cpu().tolist(), "nuniq", uniq.numel())
 
-                        logits = model(xb)
-                        yb_r = resize_masks_to(logits, yb)
-                        rb_r = resize_masks_to(logits, rb)
+
                         valid = valid_mask_from_real(rb_r)
                         loss = masked_bce_with_logits(logits, yb_r, valid, pos_weight_t=posw_warm)
                         if not torch.isfinite(loss):
