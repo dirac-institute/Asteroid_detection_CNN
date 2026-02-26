@@ -687,6 +687,17 @@ class Trainer:
                         loss = (1.0 - float(lam)) * loss_bce + float(lam) * loss_ft
 
                     if not torch.isfinite(loss):
+                        # dump batch stats
+                        xb_f = xb.float()
+                        logits_f = logits.float()
+                        print("xb:", xb_f.min().item(), xb_f.max().item(), torch.isnan(xb_f).any().item(),
+                              torch.isinf(xb_f).any().item())
+                        print("logits:", logits_f.min().item(), logits_f.max().item(),
+                              torch.isnan(logits_f).any().item(), torch.isinf(logits_f).any().item())
+                        print("yb:", yb.float().min().item(), yb.float().max().item(),
+                              torch.isnan(yb.float()).any().item())
+                        print("rb:", rb.float().min().item(), rb.float().max().item(),
+                              torch.isnan(rb.float()).any().item())
                         raise RuntimeError(f"Non-finite loss at long epoch {ep} iter {i}: {loss.item()}")
 
                     if verbose >= 3 and is_main_process():

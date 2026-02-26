@@ -170,9 +170,7 @@ def masked_pixel_auc(
     # Broadcast result
     if dist.is_available() and dist.is_initialized():
         dist.all_reduce(out, op=dist.ReduceOp.SUM)
-
-    auc = float((out / float(world)).item())
-    return auc
+    return float(out.item())
 
 
 # =============================================================================
