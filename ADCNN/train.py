@@ -378,7 +378,12 @@ class Trainer:
                     yb = yb.to(self.device, non_blocking=True)
                     rb = rb.to(self.device, non_blocking=True)
 
-                    with amp.autocast("cuda", enabled=self.amp):
+                    with amp.autocast("cuda", enabled=self.amp, dtype=torch.bfloat16):
+                        # NaN check 0/3
+                        if is_main_process() and ep == 1 and b == 1:
+                            uniq = torch.unique(rb_r.detach().to(torch.int32))
+                            print("rb unique sample:", uniq[:20].cpu().tolist(), "nuniq", uniq.numel())
+
                         logits = model(xb)
                         yb_r = resize_masks_to(logits, yb)
                         rb_r = resize_masks_to(logits, rb)
@@ -433,9 +438,7 @@ class Trainer:
                     else:
                         print(f"[WARMUP ep{ep}] train_loss {train_loss:.4f} | {dt:.1f}s")
 
-                if is_main_process() and i == 0:
-                    uniq = torch.unique(rb_r.detach().to(torch.int32))
-                    print("rb unique sample:", uniq[:20].cpu().tolist(), "nuniq", uniq.numel())
+
 
             # Head
             freeze_all(raw_model)
@@ -466,7 +469,7 @@ class Trainer:
                     yb = yb.to(self.device, non_blocking=True)
                     rb = rb.to(self.device, non_blocking=True)
 
-                    with amp.autocast("cuda", enabled=self.amp):
+                    with amp.autocast("cuda", enabled=self.amp, dtype=torch.bfloat16):
                         logits = model(xb)
                         yb_r = resize_masks_to(logits, yb)
                         rb_r = resize_masks_to(logits, rb)
@@ -551,7 +554,7 @@ class Trainer:
                     yb = yb.to(self.device, non_blocking=True)
                     rb = rb.to(self.device, non_blocking=True)
 
-                    with amp.autocast("cuda", enabled=self.amp):
+                    with amp.autocast("cuda", enabled=self.amp, dtype=torch.bfloat16):
                         logits = model(xb)
                         yb_r = resize_masks_to(logits, yb)
                         rb_r = resize_masks_to(logits, rb)
@@ -680,7 +683,7 @@ class Trainer:
                     if not torch.isfinite(p).all():
                         raise RuntimeError(f"Non-finite PARAM before forward at ep{ep} it{i}: {name}")
 
-                with amp.autocast("cuda", enabled=self.amp):
+                with amp.autocast("cuda", enabled=self.amp, dtype=torch.bfloat16):
                     logits = model(xb)
                     yb_r = resize_masks_to(logits, yb)
                     rb_r = resize_masks_to(logits, rb)
