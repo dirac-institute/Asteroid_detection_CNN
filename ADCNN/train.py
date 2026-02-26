@@ -433,6 +433,10 @@ class Trainer:
                     else:
                         print(f"[WARMUP ep{ep}] train_loss {train_loss:.4f} | {dt:.1f}s")
 
+                if is_main_process() and i == 0:
+                    uniq = torch.unique(rb_r.detach().to(torch.int32))
+                    print("rb unique sample:", uniq[:20].cpu().tolist(), "nuniq", uniq.numel())
+
             # Head
             freeze_all(raw_model)
             if hasattr(raw_model, "head"):
@@ -671,6 +675,11 @@ class Trainer:
                 yb = yb.to(self.device, non_blocking=True)
                 rb = rb.to(self.device, non_blocking=True)
 
+                # NaN check 1/3
+                for name, p in raw_model.named_parameters():
+                    if not torch.isfinite(p).all():
+                        raise RuntimeError(f"Non-finite PARAM before forward at ep{ep} it{i}: {name}")
+
                 with amp.autocast("cuda", enabled=self.amp):
                     logits = model(xb)
                     yb_r = resize_masks_to(logits, yb)
@@ -706,9 +715,29 @@ class Trainer:
                 long_opt.zero_grad(set_to_none=True)
                 scaler.scale(loss).backward()
                 scaler.unscale_(long_opt)
+
+                # NaN check 2/3
+                bad = None
+                for name, p in raw_model.named_parameters():
+                    if p.grad is not None and not torch.isfinite(p.grad).all():
+                        bad = name
+                        break
+                if bad is not None:
+                    if is_main_process():
+                        print(f"[ep{ep} it{i}] non-finite grad in {bad} -> skipping step")
+                    long_opt.zero_grad(set_to_none=True)
+                    scaler.update()
+                    continue
+
+
                 torch.nn.utils.clip_grad_norm_(raw_model.parameters(), 1.0)
                 scaler.step(long_opt)
                 scaler.update()
+
+                # NaN check 3/3
+                for name, p in raw_model.named_parameters():
+                    if not torch.isfinite(p).all():
+                        raise RuntimeError(f"Non-finite PARAM after step at ep{ep} it{i}: {name}")
 
                 # scheduler step with fractional epoch
                 long_sched.step(ep + i / max(1, len(train_loader)))
