@@ -382,13 +382,6 @@ class Trainer:
                         logits = model(xb)
                         yb_r = resize_masks_to(logits, yb)
                         rb_r = resize_masks_to(logits, rb)
-
-                        # NaN check 0/3
-                        if is_main_process() and ep == 1 and b == 1:
-                            uniq = torch.unique(rb_r.detach().to(torch.int32))
-                            print("rb unique sample:", uniq[:20].cpu().tolist(), "nuniq", uniq.numel())
-
-
                         valid = valid_mask_from_real(rb_r)
                         loss = masked_bce_with_logits(logits, yb_r, valid, pos_weight_t=posw_warm)
                         if not torch.isfinite(loss):
@@ -615,6 +608,7 @@ class Trainer:
         # -------------------------
         # Long training
         # -------------------------
+        nan_checks = False # set True to enable NaN checks (expensive, only for debugging)
         best: Dict[str, Any] = {
             "auc": float(best_auc),
             "ep": int(best_ep),
@@ -681,9 +675,11 @@ class Trainer:
                 rb = rb.to(self.device, non_blocking=True)
 
                 # NaN check 1/3
-                for name, p in raw_model.named_parameters():
-                    if not torch.isfinite(p).all():
-                        raise RuntimeError(f"Non-finite PARAM before forward at ep{ep} it{i}: {name}")
+                if nan_checks:
+                    if i == 2 or (i % 100 == 0):
+                        for name, p in raw_model.named_parameters():
+                            if not torch.isfinite(p).all():
+                                raise RuntimeError(f"Non-finite PARAM before forward at ep{ep} it{i}: {name}")
 
                 with amp.autocast("cuda", enabled=self.amp, dtype=torch.bfloat16):
                     logits = model(xb)
@@ -722,17 +718,19 @@ class Trainer:
                 scaler.unscale_(long_opt)
 
                 # NaN check 2/3
-                bad = None
-                for name, p in raw_model.named_parameters():
-                    if p.grad is not None and not torch.isfinite(p.grad).all():
-                        bad = name
-                        break
-                if bad is not None:
-                    if is_main_process():
-                        print(f"[ep{ep} it{i}] non-finite grad in {bad} -> skipping step")
-                    long_opt.zero_grad(set_to_none=True)
-                    scaler.update()
-                    continue
+                if nan_checks:
+                    if i == 2 or (i % 100 == 0):
+                        bad = None
+                        for name, p in raw_model.named_parameters():
+                            if p.grad is not None and not torch.isfinite(p.grad).all():
+                                bad = name
+                                break
+                        if bad is not None:
+                            if is_main_process():
+                                print(f"[ep{ep} it{i}] non-finite grad in {bad} -> skipping step")
+                            long_opt.zero_grad(set_to_none=True)
+                            scaler.update()
+                            continue
 
 
                 torch.nn.utils.clip_grad_norm_(raw_model.parameters(), 1.0)
@@ -740,9 +738,11 @@ class Trainer:
                 scaler.update()
 
                 # NaN check 3/3
-                for name, p in raw_model.named_parameters():
-                    if not torch.isfinite(p).all():
-                        raise RuntimeError(f"Non-finite PARAM after step at ep{ep} it{i}: {name}")
+                if nan_checks:
+                    if i == 2 or (i % 100 == 0):
+                        for name, p in raw_model.named_parameters():
+                            if not torch.isfinite(p).all():
+                                raise RuntimeError(f"Non-finite PARAM after step at ep{ep} it{i}: {name}")
 
                 # scheduler step with fractional epoch
                 long_sched.step(ep + i / max(1, len(train_loader)))
