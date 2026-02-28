@@ -13,7 +13,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from ADCNN.utils.dist_utils import init_distributed, is_main_process
 from ADCNN.evaluation.metrics import (
     resize_masks_to,
-    masked_pixel_auc,
+    masked_pixel_auc_agg,
     valid_mask_from_real,
 )
 from ADCNN.training.ema import EMAModel
@@ -413,16 +413,15 @@ class Trainer:
                     if ema is not None and ema_eval:
                         ema.apply_to(raw_model)
                         try:
-                            auc = masked_pixel_auc(
-                                model, val_loader, device=self.device,
-                                n_bins=int(auc_bins), max_batches=int(auc_batches)
+                            auc = masked_pixel_auc_agg(
+                                model, val_loader, device=self.device, n_bins=int(auc_bins),
+                                max_batches=int(auc_batches)
                             )
                         finally:
                             ema.restore(raw_model)
                     else:
-                        auc = masked_pixel_auc(
-                            model, val_loader, device=self.device,
-                            n_bins=int(auc_bins), max_batches=int(auc_batches)
+                        auc_eval = masked_pixel_auc_agg(
+                            model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
                         )
 
                 if verbose >= 2 and is_main_process():
@@ -500,16 +499,15 @@ class Trainer:
                     if ema is not None and ema_eval:
                         ema.apply_to(raw_model)
                         try:
-                            auc = masked_pixel_auc(
-                                model, val_loader, device=self.device,
-                                n_bins=int(auc_bins), max_batches=int(auc_batches)
+                            auc = masked_pixel_auc_agg(
+                                model, val_loader, device=self.device, n_bins=int(auc_bins),
+                                max_batches=int(auc_batches)
                             )
                         finally:
                             ema.restore(raw_model)
                     else:
-                        auc = masked_pixel_auc(
-                            model, val_loader, device=self.device,
-                            n_bins=int(auc_bins), max_batches=int(auc_batches)
+                        auc = masked_pixel_auc_agg(
+                            model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
                         )
 
                 if verbose >= 2 and is_main_process():
@@ -585,16 +583,15 @@ class Trainer:
                     if ema is not None and ema_eval:
                         ema.apply_to(raw_model)
                         try:
-                            auc = masked_pixel_auc(
-                                model, val_loader, device=self.device,
-                                n_bins=int(auc_bins), max_batches=int(auc_batches)
+                            auc = masked_pixel_auc_agg(
+                                model, val_loader, device=self.device, n_bins=int(auc_bins),
+                                max_batches=int(auc_batches)
                             )
                         finally:
                             ema.restore(raw_model)
                     else:
-                        auc = masked_pixel_auc(
-                            model, val_loader, device=self.device,
-                            n_bins=int(auc_bins), max_batches=int(auc_batches)
+                        auc = masked_pixel_auc_agg(
+                            model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
                         )
 
                 if verbose >= 2 and is_main_process():
@@ -774,13 +771,13 @@ class Trainer:
                 if ema is not None and ema_eval:
                     ema.apply_to(raw_model)
                     try:
-                        auc_eval = masked_pixel_auc(
+                        auc_eval = masked_pixel_auc_agg(
                             model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
                         )
                     finally:
                         ema.restore(raw_model)
                 else:
-                    auc_eval = masked_pixel_auc(
+                    auc_eval = masked_pixel_auc_agg(
                         model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
                     )
 

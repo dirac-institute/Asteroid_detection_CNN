@@ -86,6 +86,8 @@ def masked_pixel_auc(
 
     Returns:
         AUC score (float)
+
+    DEPRICATED
     """
     model.eval()
     n_bins = int(n_bins)
@@ -172,7 +174,67 @@ def masked_pixel_auc(
         dist.all_reduce(out, op=dist.ReduceOp.SUM)
     return float(out.item())
 
+@torch.no_grad()
+def masked_pixel_auc_agg(model, loader, device, *, n_bins=256, max_batches=120):
+    """
+    Aggregated pixel ROC-AUC via histogram accumulation across many batches.
+    DDP-safe (all_reduce on histograms).
+    Returns NaN if no positives or no negatives were seen overall.
+    """
+    model.eval()
+    hist_pos = torch.zeros(int(n_bins), device=device, dtype=torch.float64)
+    hist_neg = torch.zeros(int(n_bins), device=device, dtype=torch.float64)
 
+    nb = 0
+    for nb, batch in enumerate(loader, 1):
+        xb, yb, rb, *_ = batch  # your loader yields (x, y, real, missed, detected) :contentReference[oaicite:3]{index=3}
+        xb = xb.to(device, non_blocking=True)
+        yb = yb.to(device, non_blocking=True)
+        rb = rb.to(device, non_blocking=True)
+
+        logits = model(xb)
+        # same resizing logic you already use in training
+        yb_r = resize_masks_to(logits, yb)          # [B,1,H,W] in {0,1}
+        rb_r = resize_masks_to(logits, rb)          # [B,1,H,W] in {0,1}
+        valid = valid_mask_from_real(rb_r)          # [B,1,H,W] in {0,1}
+
+        probs = torch.sigmoid(logits).detach().float()
+        t = yb_r.detach().float()
+        v = valid.detach().float()
+
+        m = (v > 0.5).reshape(-1)
+        if not bool(m.any()):
+            if max_batches and nb >= int(max_batches): break
+            continue
+
+        p = probs.reshape(-1)[m]
+        t = t.reshape(-1)[m]
+
+        idx = torch.clamp((p * int(n_bins)).to(torch.int64), 0, int(n_bins) - 1)
+        hist_pos += torch.bincount(idx, weights=t.to(torch.float64), minlength=int(n_bins)).to(torch.float64)
+        hist_neg += torch.bincount(idx, weights=(1.0 - t).to(torch.float64), minlength=int(n_bins)).to(torch.float64)
+
+        if max_batches and nb >= int(max_batches):
+            break
+
+    # DDP: sum histograms across ranks
+    if dist.is_available() and dist.is_initialized():
+        dist.all_reduce(hist_pos, op=dist.ReduceOp.SUM)
+        dist.all_reduce(hist_neg, op=dist.ReduceOp.SUM)
+
+    P = float(hist_pos.sum().item())
+    N = float(hist_neg.sum().item())
+    if P <= 0.0 or N <= 0.0:
+        return float("nan")
+
+    tp = torch.cumsum(torch.flip(hist_pos, dims=[0]), dim=0)
+    fp = torch.cumsum(torch.flip(hist_neg, dims=[0]), dim=0)
+    tpr = tp / max(P, 1e-12)
+    fpr = fp / max(N, 1e-12)
+
+    # trapezoid integral over FPR
+    auc = torch.trapz(tpr, fpr).item()
+    return float(auc)
 # =============================================================================
 # Classification Metrics (NumPy-based)
 # =============================================================================
