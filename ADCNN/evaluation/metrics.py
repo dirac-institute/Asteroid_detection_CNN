@@ -175,28 +175,32 @@ def masked_pixel_auc(
     return float(out.item())
 
 @torch.no_grad()
-def masked_pixel_auc_agg(model, loader, device, *, n_bins=256, max_batches=120):
+def masked_pixel_auc_agg(model, loader, device, *, n_bins=256, max_batches=0):
     """
     Aggregated pixel ROC-AUC via histogram accumulation across many batches.
     DDP-safe (all_reduce on histograms).
+    max_batches: Max batches to evaluate (0 = all)
     Returns NaN if no positives or no negatives were seen overall.
     """
     model.eval()
+
+    mb = int(max_batches) if max_batches is not None else 0  # None -> all
+    use_limit = (mb > 0)
+
     hist_pos = torch.zeros(int(n_bins), device=device, dtype=torch.float64)
     hist_neg = torch.zeros(int(n_bins), device=device, dtype=torch.float64)
 
     nb = 0
     for nb, batch in enumerate(loader, 1):
-        xb, yb, rb, *_ = batch  # your loader yields (x, y, real, missed, detected) :contentReference[oaicite:3]{index=3}
+        xb, yb, rb, *_ = batch
         xb = xb.to(device, non_blocking=True)
         yb = yb.to(device, non_blocking=True)
         rb = rb.to(device, non_blocking=True)
 
         logits = model(xb)
-        # same resizing logic you already use in training
-        yb_r = resize_masks_to(logits, yb)          # [B,1,H,W] in {0,1}
-        rb_r = resize_masks_to(logits, rb)          # [B,1,H,W] in {0,1}
-        valid = valid_mask_from_real(rb_r)          # [B,1,H,W] in {0,1}
+        yb_r = resize_masks_to(logits, yb)
+        rb_r = resize_masks_to(logits, rb)
+        valid = valid_mask_from_real(rb_r)
 
         probs = torch.sigmoid(logits).detach().float()
         t = yb_r.detach().float()
@@ -204,7 +208,8 @@ def masked_pixel_auc_agg(model, loader, device, *, n_bins=256, max_batches=120):
 
         m = (v > 0.5).reshape(-1)
         if not bool(m.any()):
-            if max_batches and nb >= int(max_batches): break
+            if use_limit and nb >= mb:
+                break
             continue
 
         p = probs.reshape(-1)[m]
@@ -214,10 +219,9 @@ def masked_pixel_auc_agg(model, loader, device, *, n_bins=256, max_batches=120):
         hist_pos += torch.bincount(idx, weights=t.to(torch.float64), minlength=int(n_bins)).to(torch.float64)
         hist_neg += torch.bincount(idx, weights=(1.0 - t).to(torch.float64), minlength=int(n_bins)).to(torch.float64)
 
-        if max_batches and nb >= int(max_batches):
+        if use_limit and nb >= mb:
             break
 
-    # DDP: sum histograms across ranks
     if dist.is_available() and dist.is_initialized():
         dist.all_reduce(hist_pos, op=dist.ReduceOp.SUM)
         dist.all_reduce(hist_neg, op=dist.ReduceOp.SUM)
@@ -232,9 +236,9 @@ def masked_pixel_auc_agg(model, loader, device, *, n_bins=256, max_batches=120):
     tpr = tp / max(P, 1e-12)
     fpr = fp / max(N, 1e-12)
 
-    # trapezoid integral over FPR
-    auc = torch.trapz(tpr, fpr).item()
-    return float(auc)
+    return float(torch.trapz(tpr, fpr).item())
+
+
 # =============================================================================
 # Classification Metrics (NumPy-based)
 # =============================================================================

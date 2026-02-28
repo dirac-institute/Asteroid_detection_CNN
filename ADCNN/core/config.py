@@ -89,9 +89,9 @@ class TrainConfig:
     auc_bins: int = 256
 
     # EMA defaults (can be overridden via CLI)
-    use_ema: bool = True
+    use_ema: bool = False
     ema_decay: float = 0.999
-    ema_eval: bool = True
+    ema_eval: bool = False
 
     # Checkpoints
     save_best_to: str = "../checkpoints/ckpt_best.pt"
