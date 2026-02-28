@@ -87,7 +87,6 @@ run_test () {
   python3 -m ADCNN.debugging "${COMMON_ARGS[@]}" "$@"
 }
 
-cd "ADCNN"
 export PYTHONPATH=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN:$PYTHONPATH
 
 # -----------------------------
