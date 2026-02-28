@@ -49,7 +49,7 @@ from ADCNN.utils.helpers import set_seed, split_indices, worker_init_fn
 from ADCNN.data.datasets import H5TiledDataset
 
 # In your refactor, these live in repo-root main.py (not in ADCNN.data.datasets)
-from main import TileSubsetWithRealAndFlags, filter_tiles_by_panels, build_tile_mask_from_csv
+from ADCNN.main import TileSubsetWithRealAndFlags, filter_tiles_by_panels, build_tile_mask_from_csv
 
 from ADCNN.evaluation.metrics import (
     resize_masks_to,
