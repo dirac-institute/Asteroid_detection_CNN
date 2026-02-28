@@ -82,9 +82,9 @@ run_test () {
   echo
   echo "============================================================"
   echo "TEST: ${name}"
-  echo "CMD:  python -m debugging ${COMMON_ARGS[*]} $*"
+  echo "CMD:  python3 -m debugging.py ${COMMON_ARGS[*]} $*"
   echo "============================================================"
-  python -m debugging "${COMMON_ARGS[@]}" "$@"
+  python3 -m debugging.py "${COMMON_ARGS[@]}" "$@"
 }
 #cd "ADCNN"
 # -----------------------------
