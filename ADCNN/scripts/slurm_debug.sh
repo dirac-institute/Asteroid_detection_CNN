@@ -1,7 +1,8 @@
 #!/bin/bash
 #SBATCH -J adcnn_dbg
-#SBATCH -A rubin
-#SBATCH -p ampere
+#SBATCH --account kipac:kipac
+#SBATCH --partition ada
+#SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
