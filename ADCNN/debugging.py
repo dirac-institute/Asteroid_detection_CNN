@@ -493,8 +493,8 @@ def phase_val_probe(
         logits = model(x)
         probs = torch.sigmoid(logits)
 
-        y_r = resize_masks_to(probs, y).float().clamp(0.0, 1.0)
-        real_r = resize_masks_to(probs, real)
+        y_r = resize_masks_to(y, probs).float().clamp(0.0, 1.0)
+        real_r = resize_masks_to(real, probs)
         valid = valid_mask_from_real(real_r)
 
         pos, neg, raw_pos, raw_neg = _mask_counts(y_r, valid)
@@ -580,8 +580,8 @@ def phase_overfit_one_batch(
 
         with torch.cuda.amp.autocast(enabled=amp_enabled):
             logits = model(x)
-            y_r = resize_masks_to(logits, y).float().clamp(0.0, 1.0)
-            real_r = resize_masks_to(logits, real)
+            y_r = resize_masks_to(y, logits).float().clamp(0.0, 1.0)
+            real_r = resize_masks_to(real, logits)
             valid = valid_mask_from_real(real_r)
             loss = masked_bce_compat(masked_bce_with_logits, logits, y_r, valid, float(pos_weight))
 
@@ -593,8 +593,8 @@ def phase_overfit_one_batch(
             with torch.no_grad():
                 logits = model(x)
                 probs = torch.sigmoid(logits)
-                y_r = resize_masks_to(probs, y).float().clamp(0.0, 1.0)
-                real_r = resize_masks_to(probs, real)
+                y_r = resize_masks_to(y, probs).float().clamp(0.0, 1.0)
+                real_r = resize_masks_to(real, probs)
                 valid = valid_mask_from_real(real_r)
 
                 pos, neg, raw_pos, raw_neg = _mask_counts(y_r, valid)
