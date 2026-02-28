@@ -88,6 +88,7 @@ run_test () {
 }
 
 cd "ADCNN"
+export PYTHONPATH=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN:$PYTHONPATH
 
 # -----------------------------
 # 4 tests
