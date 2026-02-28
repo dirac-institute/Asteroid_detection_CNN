@@ -7,8 +7,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH -t 02:00:00
-#SBATCH -o /sdf/home/m/mrakovci/logs/adcnn_debug_%j.out
-#SBATCH -e /sdf/home/m/mrakovci/logs/adcnn_debug_%j.err
+#SBATCH -o /sdf/home/m/mrakovci/logs/adcnn_debug.out
 
 set -euo pipefail
 
@@ -83,11 +82,11 @@ run_test () {
   echo
   echo "============================================================"
   echo "TEST: ${name}"
-  echo "CMD:  python -m ADCNN.debugging ${COMMON_ARGS[*]} $*"
+  echo "CMD:  python -m debugging ${COMMON_ARGS[*]} $*"
   echo "============================================================"
-  python -m ADCNN.debugging "${COMMON_ARGS[@]}" "$@"
+  python -m debugging "${COMMON_ARGS[@]}" "$@"
 }
-
+cd "ADCNN"
 # -----------------------------
 # 4 tests
 # -----------------------------
