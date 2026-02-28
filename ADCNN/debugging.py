@@ -211,7 +211,7 @@ def _polarity_auc_probe(
       B) valid = real  (inversion test)
     """
     y_r = y
-    real_r = resize_masks_to(real, y_r)
+    real_r = resize_masks_to(y_r, real)
 
     # A) expected: valid = ~real
     valid_a = valid_mask_from_real(real_r)
@@ -417,7 +417,7 @@ def phase_dataset_stats(
             real = real.to(device, non_blocking=True)
 
             y_r = y
-            real_r = resize_masks_to(real, y_r)
+            real_r = resize_masks_to(y_r, real)
             valid = valid_mask_from_real(real_r)
 
             pos, neg, raw_pos, raw_neg = _mask_counts(y_r, valid)
@@ -493,8 +493,8 @@ def phase_val_probe(
         logits = model(x)
         probs = torch.sigmoid(logits)
 
-        y_r = resize_masks_to(y, probs).float().clamp(0.0, 1.0)
-        real_r = resize_masks_to(real, probs)
+        y_r = resize_masks_to(probs, y).float().clamp(0.0, 1.0)
+        real_r = resize_masks_to(probs, real)
         valid = valid_mask_from_real(real_r)
 
         pos, neg, raw_pos, raw_neg = _mask_counts(y_r, valid)
@@ -580,8 +580,8 @@ def phase_overfit_one_batch(
 
         with torch.cuda.amp.autocast(enabled=amp_enabled):
             logits = model(x)
-            y_r = resize_masks_to(y, logits).float().clamp(0.0, 1.0)
-            real_r = resize_masks_to(real, logits)
+            y_r = resize_masks_to(logits, y).float().clamp(0.0, 1.0)
+            real_r = resize_masks_to(logits, real)
             valid = valid_mask_from_real(real_r)
             loss = masked_bce_compat(masked_bce_with_logits, logits, y_r, valid, float(pos_weight))
 
@@ -593,8 +593,8 @@ def phase_overfit_one_batch(
             with torch.no_grad():
                 logits = model(x)
                 probs = torch.sigmoid(logits)
-                y_r = resize_masks_to(y, probs).float().clamp(0.0, 1.0)
-                real_r = resize_masks_to(real, probs)
+                y_r = resize_masks_to(probs, y).float().clamp(0.0, 1.0)
+                real_r = resize_masks_to(probs, real)
                 valid = valid_mask_from_real(real_r)
 
                 pos, neg, raw_pos, raw_neg = _mask_counts(y_r, valid)
