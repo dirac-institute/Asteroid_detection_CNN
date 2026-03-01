@@ -421,7 +421,7 @@ class Trainer:
                         finally:
                             ema.restore(raw_model)
                     else:
-                        auc_eval = masked_pixel_auc_agg(
+                        auc = masked_pixel_auc_agg(
                             model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
                         )
 
