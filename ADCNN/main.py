@@ -547,9 +547,9 @@ def run(cfg: Config, args: argparse.Namespace):
         expected_tile=int(cfg.data.tile),
         model_hparams=model_hparams,
         norm_name=norm_name,
-        use_ema=not bool(args.no_ema),
-        ema_decay=float(args.ema_decay),
-        ema_eval=True,
+        use_ema=cfg.train.use_ema,
+        ema_decay=cfg.train.ema_decay,
+        ema_eval=cfg.train.ema_eval,
     )
 
     if is_main_process():
@@ -570,7 +570,7 @@ def cli():
 
     # EMA toggles
     ap.add_argument("--no-ema", action="store_true", help="Disable EMA.")
-    ap.add_argument("--ema-decay", type=float, default=0.999, help="EMA decay.")
+    ap.add_argument("--ema-decay", type=float, default=None, help="EMA decay.")
 
     return ap.parse_args()
 
@@ -588,6 +588,12 @@ if __name__ == "__main__":
         cfg.loader.batch_size = args.batch
     if args.epochs is not None:
         cfg.train.max_epochs = args.epochs
+    if args.ema_decay is not None:
+        cfg.train.ema_decay = args.ema_decay
+    if args.no_ema:
+        cfg.train.use_ema = False
+        cfg.train.ema_decay = 0.0
+        cfg.train.ema_eval = False
 
     cfg.validate()
 

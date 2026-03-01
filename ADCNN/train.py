@@ -249,6 +249,7 @@ class Trainer:
         maybe_init_head_bias_to_prior(raw_model, float(init_head_prior))
 
         # EMA tracks raw_model
+        print ("EMA enabled:", use_ema)
         ema: Optional[EMAModel] = None
         if use_ema:
             ema = EMAModel(raw_model, decay=float(ema_decay), device="cpu", use_fp32=True)
