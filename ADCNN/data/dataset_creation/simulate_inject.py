@@ -656,7 +656,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                                   replace=False) if 0 < train_test_split < 1 else []
     if test_only:
         total_tasks = len(test_index)
-        dims = butler.get("preliminary_visit_image.dimensions", dataId=refs[0].dataId)
+    dims = butler.get("preliminary_visit_image.dimensions", dataId=refs[0].dataId)
     if chunks is not None:
         chunks = (1, min(int(chunks), dims.y), min(int(chunks), dims.x))
     if not test_only:
