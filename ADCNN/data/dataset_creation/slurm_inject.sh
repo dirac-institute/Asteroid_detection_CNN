@@ -11,40 +11,25 @@
 
 set -eo pipefail
 
-DO_SCAN=0
 TEST_ONLY_FLAG=""
 
 for arg in "$@"; do
   case "$arg" in
-    --scan) DO_SCAN=1 ;;
     --test) TEST_ONLY_FLAG="--test-only" ;;
   esac
 done
 
-source /cvmfs/sw.lsst.eu/almalinux-x86_64/lsst_distrib/w_2025_50/loadLSST.sh
+source /cvmfs/sw.lsst.eu/almalinux-x86_64/lsst_distrib/w_2026_07/loadLSST.sh
 setup lsst_distrib
 
 cd /sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/ADCNN/data/dataset_creation
 
 OUT="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/DATA"
-REPO="/repo/main"
-COLL="LSSTComCam/runs/DRP/DP1/w_2025_17/DM-50530"
-WHERE="instrument='LSSTComCam' AND skymap='lsst_cells_v1' AND day_obs>=20241101 AND day_obs<=20241127 AND exposure.observation_type='science' AND band in ('u','g','r','i','z','y') AND (exposure not in (2024110600163, 2024112400111, 2024110800318, 2024111200185, 2024111400039, 2024111500225, 2024111500226, 2024111500239, 2024111500240, 2024111500242, 2024111500288, 2024111500289, 2024111800077, 2024111800078, 2024112300230, 2024112400094, 2024112400225, 2024112600327))"
+REPO="dp2_prep"
+COLL="LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage2"
+WHERE="instrument='LSSTCam' AND day_obs>=20250801 AND day_obs<=20250921 AND band in ('u','g','r','i','z','y') "
 
 mkdir -p "$OUT"
-BAD="$OUT/bad_visits.csv"
-
-if [[ "$DO_SCAN" -eq 1 ]]; then
-  echo "Running bad-visits scan..."
-  srun python3 -u scan_bad_data.py \
-    --repo "$REPO" \
-    --collections "$COLL" \
-    --where "$WHERE" \
-    --out "$BAD" \
-    --no-progress
-else
-  echo "Skipping bad-visits scan"
-fi
 
 # Clean outputs safely
 rm -f "$OUT/test.h5" "$OUT/test.csv"
