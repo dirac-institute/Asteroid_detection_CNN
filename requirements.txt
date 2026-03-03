@@ -1,0 +1,13 @@
+torch==2.7.0+cu128
+torchvision==0.22.0+cu128
+torchaudio==2.7.0+cu128
+triton==3.3.0
+numpy
+scipy
+pandas
+h5py
+matplotlib
+scikit-learn
+tqdm
+psutil
+tensorboard
