@@ -342,6 +342,7 @@ def full_confusion(
     ground_truth: np.ndarray,
     predictions: np.ndarray,
     threshold: float,
+    verbose: bool = False,
     **kwargs
 ) -> tuple[tuple[int, int, int], tuple[int, int, int, int], pd.DataFrame]:
     """
@@ -357,6 +358,16 @@ def full_confusion(
     pix_tp, pix_fp, pix_fn, pix_tn = pixelwise_confusion(
         predictions, ground_truth, threshold
     )
+
+    if verbose:
+        print_confusion_matrix(
+            {"TP": obj_tp, "FP": obj_fp, "FN": obj_fn, "TN": 0},
+            title="Object-level Confusion Matrix"
+        )
+        print_confusion_matrix(
+            {"TP": pix_tp, "FP": pix_fp, "FN": pix_fn, "TN": pix_tn},
+            title="Pixel-level Confusion Matrix"
+        )
 
     return (obj_tp, obj_fp, obj_fn), (pix_tp, pix_fp, pix_fn, pix_tn), cat
 

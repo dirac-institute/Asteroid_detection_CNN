@@ -40,7 +40,7 @@ class ASPP(nn.Module):
     def forward(self,x): return self.project(torch.cat([b(x) for b in self.blocks],1))
 
 class UNetResSE(nn.Module):
-    def __init__(self,in_ch=1,out_ch=1,widths=(32,64,128,256,512)):
+    def __init__(self,in_ch=1, out_ch=1, widths=(48, 96, 192, 384, 768)):
         super().__init__(); w=widths
         self.stem=nn.Sequential(nn.Conv2d(in_ch,w[0],3,padding=1,bias=False), nn.BatchNorm2d(w[0]), nn.SiLU(True), ResBlock(w[0],w[0]))
         self.d1=Down(w[0],w[1]); self.d2=Down(w[1],w[2]); self.d3=Down(w[2],w[3]); self.d4=Down(w[3],w[4])
