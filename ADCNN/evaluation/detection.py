@@ -12,10 +12,10 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 import concurrent.futures as cf
+from scipy import ndimage as ndi
 
 from ADCNN.utils.angle_utils import deg2rad
 from ADCNN.evaluation.geometry import label_components
-
 
 try:
     from ADCNN.utils.helpers import draw_one_line
@@ -24,6 +24,70 @@ except ImportError:
     def draw_one_line(mask, origin, angle_deg, length, true_value=1, line_thickness=3):
         raise NotImplementedError("draw_one_line requires cv2")
 
+
+
+def robust_stats_mad(arr):
+    med = np.median(arr); mad = np.median(np.abs(arr - med))
+    sigma = 1.4826 * (mad + 1e-12)
+    return np.float32(med), np.float32(sigma)
+
+def _disk_mask(shape, yc, xc, r):
+    H,W = shape; y,x = np.ogrid[:H,:W]
+    return (y-yc)**2 + (x-xc)**2 <= r*r
+
+def _line_mask(shape, yc, xc, beta_deg, length, width=1):
+    H,W = shape; mask = np.zeros((H,W), bool)
+    L = float(length)/2.0; th = np.deg2rad(float(beta_deg))
+    dy,dx = np.sin(th), np.cos(th)
+    y0,x0 = float(yc)-L*dy, float(xc)-L*dx
+    y1,x1 = float(yc)+L*dy, float(xc)+L*dx
+    steps = max(2, int(np.ceil(length*2)))
+    ys = np.clip(np.rint(np.linspace(y0,y1,steps)).astype(int), 0, H-1)
+    xs = np.clip(np.rint(np.linspace(x0,x1,steps)).astype(int), 0, W-1)
+    mask[ys,xs] = True
+    if width>1:
+        rad = max(1,int(width//2))
+        mask = ndi.binary_dilation(mask, structure=np.ones((2*rad+1,2*rad+1), bool))
+    return mask
+
+def _label_components_fds(mask_bool, pixel_gap=3):
+    if pixel_gap>1:
+        grown = ndi.binary_dilation(mask_bool, structure=np.ones((2*pixel_gap+1,2*pixel_gap+1), bool))
+    else:
+        grown = mask_bool
+    labels, n = ndi.label(grown, structure=np.ones((3,3), bool))  # 8-connectivity
+    return labels, int(n)
+
+def mark_nn_and_stack_fds(csv_path, p_full, thr=0.5, pixel_gap=3, line_width=1):
+    cat = pd.read_csv(csv_path).copy()
+    need = {"image_id","x","y"}
+    miss = need - set(cat.columns)
+    if miss: raise ValueError(f"CSV missing columns: {miss}")
+    if "stack_detection" in cat.columns: cat["stack_detected"] = cat["stack_detection"].astype(bool)
+    elif "stack_mag" in cat.columns:    cat["stack_detected"] = ~cat["stack_mag"].isna()
+    else:                               cat["stack_detected"] = False
+    H,W = p_full.shape[1:]
+    pred_bin = (p_full >= thr)
+    labels_list = []
+    for i in range(p_full.shape[0]):
+        labels_list.append(_label_components_fds(pred_bin[i], pixel_gap=pixel_gap)[0])
+    nn = np.zeros(len(cat), bool)
+    has_beta = "beta" in cat.columns; has_len = "trail_length" in cat.columns
+    for pid, grp in cat.groupby("image_id"):
+        pid = int(pid)
+        if pid<0 or pid>=len(labels_list): continue
+        lab = labels_list[pid]
+        for idx in grp.index:
+            xc = int(np.clip(int(cat.at[idx,"x"]), 0, W-1))
+            yc = int(np.clip(int(cat.at[idx,"y"]), 0, H-1))
+            if has_beta and has_len and np.isfinite(cat.at[idx,"beta"]) and np.isfinite(cat.at[idx,"trail_length"]):
+                m = _line_mask((H,W), yc, xc, beta_deg=float(cat.at[idx,"beta"]),
+                               length=float(cat.at[idx,"trail_length"]), width=line_width)
+            else:
+                m = _disk_mask((H,W), yc, xc, r=max(1,pixel_gap))
+            nn[idx] = (lab[m] > 0).any()
+    cat["nn_detected"] = nn
+    return cat
 
 # =============================================================================
 # Object-wise Evaluation

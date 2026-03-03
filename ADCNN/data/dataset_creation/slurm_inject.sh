@@ -41,7 +41,6 @@ srun python3 -u simulate_inject.py \
   --repo "$REPO" \
   --collections "$COLL" \
   --save-path "$OUT" \
-  --bad-visits-file "$BAD" \
   --parallel "${SLURM_CPUS_PER_TASK:-8}" \
   --train-test-split 0.94117 \
   --random-subset 850 \
