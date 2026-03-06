@@ -31,12 +31,13 @@ completed_counter = Value('i', 0)
 counter_lock = Lock()
 
 
-def characterizeCalibrate(postISRCCD):
+def characterizeCalibrate(postISRCCD, threshold=5.0):
     char_config = CharacterizeImageTask.ConfigClass()
     char_config.doApCorr = True
     char_config.doDeblend = True
-    #char_config.doApCorr = False
-    #char_config.doDeblend = False
+    # Change the detection threshold
+    #char_config.detection.thresholdType = "stdev"
+    char_config.detection.thresholdValue = threshold
     char_task = CharacterizeImageTask(config=char_config)
     char_result = char_task.run(postISRCCD)
 
@@ -436,7 +437,7 @@ def _try_place_trail_no_overlap(
 
     raise RuntimeError(f"Could not place trail without overlap after {max_tries} tries")
 
-def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=None, debug=False, mag_mode="psf_mag", psf_template="image"):
+def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=None, debug=False, mag_mode="psf_mag", psf_template="image", detection_threshold=5.0):
     try:
         if seed is None:
             seed = np.random.randint(0,10000)
@@ -446,7 +447,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
         pre_injection_Src = butler.get("single_visit_star_footprints", dataId=ref.dataId)
         forbidden = build_forbidden_mask(calexp, pre_injection_Src, dimensions)
         injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode, psf_template=psf_template, forbidden_mask=forbidden)
-        injected_calexp, post_injection_Src = characterizeCalibrate(inject(calexp, injection_catalog))
+        injected_calexp, post_injection_Src = characterizeCalibrate(inject(calexp, injection_catalog), threshold=detection_threshold)
         mask = np.zeros((dimensions.y, dimensions.x), dtype=int)
         for i, row in enumerate(injection_catalog):
             psf_width = injected_calexp.psf.getLocalKernel(Point2D(row["x"], row["y"])).getWidth()
@@ -482,11 +483,11 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
 
 
 def worker(args):
-    idx, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta, source_type, global_seed, mag_mode, psf_template = args
+    idx, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta, source_type, global_seed, mag_mode, psf_template, detection_threshold = args
     seed = (int(global_seed) * 1_000_003 + int(dataId["visit"]) * 1_003 + int(dataId["detector"])) & 0xFFFFFFFF
     try:
         res = one_detector_injection(number, trail_length, magnitude, beta, repo, coll, dims, source_type, dataId, seed,
-                                     mag_mode=mag_mode, psf_template=psf_template)
+                                     mag_mode=mag_mode, psf_template=psf_template, detection_threshold=detection_threshold)
         if res[0] is False:
             return ("err", res[1], res[2], res[3])
         _, img, mask, real_labels, catalog = res
@@ -632,7 +633,7 @@ def select_good_refs_random_check(
 
 def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitude, beta, where, parallel=4,
                            random_subset=0, train_test_split=0, seed=123, chunks=None, test_only=False, mag_mode="psf_mag",
-                           psf_template="image"):
+                           psf_template="image", stack_detection_threshold=5.0):
     butler = Butler(repo, collections=coll)
     h5train_path = os.path.join(save_path, "train.h5")
     h5test_path = os.path.join(save_path, "test.h5")
@@ -705,14 +706,14 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             count = count_test
             count_test += 1
             tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
-                          "preliminary_visit_image", seed, mag_mode, psf_template])
+                          "preliminary_visit_image", seed, mag_mode, psf_template, stack_detection_threshold])
         elif not test_only:
             h5path = h5train_path
             csvpath = os.path.join(save_path, "train.csv")
             count = count_train
             count_train += 1
             tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
-                          "preliminary_visit_image", seed, mag_mode, psf_template])
+                          "preliminary_visit_image", seed, mag_mode, psf_template, stack_detection_threshold])
     if parallel > 1:
         completed = 0
         total_tasks = len(tasks)
@@ -763,6 +764,7 @@ def main():
     ap.add_argument("--beta-min", type=float, default=0)
     ap.add_argument("--beta-max", type=float, default=180)
     ap.add_argument("--number", type=int, default=20)
+    ap.add_argument("--stack-detection-threshold", type=float, default=5.0, help="SNR threshold for the stack (default 5.0)")
     ap.add_argument("--seed", type=int, default=123)
     ap.add_argument("--chunks", type=int, default=None, help="HDF5 chunk size (square). Example: 128 -> chunks=(1,128,128). None = contiguous")
     ap.add_argument("--test-only", action="store_true", default=False, help="Only generate test set")
@@ -789,6 +791,7 @@ def main():
         test_only=args.test_only,
         seed=args.seed,
         psf_template=args.psf_template,
+        stack_detection_threshold=args.stack_detection_threshold,
     )
 
 if __name__ == "__main__":

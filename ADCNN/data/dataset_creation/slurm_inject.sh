@@ -49,6 +49,7 @@ srun python3 -u simulate_inject.py \
   --mag-mode snr \
   --beta-min 0 --beta-max 180 \
   --number 20 \
+  --stack-detection-threshold 5.0 \
   --chunks 128 \
   $TEST_ONLY_FLAG \
   --where "$WHERE"
