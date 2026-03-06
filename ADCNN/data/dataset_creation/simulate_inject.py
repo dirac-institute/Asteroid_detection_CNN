@@ -44,6 +44,7 @@ def characterizeCalibrate(postISRCCD, threshold=5.0):
     calib_config = CalibrateTask.ConfigClass()
     calib_config.doAstrometry = False
     calib_config.doPhotoCal = False
+    calib_config.detection.thresholdValue = threshold
     calib_task = CalibrateTask(config=calib_config, icSourceSchema=char_result.sourceCat.schema)
     calib_result = calib_task.run(postISRCCD, background=char_result.background, icSourceCat=char_result.sourceCat)
     return calib_result.outputExposure, calib_result.sourceCat
