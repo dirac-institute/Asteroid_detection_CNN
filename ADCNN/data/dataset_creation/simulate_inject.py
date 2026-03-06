@@ -37,13 +37,14 @@ def characterizeCalibrate(postISRCCD, threshold=5.0):
     char_config.doDeblend = True
     # Change the detection threshold
     #char_config.detection.thresholdType = "stdev"
-    char_config.detection.thresholdValue = threshold
+    #char_config.detection.thresholdValue = threshold
     char_task = CharacterizeImageTask(config=char_config)
     char_result = char_task.run(postISRCCD)
 
     calib_config = CalibrateTask.ConfigClass()
     calib_config.doAstrometry = False
     calib_config.doPhotoCal = False
+    # Change the detection threshold
     calib_config.detection.thresholdValue = threshold
     calib_task = CalibrateTask(config=calib_config, icSourceSchema=char_result.sourceCat.schema)
     calib_result = calib_task.run(postISRCCD, background=char_result.background, icSourceCat=char_result.sourceCat)
@@ -444,11 +445,11 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             seed = np.random.randint(0,10000)
         butler = Butler(repo, collections=coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
-        if detection_threshold == 5:
-            calexp = butler.get("preliminary_visit_image", dataId=ref.dataId)
-            pre_injection_Src = butler.get("single_visit_star_footprints", dataId=ref.dataId)
-        else:
-            calexp, pre_injection_Src = characterizeCalibrate(butler.get("preliminary_visit_image", dataId=ref.dataId), threshold=detection_threshold)
+        #if detection_threshold == 5.0:
+        #    calexp = butler.get("preliminary_visit_image", dataId=ref.dataId)
+        #    pre_injection_Src = butler.get("single_visit_star_footprints", dataId=ref.dataId)
+        #else:
+        calexp, pre_injection_Src = characterizeCalibrate(butler.get("preliminary_visit_image", dataId=ref.dataId), threshold=detection_threshold)
         forbidden = build_forbidden_mask(calexp, pre_injection_Src, dimensions)
         injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode, psf_template=psf_template, forbidden_mask=forbidden)
         injected_calexp, post_injection_Src = characterizeCalibrate(inject(calexp, injection_catalog), threshold=detection_threshold)
@@ -483,7 +484,6 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             return True, injected_calexp.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog, det_mask, matched_fp_masks
     except Exception as e:
         return False, ref_dataId, repr(e), traceback.format_exc()
-        return {"ok": False, "dataId": ref_dataId, "error": repr(e), "traceback": traceback.format_exc()}
 
 
 def worker(args):
