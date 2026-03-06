@@ -15,6 +15,7 @@ from lsst.geom import Point2D
 import lsst.geom as geom
 from lsst.pipe.tasks.calibrate import CalibrateTask
 from lsst.pipe.tasks.characterizeImage import CharacterizeImageTask
+from lsst.ip.isr import IsrTask
 from lsst.source.injection.inject_exposure import ExposureInjectTask
 from lsst.meas.extensions.psfex.psfexPsfDeterminer import PsfexNoGoodStarsError
 import h5py
@@ -29,6 +30,31 @@ import traceback
 
 completed_counter = Value('i', 0)
 counter_lock = Lock()
+
+def isr (butler, dataId):
+    raw = butler.get("raw", dataId=dataId)
+    linearizer = butler.get("linearizer", dataId=dataId)
+    ptc = butler.get("ptc", dataId=dataId)
+    dark = butler.get("dark", dataId=dataId)
+    bias = butler.get("bias", dataId=dataId)
+    crosstalk = butler.get("crosstalk", dataId=dataId)
+    defects = butler.get("defects", dataId=dataId)
+    flat = butler.get("flat", dataId=dataId)
+    cti = butler.get("cti", dataId=dataId)
+    camera = butler.get("camera", dataId=dataId)
+
+    cfg = IsrTask.ConfigClass()
+    task = IsrTask(config=cfg)
+    res = task.run(raw,
+                   camera=camera,
+                   bias=bias,
+                   dark=dark,
+                   flat=flat,
+                   ptc=ptc,
+                   linearizer=linearizer,
+                   crosstalk=crosstalk,
+                   defects=defects)
+    return res.exposure
 
 
 def characterizeCalibrate(postISRCCD, threshold=5.0):
@@ -439,17 +465,21 @@ def _try_place_trail_no_overlap(
 
     raise RuntimeError(f"Could not place trail without overlap after {max_tries} tries")
 
+def format_dataId(dataId):
+    out_dataId = {"instrument": dataId["instrument"],
+                  "detector": dataId["detector"],
+                  "exposure": dataId["exposure"] if "exposure" in dataId else dataId["visit"],
+                  "band": dataId["band"]}
+    return out_dataId
+
 def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=None, debug=False, mag_mode="psf_mag", psf_template="image", detection_threshold=5.0):
     try:
         if seed is None:
             seed = np.random.randint(0,10000)
         butler = Butler(repo, collections=coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
-        #if detection_threshold == 5.0:
-        #    calexp = butler.get("preliminary_visit_image", dataId=ref.dataId)
-        #    pre_injection_Src = butler.get("single_visit_star_footprints", dataId=ref.dataId)
-        #else:
-        calexp, pre_injection_Src = characterizeCalibrate(butler.get("preliminary_visit_image", dataId=ref.dataId), threshold=detection_threshold)
+        postISRCCD = isr(butler, format_dataId(ref.dataId))
+        calexp, pre_injection_Src = characterizeCalibrate(postISRCCD, threshold=detection_threshold)
         forbidden = build_forbidden_mask(calexp, pre_injection_Src, dimensions)
         injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode, psf_template=psf_template, forbidden_mask=forbidden)
         injected_calexp, post_injection_Src = characterizeCalibrate(inject(calexp, injection_catalog), threshold=detection_threshold)
