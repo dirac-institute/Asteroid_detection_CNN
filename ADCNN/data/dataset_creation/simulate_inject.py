@@ -443,8 +443,11 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             seed = np.random.randint(0,10000)
         butler = Butler(repo, collections=coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
-        calexp = butler.get("preliminary_visit_image", dataId=ref.dataId)
-        pre_injection_Src = butler.get("single_visit_star_footprints", dataId=ref.dataId)
+        if detection_threshold == 5:
+            calexp = butler.get("preliminary_visit_image", dataId=ref.dataId)
+            pre_injection_Src = butler.get("single_visit_star_footprints", dataId=ref.dataId)
+        else:
+            calexp, pre_injection_Src = characterizeCalibrate(butler.get("preliminary_visit_image", dataId=ref.dataId), threshold=detection_threshold)
         forbidden = build_forbidden_mask(calexp, pre_injection_Src, dimensions)
         injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode, psf_template=psf_template, forbidden_mask=forbidden)
         injected_calexp, post_injection_Src = characterizeCalibrate(inject(calexp, injection_catalog), threshold=detection_threshold)
