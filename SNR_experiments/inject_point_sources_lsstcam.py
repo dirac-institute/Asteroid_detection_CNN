@@ -7,20 +7,10 @@ from typing import List, Sequence
 from ADCNN.data.dataset_creation.common import ensure_dir
 from ADCNN.data.dataset_creation.simulate_inject import one_detector_injection, select_good_refs_random_check
 
-from astroML.crossmatch import crossmatch_angular
 from lsst.daf.butler import Butler
 import numpy as np
-from astropy.table import Table
-from lsst.geom import Point2D
-import lsst.geom as geom
-from lsst.pipe.tasks.calibrate import CalibrateTask
-from lsst.pipe.tasks.characterizeImage import CharacterizeImageTask
-from lsst.source.injection.inject_exposure import ExposureInjectTask
-from lsst.meas.extensions.psfex.psfexPsfDeterminer import PsfexNoGoodStarsError
-import h5py
 import concurrent.futures
 from multiprocessing import Lock, Semaphore, Manager
-from astropy.io import ascii
 import os
 from multiprocessing import Value, Lock
 import logging
