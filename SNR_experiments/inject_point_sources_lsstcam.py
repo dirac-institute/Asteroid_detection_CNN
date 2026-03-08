@@ -1,8 +1,5 @@
 from __future__ import annotations
 import argparse
-from pathlib import Path
-import random
-from typing import List, Sequence
 
 from ADCNN.data.dataset_creation.common import ensure_dir
 from ADCNN.data.dataset_creation.simulate_inject import one_detector_injection, select_good_refs_random_check
