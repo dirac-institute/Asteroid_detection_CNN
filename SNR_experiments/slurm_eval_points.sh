@@ -53,6 +53,7 @@ if [[ -z "$TEST_ONLY_FLAG" ]]; then
 fi
 
 export PYTHONPATH=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN:$PYTHONPATH
+export PYTHONPATH=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/data/dataset_creation:$PYTHONPATH
 
 srun python3 -u inject_point_sources_lsstcam.py \
   --repo "$REPO" \
