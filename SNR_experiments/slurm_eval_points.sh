@@ -24,7 +24,7 @@ done
 source /cvmfs/sw.lsst.eu/almalinux-x86_64/lsst_distrib/w_2026_07/loadLSST.sh
 setup lsst_distrib
 
-cd /sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection/SNR_experiments/
+cd /sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/SNR_experiments/
 
 OUT="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/DATA/point_sources"
 REPO="dp2_prep"
@@ -52,7 +52,7 @@ if [[ -z "$TEST_ONLY_FLAG" ]]; then
   rm -f "$OUT/train.h5" "$OUT/train.csv"
 fi
 
-export PYTHONPATH=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection:$PYTHONPATH
+export PYTHONPATH=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN:$PYTHONPATH
 
 srun python3 -u inject_point_sources_lsstcam.py \
   --repo "$REPO" \
