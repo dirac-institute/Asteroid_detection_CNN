@@ -522,24 +522,27 @@ def select_good_refs_random_check(
     seed: int = 123,
     pool_size: int = 5000,
     max_checks: int = 200000,
-    verbose: bool = True,
+    check_refs: bool = False,
+    verbose: bool = False,
 ) -> List:
     """
-    Deterministically:
-      1) build a random pool of `pool_size` preliminary_visit_image refs (reservoir sample)
-      2) shuffle the pool with `seed`
-      3) iterate, accept refs that satisfy:
-           - single_visit_star_footprints exists
-           - preliminary_visit_image.photoCalib component loads and is not None
-      4) stop when `k` good refs collected or `max_checks` reached
+    Deterministically sample refs from preliminary_visit_image.
 
-    Notes:
-      - Fully deterministic given (repo, collections, where, instrument, seed, pool_size, max_checks)
-      - Serial IO (no parallelism)
+    If check_refs=False:
+      - return a deterministic random sample of size k (or fewer if dataset smaller)
+
+    If check_refs=True:
+      - build a deterministic random pool of size pool_size
+      - shuffle it deterministically
+      - keep refs that satisfy:
+          * single_visit_star_footprints exists
+          * preliminary_visit_image.photoCalib loads and is not None
+          * dimensions match the most common dimensions from a small sampled subset
+      - stop when k good refs are collected or max_checks reached
     """
     b = Butler(repo, collections=collections)
 
-    # Step 1: sample from all preliminary_visit_image refs (no full materialization)
+    # Query once for the random pool
     all_pvi_iter = b.registry.queryDatasets(
         "preliminary_visit_image",
         instrument=instrument,
@@ -547,30 +550,60 @@ def select_good_refs_random_check(
         collections=collections,
         findFirst=True,
     )
-    pool = reservoir_sample(all_pvi_iter, k=int(pool_size), seed=int(seed))
 
-    # find the most common dimensions among a small random subset to avoid pathological cases
-    small_pool = reservoir_sample(all_pvi_iter, k=100, seed=int(seed))
-    dims_x = np.zeros(len(small_pool), dtype=int)
-    dims_y = np.zeros(len(small_pool), dtype=int)
-    for i in range(len(small_pool)):
-        dims = b.get("preliminary_visit_image.dimensions",
-                     dataId=small_pool[i].dataId,
-                     collections=collections)
-        dims_x[i] = dims.x
-        dims_y[i] = dims.y
-    dim_x = np.bincount(dims_x).argmax()
-    dim_y = np.bincount(dims_y).argmax()
+    sample_k = int(pool_size) if check_refs else int(k)
+    pool = reservoir_sample(all_pvi_iter, k=sample_k, seed=int(seed))
 
-
-    # Step 2: deterministic shuffle order
+    # Deterministic shuffle order
     rng = random.Random(int(seed))
     rng.shuffle(pool)
 
+    # Fast path: no checks, just return shuffled unique refs up to k
+    if not check_refs:
+        out = []
+        seen = set()
+        for ref in pool:
+            key = _key_from_dataId(ref.dataId)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(ref)
+            if len(out) >= int(k):
+                break
+
+        out = sorted(out, key=lambda r: _key_from_dataId(r.dataId))
+
+        if verbose:
+            print(f"Selected refs without checks: {len(out)} (requested k={k})", flush=True)
+
+        return out
+
+    # Checked mode: find most common dimensions from a small deterministic subset
+    dims_x = []
+    dims_y = []
+    small_n = min(100, len(pool))
+    for i in range(small_n):
+        try:
+            dims = b.get(
+                "preliminary_visit_image.dimensions",
+                dataId=pool[i].dataId,
+                collections=collections,
+            )
+            dims_x.append(int(dims.x))
+            dims_y.append(int(dims.y))
+        except Exception:
+            continue
+
+    dim_x = None
+    dim_y = None
+    if len(dims_x) > 0:
+        dim_x = np.bincount(np.array(dims_x, dtype=int)).argmax()
+        dim_y = np.bincount(np.array(dims_y, dtype=int)).argmax()
+
     good = []
     seen = set()
-
     checks = 0
+
     for pvi in pool:
         if len(good) >= int(k) or checks >= int(max_checks):
             break
@@ -581,7 +614,7 @@ def select_good_refs_random_check(
             continue
         seen.add(key)
 
-        # A) require star footprints to exist (fast registry check)
+        # A) require star footprints to exist
         svsf = b.registry.findDataset(
             "single_visit_star_footprints",
             dataId=pvi.dataId,
@@ -598,22 +631,29 @@ def select_good_refs_random_check(
         if pc is None:
             continue
 
-        # C) check dimensions are the common ones (heuristic to avoid pathological cases that cause downstream failures)
-        try:
-            dims = b.get("preliminary_visit_image.dimensions",
-                         dataId=pvi.dataId,
-                         collections=collections)
-            if dims.x != dim_x or dims.y != dim_y:
+        # C) dimensions check only if we managed to estimate common dimensions
+        if dim_x is not None and dim_y is not None:
+            try:
+                dims = b.get(
+                    "preliminary_visit_image.dimensions",
+                    dataId=pvi.dataId,
+                    collections=collections,
+                )
+                if int(dims.x) != int(dim_x) or int(dims.y) != int(dim_y):
+                    continue
+            except Exception:
                 continue
-        except Exception:
-            continue
 
         good.append(pvi)
 
     good = sorted(good, key=lambda r: _key_from_dataId(r.dataId))
 
     if verbose:
-        print(f"Selected good refs: {len(good)} (requested k={k}), from pool_size={pool_size}, checks={checks}", flush=True)
+        print(
+            f"Selected good refs: {len(good)} (requested k={k}), "
+            f"from pool_size={pool_size}, checks={checks}",
+            flush=True,
+        )
 
     return good
 
