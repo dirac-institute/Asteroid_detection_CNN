@@ -100,7 +100,7 @@ def calibrate(postISRCCD, threshold=5.0):
 
     result = task.run(exposures=[postISRCCD])
 
-    return result.exposure, result.stars
+    return result.exposure, result.stars_footprints
 
 def isr_old (butler, dataId):
     raw = butler.get("raw", dataId=dataId)
@@ -142,6 +142,7 @@ def characterizeCalibrate(postISRCCD, threshold=5.0):
     calib_config.doAstrometry = False
     calib_config.doPhotoCal = False
     # Change the detection threshold
+    calib_config.detection.thresholdType = "stdev"
     calib_config.detection.thresholdValue = threshold
     calib_task = CalibrateTask(config=calib_config, icSourceSchema=char_result.sourceCat.schema)
     calib_result = calib_task.run(postISRCCD, background=char_result.background, icSourceCat=char_result.sourceCat)
