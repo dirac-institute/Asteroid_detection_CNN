@@ -19,7 +19,7 @@ for arg in "$@"; do
   esac
 done
 
-source /cvmfs/sw.lsst.eu/almalinux-x86_64/lsst_distrib/w_2026_07/loadLSST.sh
+source /cvmfs/sw.lsst.eu/almalinux-x86_64/lsst_distrib/w_2026_09/loadLSST.sh
 setup lsst_distrib
 
 cd /sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/ADCNN/data/dataset_creation

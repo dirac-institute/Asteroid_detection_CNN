@@ -7,6 +7,7 @@ import lsst.afw.image as afwImage
 from lsst.pipe.tasks.calibrate import CalibrateTask
 from lsst.pipe.tasks.characterizeImage import CharacterizeImageTask
 from lsst.ip.isr import IsrTask
+import inspect
 
 
 def isr(butler, dataId):
@@ -23,18 +24,17 @@ def isr(butler, dataId):
         camera=butler.get("camera", dataId=dataId),
     )
 
-    # LSST-specific ISR inputs
+    # LSST-specific inputs
     try:
         kwargs["deferredChargeCalib"] = butler.get("cti", dataId=dataId)
-    except Exception as e:
-        print("No cti -> deferredChargeCalib:", e)
+    except Exception:
+        pass
 
     try:
-        kwargs["bfGains"] = butler.get("gain_correction", dataId=dataId)
-    except Exception as e:
-        print("No gain_correction -> bfGains:", e)
+        kwargs["gainCorrection"] = butler.get("gain_correction", dataId=dataId)
+    except Exception:
+        pass
 
-    # Only some repos have this separately
     for name in ("bfKernel", "bfk"):
         try:
             kwargs["bfKernel"] = butler.get(name, dataId=dataId)
@@ -42,8 +42,19 @@ def isr(butler, dataId):
         except Exception:
             pass
 
+    for name in ("electroBFDistortionMatrix", "electroBfDistortionMatrix"):
+        try:
+            kwargs["electroBfDistortionMatrix"] = butler.get(name, dataId=dataId)
+            break
+        except Exception:
+            pass
+
     cfg = IsrTaskLSST.ConfigClass()
     task = IsrTaskLSST(config=cfg)
+
+    allowed = set(inspect.signature(task.run).parameters.keys())
+    kwargs = {k: v for k, v in kwargs.items() if k in allowed}
+
     res = task.run(raw, **kwargs)
     return res.exposure
 
