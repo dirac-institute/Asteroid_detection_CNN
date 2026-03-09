@@ -100,7 +100,7 @@ def calibrate(postISRCCD, threshold=5.0):
 
     result = task.run(exposures=[postISRCCD])
 
-    return result.exposure, result.stars, result
+    return result.exposure, result.stars
 
 def isr_old (butler, dataId):
     raw = butler.get("raw", dataId=dataId)
