@@ -522,7 +522,7 @@ def select_good_refs_random_check(
     seed: int = 123,
     pool_size: int = 5000,
     max_checks: int = 200000,
-    check_refs: bool = False,
+    check_refs: bool = True,
     verbose: bool = False,
 ) -> List:
     """
