@@ -3,7 +3,7 @@ import argparse
 from pathlib import Path
 
 from common import ensure_dir, draw_one_line, psf_fwhm_arcsec_from_calexp, mag_to_snr, snr_to_mag
-from pipetasks import characterizeCalibrate as calibrate, isr
+from pipetasks import calibrate, isr
 
 import random
 from typing import List, Sequence
