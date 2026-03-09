@@ -3,6 +3,7 @@ import argparse
 from pathlib import Path
 
 from common import ensure_dir, draw_one_line, psf_fwhm_arcsec_from_calexp, mag_to_snr, snr_to_mag
+from pipetasks import calibrate, isr
 
 import random
 from typing import List, Sequence
@@ -13,9 +14,6 @@ import numpy as np
 from astropy.table import Table
 from lsst.geom import Point2D
 import lsst.geom as geom
-from lsst.pipe.tasks.calibrate import CalibrateTask
-from lsst.pipe.tasks.characterizeImage import CharacterizeImageTask
-from lsst.ip.isr import IsrTask
 from lsst.source.injection.inject_exposure import ExposureInjectTask
 from lsst.meas.extensions.psfex.psfexPsfDeterminer import PsfexNoGoodStarsError
 import h5py
@@ -30,52 +28,6 @@ import traceback
 
 completed_counter = Value('i', 0)
 counter_lock = Lock()
-
-def isr (butler, dataId):
-    raw = butler.get("raw", dataId=dataId)
-    linearizer = butler.get("linearizer", dataId=dataId)
-    ptc = butler.get("ptc", dataId=dataId)
-    dark = butler.get("dark", dataId=dataId)
-    bias = butler.get("bias", dataId=dataId)
-    crosstalk = butler.get("crosstalk", dataId=dataId)
-    defects = butler.get("defects", dataId=dataId)
-    flat = butler.get("flat", dataId=dataId)
-    cti = butler.get("cti", dataId=dataId)
-    camera = butler.get("camera", dataId=dataId)
-
-    cfg = IsrTask.ConfigClass()
-    task = IsrTask(config=cfg)
-    res = task.run(raw,
-                   camera=camera,
-                   bias=bias,
-                   dark=dark,
-                   flat=flat,
-                   ptc=ptc,
-                   linearizer=linearizer,
-                   crosstalk=crosstalk,
-                   defects=defects)
-    return res.exposure
-
-
-def characterizeCalibrate(postISRCCD, threshold=5.0):
-    char_config = CharacterizeImageTask.ConfigClass()
-    char_config.doApCorr = True
-    char_config.doDeblend = True
-    # Change the detection threshold
-    #char_config.detection.thresholdType = "stdev"
-    #char_config.detection.thresholdValue = threshold
-    char_task = CharacterizeImageTask(config=char_config)
-    char_result = char_task.run(postISRCCD)
-
-    calib_config = CalibrateTask.ConfigClass()
-    calib_config.doAstrometry = False
-    calib_config.doPhotoCal = False
-    # Change the detection threshold
-    calib_config.detection.thresholdValue = threshold
-    calib_task = CalibrateTask(config=calib_config, icSourceSchema=char_result.sourceCat.schema)
-    calib_result = calib_task.run(postISRCCD, background=char_result.background, icSourceCat=char_result.sourceCat)
-    return calib_result.outputExposure, calib_result.sourceCat
-
 
 def inject(postISRCCD, injection_catalog):
     inject_task = ExposureInjectTask()
@@ -479,10 +431,10 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
         butler = Butler(repo, collections=coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
         postISRCCD = isr(butler, format_dataId(ref.dataId))
-        calexp, pre_injection_Src = characterizeCalibrate(postISRCCD, threshold=detection_threshold)
+        calexp, pre_injection_Src = calibrate(postISRCCD, threshold=detection_threshold)
         forbidden = build_forbidden_mask(calexp, pre_injection_Src, dimensions)
         injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode, psf_template=psf_template, forbidden_mask=forbidden)
-        injected_calexp, post_injection_Src = characterizeCalibrate(inject(calexp, injection_catalog), threshold=detection_threshold)
+        injected_calexp, post_injection_Src = calibrate(inject(calexp, injection_catalog), threshold=detection_threshold)
         mask = np.zeros((dimensions.y, dimensions.x), dtype=int)
         for i, row in enumerate(injection_catalog):
             psf_width = injected_calexp.psf.getLocalKernel(Point2D(row["x"], row["y"])).getWidth()
