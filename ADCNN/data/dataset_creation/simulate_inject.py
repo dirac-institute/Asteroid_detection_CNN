@@ -204,6 +204,7 @@ def stack_hits_by_footprints(
     injection_catalog,
     overlap_frac=0.02,
     overlap_minpix=100,
+    return_matched_fp_masks = False
 ):
     H, W = int(dimensions.y), int(dimensions.x)
     N = len(injection_catalog)
@@ -212,7 +213,8 @@ def stack_hits_by_footprints(
     det_mag = np.full(N, np.nan)
     det_magerr = np.full(N, np.nan)
     det_snr = np.full(N, np.nan)
-    matched_fp_masks = [np.zeros((H, W), bool) for _ in range(N)]
+    if return_matched_fp_masks:
+        matched_fp_masks = [np.zeros((H, W), bool) for _ in range(N)]
 
     mags = calexp_post.photoCalib.instFluxToMagnitude(post_src, "base_PsfFlux")
 
@@ -276,13 +278,17 @@ def stack_hits_by_footprints(
             f = float(post_src[best_idx].get("base_PsfFlux_instFlux"))
             fe = float(post_src[best_idx].get("base_PsfFlux_instFluxErr"))
             det_snr[inj_id] = f / fe if (np.isfinite(f) and np.isfinite(fe) and fe > 0) else np.nan
-            matched_fp_masks[inj_id][y0:y1+1, x0:x1+1] |= best_fp
+            if return_matched_fp_masks:
+                matched_fp_masks[inj_id][y0:y1+1, x0:x1+1] |= best_fp
 
     injection_catalog["stack_detection"] = det_flag
     injection_catalog["stack_mag"] = det_mag
     injection_catalog["stack_mag_err"] = det_magerr
     injection_catalog["stack_snr"] = det_snr
-    return injection_catalog, matched_fp_masks
+    if return_matched_fp_masks:
+        return injection_catalog, matched_fp_masks
+    else:
+        return injection_catalog, None
 
 def crossmatch_catalogs (pre, post):
     # Crossmatch POST vs PRE on-sky (inputs in radians, radius in radians)
@@ -437,7 +443,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
         forbidden = build_forbidden_mask(calexp, pre_injection_Src, dimensions)
         injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode, psf_template=psf_template, forbidden_mask=forbidden)
         injected_calexp, post_injection_Src = calibrate(butler, inject(calexp, injection_catalog), format_dataId(ref.dataId), threshold=detection_threshold)
-        mask = np.zeros((dimensions.y, dimensions.x), dtype=int)
+        mask = np.zeros((dimensions.y, dimensions.x), dtype=np.uint16)
         for i, row in enumerate(injection_catalog):
             psf_width = injected_calexp.psf.getLocalKernel(Point2D(row["x"], row["y"])).getWidth()
             mask = draw_one_line(mask, [row["x"], row["y"]], row["beta"], row["trail_length"], true_value=i + 1,
@@ -449,7 +455,8 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
                                                                        truth_id_mask=mask,
                                                                        injection_catalog=injection_catalog,
                                                                        overlap_minpix=1,
-                                                                       overlap_frac=0.0,)
+                                                                       overlap_frac=0.0,
+                                                                       return_matched_fp_masks=debug)
 
         real_labels = footprints_to_label_mask(pre_injection_Src, dimensions, dtype=np.uint16)
         if not debug:
