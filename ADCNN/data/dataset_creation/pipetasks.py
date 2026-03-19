@@ -75,7 +75,7 @@ def calibrate(butler, postISRCCD, dataId, threshold=5.0):
     cfg.useButlerCamera = True
     cfg.astrometry.matcher.maxOffsetPix = 800
     cfg.astrometry_ref_loader.pixelMargin = 800
-    cfg.star_detection.thresholdValue = threshold
+    #cfg.star_detection.thresholdValue = threshold
 
     cfg.connections.astrometry_ref_cat = "the_monster_20250219"
     cfg.connections.photometry_ref_cat = "the_monster_20250219"
