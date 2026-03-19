@@ -1,13 +1,9 @@
-from lsst.ip.isr import IsrTaskLSST
-from lsst.daf.butler import Butler
-from lsst.pipe.tasks.calibrateImage import CalibrateImageTask
-from lsst.pipe.tasks.calibrateImage import CalibrateImageConfig
-import lsst.afw.image as afwImage
-
-from lsst.pipe.tasks.calibrate import CalibrateTask
-from lsst.pipe.tasks.characterizeImage import CharacterizeImageTask
-from lsst.ip.isr import IsrTask
+import os
 import inspect
+import lsst.meas.algorithms
+from lsst.pipe.tasks.calibrateImage import CalibrateImageTask, CalibrateImageConfig
+from lsst.ap.association.utils import getRegion
+from lsst.ip.isr import IsrTaskLSST
 
 
 def isr(butler, dataId):
@@ -24,7 +20,6 @@ def isr(butler, dataId):
         camera=butler.get("camera", dataId=dataId),
     )
 
-    # LSST-specific inputs
     try:
         kwargs["deferredChargeCalib"] = butler.get("cti", dataId=dataId)
     except Exception:
@@ -50,6 +45,7 @@ def isr(butler, dataId):
             pass
 
     cfg = IsrTaskLSST.ConfigClass()
+    cfg.ampOffset.doApplyAmpOffset = True
     task = IsrTaskLSST(config=cfg)
 
     allowed = set(inspect.signature(task.run).parameters.keys())
@@ -58,92 +54,90 @@ def isr(butler, dataId):
     res = task.run(raw, **kwargs)
     return res.exposure
 
-class CalibrateImageNoRefTask(CalibrateImageTask):
-    """Use modern CalibrateImageTask internals, but skip astrometry and photometry."""
 
-    def _fit_astrometry(self, exposure, stars, exposure_region=None):
-        # Keep whatever WCS is already on the exposure.
-        self.metadata["astrometry_matches_count"] = 0
-        self.metadata["initial_to_final_wcs"] = float("nan")
-        self.metadata["astrom_offset_mean"] = float("nan")
-        self.metadata["astrom_offset_std"] = float("nan")
-        self.metadata["astrom_offset_median"] = float("nan")
-        return [], None
+def calibrate(butler, postISRCCD, dataId, threshold=5.0):
+    expanded = butler.registry.expandDataId(dataId)
+    exposure_record = expanded.records["exposure"]
 
-    def _fit_photometry(self, exposure, stars):
-        # Keep instrumental units; attach a trivial PhotoCalib if needed.
-        photo_calib = exposure.getPhotoCalib()
-        if photo_calib is None:
-            photo_calib = afwImage.PhotoCalib(1.0, 0.0, bbox=exposure.getBBox())
-            exposure.setPhotoCalib(photo_calib)
-        self.metadata["photometry_matches_count"] = 0
-        return stars, [], None, photo_calib
-
-
-def calibrate(postISRCCD, threshold=5.0):
     cfg = CalibrateImageConfig()
-    cfg.do_calibrate_pixels = False
+    cfg.load(os.path.expandvars("$DRP_PIPE_DIR/config/calibrateImage.py"))
 
-    # Do not try to persist empty match catalogs
-    cfg.optional_outputs = [
-        x for x in cfg.optional_outputs
-        if x not in ("astrometry_matches", "photometry_matches")
-    ]
+    cfg.connections.exposures = "post_isr_image"
+    cfg.connections.stars_footprints = "single_visit_star_footprints"
+    cfg.connections.psf_stars_footprints = "single_visit_psf_star_footprints"
+    cfg.connections.psf_stars = "single_visit_psf_star"
+    cfg.connections.initial_stars_schema = "single_visit_star_schema"
+    cfg.connections.stars = "single_visit_star_unstandardized"
+    cfg.connections.exposure = "preliminary_visit_image"
+    cfg.connections.mask = "preliminary_visit_mask"
+    cfg.connections.background = "preliminary_visit_image_background"
 
-    # Optional: expose threshold control similar to old CalibrateTask
+    cfg.useButlerCamera = True
+    cfg.astrometry.matcher.maxOffsetPix = 800
+    cfg.astrometry_ref_loader.pixelMargin = 800
     cfg.star_detection.thresholdValue = threshold
 
-    task = CalibrateImageNoRefTask(config=cfg)
+    cfg.connections.astrometry_ref_cat = "the_monster_20250219"
+    cfg.connections.photometry_ref_cat = "the_monster_20250219"
 
-    # Skip astrometry quality validation entirely
-    task.astrometry.check = lambda *args, **kwargs: None
+    cfg.photometry_ref_loader.filterMap = {
+        "u": "monster_ComCam_u",
+        "g": "monster_ComCam_g",
+        "r": "monster_ComCam_r",
+        "i": "monster_ComCam_i",
+        "z": "monster_ComCam_z",
+        "y": "monster_ComCam_y",
+    }
+    cfg.photometry.applyColorTerms = False
+    cfg.photometry.photoCatName = "the_monster_20250219"
 
-    result = task.run(exposures=[postISRCCD])
+    cfg.do_calibrate_pixels = False
 
+    task = CalibrateImageTask(config=cfg)
+
+    region = getRegion(postISRCCD)
+
+    dt = butler.get_dataset_type("the_monster_20250219")
+    dims = tuple(dt.dimensions.names)
+    skypix_dim = [d for d in dims if d.startswith("htm") or d.startswith("healpix")][0]
+    where = f"{skypix_dim}.region OVERLAPS :region"
+
+    refs = list(
+        butler.query_datasets(
+            "the_monster_20250219",
+            collections="refcats",
+            where=where,
+            bind={"region": region},
+            find_first=False,
+            with_dimension_records=True,
+        )
+    )
+    if not refs:
+        raise RuntimeError("No overlapping refcat shards found.")
+
+    astrometry_loader = lsst.meas.algorithms.ReferenceObjectLoader(
+        dataIds=[ref.dataId for ref in refs],
+        refCats=[butler.getDeferred(ref) for ref in refs],
+        name=cfg.connections.astrometry_ref_cat,
+        config=cfg.astrometry_ref_loader,
+        log=task.log,
+    )
+    task.astrometry.setRefObjLoader(astrometry_loader)
+
+    photometry_loader = lsst.meas.algorithms.ReferenceObjectLoader(
+        dataIds=[ref.dataId for ref in refs],
+        refCats=[butler.getDeferred(ref) for ref in refs],
+        name=cfg.connections.photometry_ref_cat,
+        config=cfg.photometry_ref_loader,
+        log=task.log,
+    )
+    task.photometry.match.setRefObjLoader(photometry_loader)
+
+    result = task.run(
+        exposures=[postISRCCD],
+        id_generator=cfg.id_generator.apply(expanded),
+        camera_model=butler.get("astrometry_camera", dataId=expanded),
+        exposure_record=exposure_record,
+        exposure_region=expanded.region,
+    )
     return result.exposure, result.stars_footprints
-
-def isr_old (butler, dataId):
-    raw = butler.get("raw", dataId=dataId)
-    linearizer = butler.get("linearizer", dataId=dataId)
-    ptc = butler.get("ptc", dataId=dataId)
-    dark = butler.get("dark", dataId=dataId)
-    bias = butler.get("bias", dataId=dataId)
-    crosstalk = butler.get("crosstalk", dataId=dataId)
-    defects = butler.get("defects", dataId=dataId)
-    flat = butler.get("flat", dataId=dataId)
-    cti = butler.get("cti", dataId=dataId)
-    camera = butler.get("camera", dataId=dataId)
-
-    cfg = IsrTask.ConfigClass()
-    task = IsrTask(config=cfg)
-    res = task.run(raw,
-                   camera=camera,
-                   bias=bias,
-                   dark=dark,
-                   flat=flat,
-                   ptc=ptc,
-                   linearizer=linearizer,
-                   crosstalk=crosstalk,
-                   defects=defects)
-    return res.exposure
-
-
-def characterizeCalibrate(postISRCCD, threshold=5.0):
-    char_config = CharacterizeImageTask.ConfigClass()
-    char_config.doApCorr = True
-    char_config.doDeblend = True
-    # Change the detection threshold
-    #char_config.detection.thresholdType = "stdev"
-    #char_config.detection.thresholdValue = threshold
-    char_task = CharacterizeImageTask(config=char_config)
-    char_result = char_task.run(postISRCCD)
-
-    calib_config = CalibrateTask.ConfigClass()
-    calib_config.doAstrometry = False
-    calib_config.doPhotoCal = False
-    # Change the detection threshold
-    calib_config.detection.thresholdType = "stdev"
-    calib_config.detection.thresholdValue = threshold
-    calib_task = CalibrateTask(config=calib_config, icSourceSchema=char_result.sourceCat.schema)
-    calib_result = calib_task.run(postISRCCD, background=char_result.background, icSourceCat=char_result.sourceCat)
-    return calib_result.outputExposure, calib_result.sourceCat
