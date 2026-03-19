@@ -54,7 +54,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
         seed=seed,
         pool_size=5000,  # increase if acceptance rate is low
         max_checks=200000,  # safety cap
-        check_refs = False
+        check_refs = True
     )
     print("Selected datasets:", len(refs))
 

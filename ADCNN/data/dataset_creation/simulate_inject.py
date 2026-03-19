@@ -632,7 +632,15 @@ def select_good_refs_random_check(
         if pc is None:
             continue
 
-        # C) dimensions check only if we managed to estimate common dimensions
+        # C) require single_visit_star_footprints to exist
+        try:
+            stack_catalog = b.get("single_visit_star_footprints", dataId=pvi.dataId)
+        except Exception:
+            continue
+        if stack_catalog is None:
+            continue
+
+        # D) dimensions check only if we managed to estimate common dimensions
         if dim_x is not None and dim_y is not None:
             try:
                 dims = b.get(
