@@ -421,6 +421,7 @@ def format_dataId(dataId):
     out_dataId = {"instrument": dataId["instrument"],
                   "detector": dataId["detector"],
                   "exposure": dataId["exposure"] if "exposure" in dataId else dataId["visit"],
+                  "visit": dataId["exposure"] if "exposure" in dataId else dataId["visit"],
                   "band": dataId["band"]}
     return out_dataId
 
