@@ -3,7 +3,7 @@ import argparse
 from pathlib import Path
 
 from common import ensure_dir, draw_one_line, psf_fwhm_arcsec_from_calexp, mag_to_snr, snr_to_mag
-from pipetasks import calibrate, isr
+from pipetasks import calibrate, isr, fetch_from_butler
 
 import random
 from typing import List, Sequence
@@ -438,8 +438,8 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             seed = np.random.randint(0,10000)
         butler = Butler(repo, collections=coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
-        postISRCCD = isr(butler, format_dataId(ref.dataId))
-        calexp, pre_injection_Src = calibrate(butler, postISRCCD, format_dataId(ref.dataId), threshold=detection_threshold)
+        #calexp, pre_injection_Src = calibrate(butler, isr(butler, format_dataId(ref.dataId)), format_dataId(ref.dataId), threshold=detection_threshold)
+        calexp, pre_injection_Src = fetch_from_butler(butler, dataId=format_dataId(ref.dataId), threshold=detection_threshold)
         forbidden = build_forbidden_mask(calexp, pre_injection_Src, dimensions)
         injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode, psf_template=psf_template, forbidden_mask=forbidden)
         injected_calexp, post_injection_Src = calibrate(butler, inject(calexp, injection_catalog), format_dataId(ref.dataId), threshold=detection_threshold)
@@ -641,12 +641,12 @@ def select_good_refs_random_check(
             continue
 
         # C) require single_visit_star_footprints to exist
-        try:
-            stack_catalog = b.get("single_visit_star_footprints", dataId=pvi.dataId)
-        except Exception:
-            continue
-        if stack_catalog is None:
-            continue
+        #try:
+        #    stack_catalog = b.get("single_visit_star_footprints", dataId=pvi.dataId)
+        #except Exception:
+        #    continue
+        #if stack_catalog is None:
+        #    continue
 
         # D) dimensions check only if we managed to estimate common dimensions
         if dim_x is not None and dim_y is not None:

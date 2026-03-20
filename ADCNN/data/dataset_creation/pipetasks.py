@@ -2,6 +2,7 @@ import os
 import inspect
 import lsst.meas.algorithms
 from lsst.pipe.tasks.calibrateImage import CalibrateImageTask, CalibrateImageConfig
+from lsst.drp.tasks.single_frame_detect_and_measure import SingleFrameDetectAndMeasureTask, SingleFrameDetectAndMeasureConfig
 from lsst.ap.association.utils import getRegion
 from lsst.ip.isr import IsrTaskLSST
 
@@ -54,6 +55,27 @@ def isr(butler, dataId):
     res = task.run(raw, **kwargs)
     return res.exposure
 
+def source_detect(exposure, input_background, threshold = 5.0, release_id=0):
+    cfg = SingleFrameDetectAndMeasureConfig()
+
+    cfg.connections.exposure = "preliminary_visit_image"
+    cfg.connections.input_background = "preliminary_visit_image_background"
+    cfg.connections.sources = "single_visit_star_reprocessed_unstandardized"
+    cfg.connections.sources_footprints = "single_visit_star_reprocessed_footprints"
+    cfg.connections.background = "preliminary_visit_image_reprocessed_background"
+
+    cfg.id_generator.release_id = release_id
+
+    cfg.detection.thresholdValue = threshold
+    cfg.detection.includeThresholdMultiplier = 1.0
+    cfg.detection.reEstimateBackground = True
+    cfg.detection.doTempLocalBackground = True
+
+    cfg.deblend.maxFootprintArea = -1
+
+    task = SingleFrameDetectAndMeasureTask(config=cfg)
+    result = task.run(exposure=exposure, input_background=input_background)
+    return result
 
 def calibrate(butler, postISRCCD, dataId, threshold=5.0):
     expanded = butler.registry.expandDataId(dataId)
@@ -75,7 +97,6 @@ def calibrate(butler, postISRCCD, dataId, threshold=5.0):
     cfg.useButlerCamera = True
     cfg.astrometry.matcher.maxOffsetPix = 800
     cfg.astrometry_ref_loader.pixelMargin = 800
-    #cfg.star_detection.thresholdValue = threshold
 
     cfg.connections.astrometry_ref_cat = "the_monster_20250219"
     cfg.connections.photometry_ref_cat = "the_monster_20250219"
@@ -140,4 +161,14 @@ def calibrate(butler, postISRCCD, dataId, threshold=5.0):
         exposure_record=exposure_record,
         exposure_region=expanded.region,
     )
-    return result.exposure, result.stars_footprints
+
+    calexp = result.exposure
+    catalog = source_detect(calexp, result.background, threshold = threshold)
+
+    return calexp, catalog
+
+def fetch_from_butler(butler, dataId, threshold = 5.0):
+    calexp = butler.get("preliminary_visit_image", dataId=dataId)
+    background = butler.get("preliminary_visit_image_background", dataId=dataId)
+    catalog =  source_detect(calexp, background, threshold =threshold)
+    return calexp, catalog
