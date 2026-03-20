@@ -75,7 +75,7 @@ def source_detect(exposure, input_background, threshold = 5.0, release_id=0):
 
     task = SingleFrameDetectAndMeasureTask(config=cfg)
     result = task.run(exposure=exposure, input_background=input_background)
-    return result
+    return result.sources_footprints
 
 def calibrate(butler, postISRCCD, dataId, threshold=5.0):
     expanded = butler.registry.expandDataId(dataId)
