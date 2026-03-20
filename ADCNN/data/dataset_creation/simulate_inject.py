@@ -149,8 +149,8 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
             else:
                 magnitude = psf_magnitude
                 surface_brightness = magnitude
-            stack_snr = snr
-            #stack_snr = mag_to_snr(magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel, l_pix=length, theta_deg=angle, snr_definition="measurement")
+            #stack_snr = snr
+            stack_snr = mag_to_snr(magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel, l_pix=length, theta_deg=angle, snr_definition="measurement")
         elif mag_mode == "psf_mag":
             psf_magnitude = rng.uniform(mag[0], upper_limit_mag)
             if inject_length > 0:
