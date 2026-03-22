@@ -468,3 +468,128 @@ def plot_completeness_2d(catalog, snr_bins=10, trail_bins=10,
         ax.set_title(title)
     plt.tight_layout()
     return fig, ax
+
+# =============================================================================
+# Combined Evaluation (separate-algorithm counting)
+# =============================================================================
+
+def _get_stack_detected_column(cat: pd.DataFrame) -> pd.Series:
+    """Return per-object stack detection flag from catalog."""
+    if "stack_detected" in cat.columns:
+        return cat["stack_detected"].astype(bool)
+    if "stack_detection" in cat.columns:
+        return cat["stack_detection"].astype(bool)
+    if "stack_mag" in cat.columns:
+        return (~cat["stack_mag"].isna()).astype(bool)
+    return pd.Series(False, index=cat.index)
+
+
+def combined_objectwise_confusion_separate(
+    catalog: pd.DataFrame,
+    predictions: np.ndarray,
+    threshold: float,
+    *,
+    pixel_gap: int = 2,
+    psf_width: int = 40,
+    max_workers: Optional[int] = None,
+    use_threads: bool = False,
+    stack_mask: Optional[np.ndarray] = None,
+) -> tuple[int, int, int, pd.DataFrame]:
+    """
+    Object-level confusion where NN and stack are counted separately.
+
+    Definitions:
+      TP = true asteroid detected by NN OR stack
+      FN = true asteroid detected by neither
+      FP = unmatched NN detections + unmatched stack detections
+
+    Important:
+      - TP/FN are evaluated on catalog objects.
+      - FP is additive across algorithms.
+      - This is NOT based on connected components of the union mask.
+
+    Args:
+        catalog: GT catalog, one row per real injected object
+        predictions: NN prediction array (N,H,W)
+        threshold: NN threshold
+        stack_mask: stack detection mask/candidate mask (N,H,W). Required if you
+                    want stack false positives counted from image detections.
+
+    Returns:
+        (tp, fp, fn, catalog_with_detection_columns)
+    """
+    cat = catalog.copy()
+
+    # ---------------------------
+    # 1) NN detections on real objects + NN FP
+    # ---------------------------
+    nn_tp, nn_fp, nn_fn, cat_nn = objectwise_confusion(
+        cat.copy(),
+        predictions,
+        threshold,
+        pixel_gap=pixel_gap,
+        psf_width=psf_width,
+        max_workers=max_workers,
+        use_threads=use_threads,
+        stack_fp=stack_mask,
+    )
+    cat["nn_detected"] = cat_nn["nn_detected"].astype(bool)
+
+    # ---------------------------
+    # 2) Stack detections on real objects
+    # ---------------------------
+    cat["stack_detected"] = _get_stack_detected_column(cat)
+
+    # ---------------------------
+    # 3) Combined TP/FN on real objects
+    # ---------------------------
+    cat["combined_detected"] = cat["nn_detected"] | cat["stack_detected"]
+
+    tp = int(cat["combined_detected"].sum())
+    fn = int((~cat["combined_detected"]).sum())
+
+    # ---------------------------
+    # 4) Stack FP counted separately from stack mask
+    # ---------------------------
+    stack_fp = stack_mask.max(axis=(1, 2)).sum()
+
+    # ---------------------------
+    # 5) Total FP = NN FP + stack FP
+    # ---------------------------
+    fp = int(nn_fp + stack_fp)
+
+    return int(tp), int(fp), int(fn), cat
+
+
+def combined_confusion_separate(
+    catalog: pd.DataFrame,
+    ground_truth: np.ndarray,
+    predictions: np.ndarray,
+    threshold: float,
+    *,
+    stack_mask: Optional[np.ndarray] = None,
+    verbose: bool = False,
+    **kwargs
+) -> tuple[tuple[int, int, int], tuple[int, int, int, int], pd.DataFrame]:
+    """
+    Combined confusion where object-level FP is counted separately
+    for NN and stack.
+
+    Returns:
+        ((obj_tp, obj_fp, obj_fn), (pix_tp, pix_fp, pix_fn, pix_tn), catalog)
+    """
+    obj_tp, obj_fp, obj_fn, cat = combined_objectwise_confusion_separate(
+        catalog=catalog,
+        predictions=predictions,
+        threshold=threshold,
+        stack_mask=stack_mask,
+        **kwargs,
+    )
+
+
+    if verbose:
+        print_confusion_matrix(
+            {"TP": obj_tp, "FP": obj_fp, "FN": obj_fn, "TN": 0},
+            title="Combined Object-level Confusion Matrix",
+        )
+    return (obj_tp, obj_fp, obj_fn), cat
