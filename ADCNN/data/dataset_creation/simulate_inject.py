@@ -548,10 +548,11 @@ def select_good_refs_random_check(
           * preliminary_visit_image.photoCalib loads and is not None
           * dimensions match the most common dimensions from a small sampled subset
       - stop when k good refs are collected or max_checks reached
+      - if the initial pool is insufficient, extend it deterministically and continue
     """
     b = Butler(repo, collections=collections)
 
-    # Query once for the random pool
+    refs_by_key = {}
     all_pvi_iter = b.registry.queryDatasets(
         "preliminary_visit_image",
         instrument=instrument,
@@ -559,43 +560,30 @@ def select_good_refs_random_check(
         collections=collections,
         findFirst=True,
     )
+    for ref in all_pvi_iter:
+        key = _key_from_dataId(ref.dataId)
+        refs_by_key.setdefault(key, ref)
 
-    sample_k = int(pool_size) if check_refs else int(k)
-    pool = reservoir_sample(all_pvi_iter, k=sample_k, seed=int(seed))
-
-    # Deterministic shuffle order
+    ordered_refs = [refs_by_key[key] for key in sorted(refs_by_key)]
     rng = random.Random(int(seed))
-    rng.shuffle(pool)
+    rng.shuffle(ordered_refs)
 
-    # Fast path: no checks, just return shuffled unique refs up to k
+    # Fast path: no checks, just return the deterministic sample up to k
     if not check_refs:
-        out = []
-        seen = set()
-        for ref in pool:
-            key = _key_from_dataId(ref.dataId)
-            if key in seen:
-                continue
-            seen.add(key)
-            out.append(ref)
-            if len(out) >= int(k):
-                break
-
-        out = sorted(out, key=lambda r: _key_from_dataId(r.dataId))
-
+        out = sorted(ordered_refs[:int(k)], key=lambda r: _key_from_dataId(r.dataId))
         if verbose:
             print(f"Selected refs without checks: {len(out)} (requested k={k})", flush=True)
-
         return out
 
-    # Checked mode: find most common dimensions from a small deterministic subset
+    initial_pool = min(len(ordered_refs), max(int(k), int(pool_size)))
     dims_x = []
     dims_y = []
-    small_n = min(100, len(pool))
+    small_n = min(100, initial_pool)
     for i in range(small_n):
         try:
             dims = b.get(
                 "preliminary_visit_image.dimensions",
-                dataId=pool[i].dataId,
+                dataId=ordered_refs[i].dataId,
                 collections=collections,
             )
             dims_x.append(int(dims.x))
@@ -609,59 +597,73 @@ def select_good_refs_random_check(
         dim_x = np.bincount(np.array(dims_x, dtype=int)).argmax()
         dim_y = np.bincount(np.array(dims_y, dtype=int)).argmax()
 
-    good = []
-    seen = set()
-    checks = 0
-
-    for pvi in pool:
-        if len(good) >= int(k) or checks >= int(max_checks):
-            break
-        checks += 1
-
-        key = _key_from_dataId(pvi.dataId)
-        if key in seen:
-            continue
-        seen.add(key)
-
-        # A) require star footprints to exist
-        svsf = b.registry.findDataset(
-            "single_visit_star_footprints",
-            dataId=pvi.dataId,
-            collections=collections,
-        )
-        if svsf is None:
-            continue
-
-        # B) require photoCalib to load and not be None
+    slurm_cpus = os.environ.get("SLURM_CPUS_PER_TASK")
+    if slurm_cpus:
         try:
-            pc = b.get(pvi.makeComponentRef("photoCalib"))
-        except Exception:
-            continue
-        if pc is None:
-            continue
+            n_workers = max(1, int(slurm_cpus) - 1)
+        except ValueError:
+            n_workers = max(1, (os.cpu_count() or 1) - 1)
+    else:
+        n_workers = max(1, (os.cpu_count() or 1) - 1)
 
-        # C) require single_visit_star_footprints to exist
-        #try:
-        #    stack_catalog = b.get("single_visit_star_footprints", dataId=pvi.dataId)
-        #except Exception:
-        #    continue
-        #if stack_catalog is None:
-        #    continue
+    def _validate_ref(ref):
+        local_b = Butler(repo, collections=collections)
+        try:
+            svsf = local_b.registry.findDataset(
+                "single_visit_star_footprints",
+                dataId=ref.dataId,
+                collections=collections,
+            )
+            if svsf is None:
+                return False
 
-        # D) dimensions check only if we managed to estimate common dimensions
-        if dim_x is not None and dim_y is not None:
             try:
-                dims = b.get(
-                    "preliminary_visit_image.dimensions",
-                    dataId=pvi.dataId,
-                    collections=collections,
-                )
-                if int(dims.x) != int(dim_x) or int(dims.y) != int(dim_y):
-                    continue
+                pc = local_b.get("preliminary_visit_image.photoCalib", dataId=ref.dataId, collections=collections)
             except Exception:
-                continue
+                return False
+            if pc is None:
+                return False
 
-        good.append(pvi)
+            if dim_x is not None and dim_y is not None:
+                try:
+                    dims = local_b.get(
+                        "preliminary_visit_image.dimensions",
+                        dataId=ref.dataId,
+                        collections=collections,
+                    )
+                    if int(dims.x) != int(dim_x) or int(dims.y) != int(dim_y):
+                        return False
+                except Exception:
+                    return False
+
+            return True
+        except Exception:
+            return False
+
+    good = []
+    checks = 0
+    next_start = 0
+    refill_size = max(1, int(pool_size))
+    batch_size = max(1, min(256, refill_size))
+
+    while len(good) < int(k) and checks < int(max_checks) and next_start < len(ordered_refs):
+        pool_end = min(len(ordered_refs), next_start + (initial_pool if next_start == 0 else refill_size))
+        pool = ordered_refs[next_start:pool_end]
+        next_start = pool_end
+
+        for batch_start in range(0, len(pool), batch_size):
+            if len(good) >= int(k) or checks >= int(max_checks):
+                break
+            batch = pool[batch_start:batch_start + batch_size]
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(n_workers, len(batch))) as ex:
+                results = list(ex.map(_validate_ref, batch))
+
+            for ref, ok in zip(batch, results):
+                if len(good) >= int(k) or checks >= int(max_checks):
+                    break
+                checks += 1
+                if ok:
+                    good.append(ref)
 
     good = sorted(good, key=lambda r: _key_from_dataId(r.dataId))
 
