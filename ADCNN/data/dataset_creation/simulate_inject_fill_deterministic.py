@@ -36,14 +36,31 @@ from multiprocessing import Value, Lock
 import logging
 import pandas as pd
 import traceback
+import time
 
 completed_counter = Value('i', 0)
 counter_lock = Lock()
+_WORKER_BUTLERS = {}
+
 
 def inject(postISRCCD, injection_catalog):
     inject_task = ExposureInjectTask()
     inject_res = inject_task.run([injection_catalog], postISRCCD, postISRCCD.psf, postISRCCD.photoCalib, postISRCCD.wcs)
     return inject_res.output_exposure
+
+
+def get_worker_butler(repo, coll):
+    key = (str(repo), tuple(coll) if isinstance(coll, (list, tuple)) else str(coll))
+    butler = _WORKER_BUTLERS.get(key)
+    if butler is None:
+        butler = Butler(repo, collections=coll)
+        _WORKER_BUTLERS[key] = butler
+    return butler
+
+
+def choose_tmp_dir(save_path, seed):
+    base = os.environ.get("SLURM_TMPDIR") or os.environ.get("TMPDIR") or "/tmp"
+    return os.path.join(base, f"simulate_inject_fill_deterministic_{os.getpid()}_{int(seed)}")
 
 def estimate_m5_local_from_psf_var(calexp, x, y, snr=5.0):
     """
@@ -451,7 +468,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
     try:
         if seed is None:
             seed = np.random.randint(0,10000)
-        butler = Butler(repo, collections=coll)
+        butler = get_worker_butler(repo, coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
         if reprocess:
             calexp, pre_injection_Src = calibrate(butler, isr(butler, format_dataId(ref.dataId)), format_dataId(ref.dataId), threshold=detection_threshold)
@@ -508,6 +525,7 @@ def worker(args):
     rank, dataId, repo, coll, dims, number, trail_length, magnitude, beta, source_type, global_seed, mag_mode, psf_template, detection_threshold, tmp_dir = args
     seed = (int(global_seed) * 1_000_003 + int(dataId["visit"]) * 1_003 + int(dataId["detector"])) & 0xFFFFFFFF
     try:
+        t0 = time.perf_counter()
         res = one_detector_injection(
             number,
             trail_length,
@@ -523,6 +541,7 @@ def worker(args):
             psf_template=psf_template,
             detection_threshold=detection_threshold,
         )
+        t1 = time.perf_counter()
         if res[0] is False:
             return {
                 "status": "err",
@@ -530,6 +549,7 @@ def worker(args):
                 "dataId": res[1],
                 "error": res[2],
                 "traceback": res[3],
+                "compute_s": t1 - t0,
             }
         _, img, mask, real_labels, catalog = res
         tmp_h5 = os.path.join(tmp_dir, f"rank_{rank:09d}.h5")
@@ -539,12 +559,15 @@ def worker(args):
             f.create_dataset("mask", data=mask, dtype="bool")
             f.create_dataset("real_labels", data=real_labels, dtype="uint16")
         catalog.to_pandas().to_csv(tmp_csv, index=False)
+        t2 = time.perf_counter()
         return {
             "status": "ok",
             "rank": rank,
             "dataId": dataId,
             "tmp_h5": tmp_h5,
             "tmp_csv": tmp_csv,
+            "compute_s": t1 - t0,
+            "stage_s": t2 - t1,
         }
 
     except BaseException as e:
@@ -696,6 +719,7 @@ def cleanup_tmp_result(result):
 
 def process_result_in_order(result, success_ordinal, test_ordinals, train_idx, test_idx, paths):
     is_test = success_ordinal in test_ordinals
+    t0 = time.perf_counter()
     try:
         if is_test:
             write_success(paths["test_h5"], test_idx, result)
@@ -707,7 +731,7 @@ def process_result_in_order(result, success_ordinal, test_ordinals, train_idx, t
             train_idx += 1
     finally:
         cleanup_tmp_result(result)
-    return train_idx, test_idx
+    return train_idx, test_idx, time.perf_counter() - t0
 
 def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitude, beta, where, parallel=4,
                            random_subset=0, train_test_split=0, seed=123, chunks=None, test_only=False, mag_mode="psf_mag",
@@ -744,13 +768,14 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
 
     train_csv_path = os.path.join(save_path, "train.csv")
     test_csv_path = os.path.join(save_path, "test.csv")
-    tmp_dir = os.path.join(save_path, ".simulate_inject_fill_deterministic_tmp")
+    tmp_dir = choose_tmp_dir(save_path, seed)
     for path in (h5train_path, h5test_path, train_csv_path, test_csv_path):
         if os.path.exists(path):
             os.remove(path)
     if os.path.exists(tmp_dir):
         shutil.rmtree(tmp_dir)
     os.makedirs(tmp_dir, exist_ok=True)
+    print(f"Temp staging dir: {tmp_dir}", flush=True)
 
     if train_target > 0:
         init_output_file(h5train_path, train_target, dims, h5_chunks)
@@ -788,6 +813,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
     test_count = 0
     success_count = 0
     attempts = 0
+    timing = {"compute_s": 0.0, "stage_s": 0.0, "promote_s": 0.0, "successes": 0, "failures": 0}
     paths = {
         "train_h5": h5train_path,
         "test_h5": h5test_path,
@@ -816,7 +842,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                     )
                     cleanup_tmp_result(result)
                     continue
-                train_count, test_count = process_result_in_order(
+                train_count, test_count, promote_s = process_result_in_order(
                     result,
                     success_count,
                     test_ordinals,
@@ -825,23 +851,40 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                     paths,
                 )
                 success_count += 1
+                timing["compute_s"] += float(result.get("compute_s", 0.0))
+                timing["stage_s"] += float(result.get("stage_s", 0.0))
+                timing["promote_s"] += float(promote_s)
+                timing["successes"] += 1
                 print(f"[{attempts}/{len(tasks)}] done", flush=True)
             else:
+                timing["compute_s"] += float(result.get("compute_s", 0.0))
+                timing["failures"] += 1
                 print(
                     f"[{attempts}/{len(tasks)}] ERROR: rank={result['rank']} dataId={result['dataId']} error={result['error']}",
                     flush=True,
                 )
                 print(result["traceback"], flush=True)
+            if attempts % 25 == 0:
+                success_denom = max(1, timing["successes"])
+                attempt_denom = max(1, attempts)
+                print(
+                    f"[timing] attempts={attempts} successes={timing['successes']} failures={timing['failures']} "
+                    f"avg_compute={timing['compute_s']/attempt_denom:.2f}s "
+                    f"avg_stage={timing['stage_s']/success_denom:.2f}s "
+                    f"avg_promote={timing['promote_s']/success_denom:.2f}s",
+                    flush=True,
+                )
 
     if parallel > 1:
         max_workers = max(1, int(parallel))
+        max_inflight = max_workers * 2
         next_submit = 0
         next_flush_rank = 0
         completed_by_rank = {}
         future_to_rank = {}
 
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as ex:
-            while next_submit < len(tasks) and len(future_to_rank) < max_workers:
+            while next_submit < len(tasks) and len(future_to_rank) < max_inflight:
                 fut = ex.submit(worker, tasks[next_submit])
                 future_to_rank[fut] = next_submit
                 next_submit += 1
@@ -868,7 +911,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                         fut.cancel()
                     break
 
-                while next_submit < len(tasks) and len(future_to_rank) < max_workers:
+                while next_submit < len(tasks) and len(future_to_rank) < max_inflight:
                     fut = ex.submit(worker, tasks[next_submit])
                     future_to_rank[fut] = next_submit
                     next_submit += 1
@@ -887,6 +930,16 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
         print(
             f"Candidate pool exhausted before reaching target: successes={success_count}/{final_target_total}, "
             f"attempts={attempts}, remaining_shortfall={final_target_total - success_count}",
+            flush=True,
+        )
+    if attempts > 0:
+        success_denom = max(1, timing["successes"])
+        attempt_denom = max(1, attempts)
+        print(
+            f"[timing-final] attempts={attempts} successes={timing['successes']} failures={timing['failures']} "
+            f"avg_compute={timing['compute_s']/attempt_denom:.2f}s "
+            f"avg_stage={timing['stage_s']/success_denom:.2f}s "
+            f"avg_promote={timing['promote_s']/success_denom:.2f}s",
             flush=True,
         )
     if os.path.exists(tmp_dir):
