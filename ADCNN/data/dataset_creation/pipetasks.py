@@ -171,4 +171,4 @@ def fetch_from_butler(butler, dataId, threshold = 5.0):
     calexp = butler.get("preliminary_visit_image", dataId=dataId)
     background = butler.get("preliminary_visit_image_background", dataId=dataId)
     catalog =  source_detect(calexp, background, threshold =threshold)
-    return calexp, catalog
+    return calexp, catalog, background

@@ -3,7 +3,7 @@ import argparse
 from pathlib import Path
 
 from common import ensure_dir, draw_one_line, psf_fwhm_arcsec_from_calexp, mag_to_snr, snr_to_mag
-from pipetasks import calibrate, isr, fetch_from_butler
+from pipetasks import calibrate, isr, fetch_from_butler, source_detect
 
 import random
 from typing import List, Sequence
@@ -432,17 +432,27 @@ def format_dataId(dataId):
                   "band": dataId["band"]}
     return out_dataId
 
-def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=None, debug=False, mag_mode="psf_mag", psf_template="image", detection_threshold=5.0):
+def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=None, debug=False, mag_mode="psf_mag", psf_template="image", detection_threshold=5.0, reprocess=False):
     try:
         if seed is None:
             seed = np.random.randint(0,10000)
         butler = Butler(repo, collections=coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
-        #calexp, pre_injection_Src = calibrate(butler, isr(butler, format_dataId(ref.dataId)), format_dataId(ref.dataId), threshold=detection_threshold)
-        calexp, pre_injection_Src = fetch_from_butler(butler, dataId=format_dataId(ref.dataId), threshold=detection_threshold)
-        forbidden = build_forbidden_mask(calexp, pre_injection_Src, dimensions)
-        injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode, psf_template=psf_template, forbidden_mask=forbidden)
-        injected_calexp, post_injection_Src = calibrate(butler, inject(calexp, injection_catalog), format_dataId(ref.dataId), threshold=detection_threshold)
+        if reprocess:
+            calexp, pre_injection_Src = calibrate(butler, isr(butler, format_dataId(ref.dataId)), format_dataId(ref.dataId), threshold=detection_threshold)
+            forbidden = build_forbidden_mask(calexp, pre_injection_Src, dimensions)
+            injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp,
+                                                  mag_mode=mag_mode, psf_template=psf_template,
+                                                  forbidden_mask=forbidden)
+            injected_calexp, post_injection_Src = calibrate(butler, inject(calexp, injection_catalog),
+                                                            format_dataId(ref.dataId), threshold=detection_threshold)
+
+        else:
+            calexp, pre_injection_Src, background = fetch_from_butler(butler, dataId=format_dataId(ref.dataId), threshold=detection_threshold)
+            forbidden = build_forbidden_mask(calexp, pre_injection_Src, dimensions)
+            injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode, psf_template=psf_template, forbidden_mask=forbidden)
+            injected_calexp = inject(calexp, injection_catalog)
+            post_injection_Src = source_detect(injected_calexp, background, threshold=detection_threshold)
         mask = np.zeros((dimensions.y, dimensions.x), dtype=np.uint16)
         for i, row in enumerate(injection_catalog):
             psf_width = injected_calexp.psf.getLocalKernel(Point2D(row["x"], row["y"])).getWidth()
