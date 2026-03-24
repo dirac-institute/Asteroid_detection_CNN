@@ -777,15 +777,44 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                 print(result["traceback"], flush=True)
 
     if parallel > 1:
-        batch_size = max(1, int(parallel))
-        with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as ex:
-            for start in range(0, len(tasks), batch_size):
+        max_workers = max(1, int(parallel))
+        next_submit = 0
+        next_flush_rank = 0
+        completed_by_rank = {}
+        future_to_rank = {}
+
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as ex:
+            while next_submit < len(tasks) and len(future_to_rank) < max_workers:
+                fut = ex.submit(worker, tasks[next_submit])
+                future_to_rank[fut] = next_submit
+                next_submit += 1
+
+            while future_to_rank:
+                done, _ = concurrent.futures.wait(
+                    future_to_rank.keys(),
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+                for fut in done:
+                    rank = future_to_rank.pop(fut)
+                    completed_by_rank[rank] = fut.result()
+
+                flushed = []
+                while next_flush_rank in completed_by_rank:
+                    flushed.append(completed_by_rank.pop(next_flush_rank))
+                    next_flush_rank += 1
+
+                if flushed:
+                    handle_ordered_batch(flushed)
+
                 if success_count >= final_target_total:
+                    for fut in future_to_rank:
+                        fut.cancel()
                     break
-                batch = tasks[start:start + batch_size]
-                futs = [ex.submit(worker, task) for task in batch]
-                batch_results = [fut.result() for fut in concurrent.futures.as_completed(futs)]
-                handle_ordered_batch(batch_results)
+
+                while next_submit < len(tasks) and len(future_to_rank) < max_workers:
+                    fut = ex.submit(worker, tasks[next_submit])
+                    future_to_rank[fut] = next_submit
+                    next_submit += 1
     else:
         for task in tasks:
             if success_count >= final_target_total:
