@@ -37,10 +37,12 @@ import logging
 import pandas as pd
 import traceback
 import time
+import signal
 
 completed_counter = Value('i', 0)
 counter_lock = Lock()
 _WORKER_BUTLERS = {}
+TASK_TIMEOUT_SECONDS = 300
 
 
 def inject(postISRCCD, injection_catalog):
@@ -61,6 +63,14 @@ def get_worker_butler(repo, coll):
 def choose_tmp_dir(save_path, seed):
     base = os.environ.get("SLURM_TMPDIR") or os.environ.get("TMPDIR") or "/tmp"
     return os.path.join(base, f"simulate_inject_fill_deterministic_{os.getpid()}_{int(seed)}")
+
+
+class TaskTimeoutError(TimeoutError):
+    pass
+
+
+def _alarm_timeout_handler(signum, frame):
+    raise TaskTimeoutError(f"Task exceeded timeout of {TASK_TIMEOUT_SECONDS} seconds")
 
 def estimate_m5_local_from_psf_var(calexp, x, y, snr=5.0):
     """
@@ -526,21 +536,27 @@ def worker(args):
     seed = (int(global_seed) * 1_000_003 + int(dataId["visit"]) * 1_003 + int(dataId["detector"])) & 0xFFFFFFFF
     try:
         t0 = time.perf_counter()
-        res = one_detector_injection(
-            number,
-            trail_length,
-            magnitude,
-            beta,
-            repo,
-            coll,
-            dims,
-            source_type,
-            dataId,
-            seed,
-            mag_mode=mag_mode,
-            psf_template=psf_template,
-            detection_threshold=detection_threshold,
-        )
+        previous_handler = signal.signal(signal.SIGALRM, _alarm_timeout_handler)
+        signal.setitimer(signal.ITIMER_REAL, TASK_TIMEOUT_SECONDS)
+        try:
+            res = one_detector_injection(
+                number,
+                trail_length,
+                magnitude,
+                beta,
+                repo,
+                coll,
+                dims,
+                source_type,
+                dataId,
+                seed,
+                mag_mode=mag_mode,
+                psf_template=psf_template,
+                detection_threshold=detection_threshold,
+            )
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous_handler)
         t1 = time.perf_counter()
         if res[0] is False:
             return {
@@ -787,13 +803,17 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
     timing = {"compute_s": 0.0, "stage_s": 0.0, "promote_s": 0.0, "successes": 0, "failures": 0}
     manager = Manager()
     lock = manager.Lock()
-    next_candidate_idx = 0
+    next_candidate_for_slot = [slot_idx for slot_idx in range(len(slots))]
     next_slot_to_activate = 0
     filled_slots = set()
 
-    def make_task(slot_idx, candidate_idx):
+    def make_task(slot_idx):
         slot = slots[slot_idx]
+        candidate_idx = next_candidate_for_slot[slot_idx]
+        if candidate_idx >= len(refs):
+            return None
         ref = refs[candidate_idx]
+        next_candidate_for_slot[slot_idx] += len(slots)
         return [
             candidate_idx,
             slot["image_id"],
@@ -833,11 +853,14 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
         future_to_slot = {}
 
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as ex:
-            while next_slot_to_activate < len(slots) and len(future_to_slot) < max_inflight and next_candidate_idx < len(refs):
-                fut = ex.submit(worker, make_task(next_slot_to_activate, next_candidate_idx))
+            while next_slot_to_activate < len(slots) and len(future_to_slot) < max_inflight:
+                task = make_task(next_slot_to_activate)
+                if task is None:
+                    next_slot_to_activate += 1
+                    continue
+                fut = ex.submit(worker, task)
                 future_to_slot[fut] = next_slot_to_activate
                 next_slot_to_activate += 1
-                next_candidate_idx += 1
 
             while future_to_slot:
                 done, _ = concurrent.futures.wait(
@@ -864,10 +887,10 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                         )
                         if result.get("traceback"):
                             print(result["traceback"], flush=True)
-                        if next_candidate_idx < len(refs):
-                            retry_fut = ex.submit(worker, make_task(slot_idx, next_candidate_idx))
+                        retry_task = make_task(slot_idx)
+                        if retry_task is not None:
+                            retry_fut = ex.submit(worker, retry_task)
                             future_to_slot[retry_fut] = slot_idx
-                            next_candidate_idx += 1
 
                 if attempts % 25 == 0:
                     log_timing()
@@ -880,19 +903,23 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                 while (
                     next_slot_to_activate < len(slots)
                     and len(future_to_slot) < max_inflight
-                    and next_candidate_idx < len(refs)
                 ):
-                    fut = ex.submit(worker, make_task(next_slot_to_activate, next_candidate_idx))
+                    task = make_task(next_slot_to_activate)
+                    if task is None:
+                        next_slot_to_activate += 1
+                        continue
+                    fut = ex.submit(worker, task)
                     future_to_slot[fut] = next_slot_to_activate
                     next_slot_to_activate += 1
-                    next_candidate_idx += 1
     else:
-        while next_slot_to_activate < len(slots) and next_candidate_idx < len(refs):
+        while next_slot_to_activate < len(slots):
             slot_idx = next_slot_to_activate
             next_slot_to_activate += 1
-            while next_candidate_idx < len(refs):
-                result = worker(make_task(slot_idx, next_candidate_idx))
-                next_candidate_idx += 1
+            while True:
+                task = make_task(slot_idx)
+                if task is None:
+                    break
+                result = worker(task)
                 attempts += 1
                 timing["compute_s"] += float(result.get("compute_s", 0.0))
                 if result["status"] == "ok":
