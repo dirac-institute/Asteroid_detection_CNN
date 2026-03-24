@@ -32,7 +32,7 @@ import concurrent.futures
 from astropy.io import ascii
 import os
 import shutil
-from multiprocessing import Value, Lock
+from multiprocessing import Value, Lock, Manager
 import logging
 import pandas as pd
 import traceback
@@ -522,7 +522,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
 
 
 def worker(args):
-    rank, dataId, repo, coll, dims, number, trail_length, magnitude, beta, source_type, global_seed, mag_mode, psf_template, detection_threshold, tmp_dir = args
+    rank, image_id, split_name, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta, source_type, global_seed, mag_mode, psf_template, detection_threshold = args
     seed = (int(global_seed) * 1_000_003 + int(dataId["visit"]) * 1_003 + int(dataId["detector"])) & 0xFFFFFFFF
     try:
         t0 = time.perf_counter()
@@ -546,28 +546,34 @@ def worker(args):
             return {
                 "status": "err",
                 "rank": rank,
+                "image_id": image_id,
+                "split": split_name,
                 "dataId": res[1],
                 "error": res[2],
                 "traceback": res[3],
                 "compute_s": t1 - t0,
             }
         _, img, mask, real_labels, catalog = res
-        tmp_h5 = os.path.join(tmp_dir, f"rank_{rank:09d}.h5")
-        tmp_csv = os.path.join(tmp_dir, f"rank_{rank:09d}.csv")
-        with h5py.File(tmp_h5, "w") as f:
-            f.create_dataset("image", data=img, dtype="float32")
-            f.create_dataset("mask", data=mask, dtype="bool")
-            f.create_dataset("real_labels", data=real_labels, dtype="uint16")
-        catalog.to_pandas().to_csv(tmp_csv, index=False)
         t2 = time.perf_counter()
+        with lock:
+            with h5py.File(h5path, "a") as f:
+                f["images"][image_id] = img
+                f["masks"][image_id] = mask
+                f["real_labels"][image_id] = real_labels
+            df = catalog.to_pandas()
+            df["image_id"] = image_id
+            file_exists = os.path.exists(csvpath)
+            df.to_csv(csvpath, mode=("a" if file_exists else "w"), header=(not file_exists), index=False)
+        t3 = time.perf_counter()
         return {
             "status": "ok",
             "rank": rank,
+            "image_id": image_id,
+            "split": split_name,
             "dataId": dataId,
-            "tmp_h5": tmp_h5,
-            "tmp_csv": tmp_csv,
             "compute_s": t1 - t0,
             "stage_s": t2 - t1,
+            "promote_s": t3 - t2,
         }
 
     except BaseException as e:
@@ -575,6 +581,8 @@ def worker(args):
         return {
             "status": "err",
             "rank": rank,
+            "image_id": image_id,
+            "split": split_name,
             "dataId": dataId,
             "error": repr(e),
             "traceback": tb,
@@ -687,51 +695,41 @@ def resize_output_file(path, n_rows):
             f[key].resize((n_rows, f[key].shape[1], f[key].shape[2]))
 
 
-def write_success(path, idx, result):
-    with h5py.File(result["tmp_h5"], "r") as src:
-        image = src["image"][:]
-        mask = src["mask"][:]
-        real_labels = src["real_labels"][:]
-    with h5py.File(path, "a") as f:
-        f["images"][idx] = image
-        f["masks"][idx] = mask
-        f["real_labels"][idx] = real_labels
-
-
-def append_catalog(csv_path, catalog_df, image_id):
-    df = catalog_df.copy()
-    df["image_id"] = image_id
-    file_exists = os.path.exists(csv_path)
-    df.to_csv(csv_path, mode=("a" if file_exists else "w"), header=(not file_exists), index=False)
-
-
-def append_catalog_from_tmp(csv_path, tmp_csv_path, image_id):
-    df = pd.read_csv(tmp_csv_path)
-    append_catalog(csv_path, df, image_id)
-
-
-def cleanup_tmp_result(result):
-    for key in ("tmp_h5", "tmp_csv"):
-        path = result.get(key)
-        if path and os.path.exists(path):
-            os.remove(path)
-
-
-def process_result_in_order(result, success_ordinal, test_ordinals, train_idx, test_idx, paths):
-    is_test = success_ordinal in test_ordinals
-    t0 = time.perf_counter()
-    try:
-        if is_test:
-            write_success(paths["test_h5"], test_idx, result)
-            append_catalog_from_tmp(paths["test_csv"], result["tmp_csv"], test_idx)
-            test_idx += 1
-        else:
-            write_success(paths["train_h5"], train_idx, result)
-            append_catalog_from_tmp(paths["train_csv"], result["tmp_csv"], train_idx)
-            train_idx += 1
-    finally:
-        cleanup_tmp_result(result)
-    return train_idx, test_idx, time.perf_counter() - t0
+def build_output_slots(target_total, test_ordinals, test_only, h5train_path, h5test_path, train_csv_path, test_csv_path):
+    slots = []
+    train_image_id = 0
+    test_image_id = 0
+    if test_only:
+        for ordinal in range(int(target_total)):
+            slots.append({
+                "ordinal": ordinal,
+                "split": "test",
+                "image_id": test_image_id,
+                "h5path": h5test_path,
+                "csvpath": test_csv_path,
+            })
+            test_image_id += 1
+    else:
+        for ordinal in range(int(target_total)):
+            if ordinal in test_ordinals:
+                slots.append({
+                    "ordinal": ordinal,
+                    "split": "test",
+                    "image_id": test_image_id,
+                    "h5path": h5test_path,
+                    "csvpath": test_csv_path,
+                })
+                test_image_id += 1
+            else:
+                slots.append({
+                    "ordinal": ordinal,
+                    "split": "train",
+                    "image_id": train_image_id,
+                    "h5path": h5train_path,
+                    "csvpath": train_csv_path,
+                })
+                train_image_id += 1
+    return slots
 
 def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitude, beta, where, parallel=4,
                            random_subset=0, train_test_split=0, seed=123, chunks=None, test_only=False, mag_mode="psf_mag",
@@ -768,14 +766,9 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
 
     train_csv_path = os.path.join(save_path, "train.csv")
     test_csv_path = os.path.join(save_path, "test.csv")
-    tmp_dir = choose_tmp_dir(save_path, seed)
     for path in (h5train_path, h5test_path, train_csv_path, test_csv_path):
         if os.path.exists(path):
             os.remove(path)
-    if os.path.exists(tmp_dir):
-        shutil.rmtree(tmp_dir)
-    os.makedirs(tmp_dir, exist_ok=True)
-    print(f"Temp staging dir: {tmp_dir}", flush=True)
 
     if train_target > 0:
         init_output_file(h5train_path, train_target, dims, h5_chunks)
@@ -788,13 +781,30 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             compression={"compression": "gzip", "compression_opts": 4, "shuffle": True},
         )
 
-    tasks = [
-        [
-            rank,
+    slots = build_output_slots(final_target_total, test_ordinals, test_only, h5train_path, h5test_path, train_csv_path, test_csv_path)
+    success_count = 0
+    attempts = 0
+    timing = {"compute_s": 0.0, "stage_s": 0.0, "promote_s": 0.0, "successes": 0, "failures": 0}
+    manager = Manager()
+    lock = manager.Lock()
+    next_candidate_idx = 0
+    next_slot_to_activate = 0
+    filled_slots = set()
+
+    def make_task(slot_idx, candidate_idx):
+        slot = slots[slot_idx]
+        ref = refs[candidate_idx]
+        return [
+            candidate_idx,
+            slot["image_id"],
+            slot["split"],
             ref.dataId,
             repo,
             coll,
             dims,
+            lock,
+            slot["h5path"],
+            slot["csvpath"],
             number,
             trail_length,
             magnitude,
@@ -804,127 +814,106 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             mag_mode,
             psf_template,
             stack_detection_threshold,
-            tmp_dir,
         ]
-        for rank, ref in enumerate(refs)
-    ]
 
-    train_count = 0
-    test_count = 0
-    success_count = 0
-    attempts = 0
-    timing = {"compute_s": 0.0, "stage_s": 0.0, "promote_s": 0.0, "successes": 0, "failures": 0}
-    paths = {
-        "train_h5": h5train_path,
-        "test_h5": h5test_path,
-        "train_csv": train_csv_path,
-        "test_csv": test_csv_path,
-    }
-
-    def handle_ordered_batch(batch_results):
-        nonlocal train_count, test_count, success_count, attempts
-        for result in sorted(batch_results, key=lambda x: x["rank"]):
-            attempts += 1
-            if result["status"] == "ok":
-                if success_count >= final_target_total:
-                    cleanup_tmp_result(result)
-                    continue
-                with h5py.File(result["tmp_h5"], "r") as src:
-                    image_shape = tuple(src["image"].shape)
-                    mask_shape = tuple(src["mask"].shape)
-                    labels_shape = tuple(src["real_labels"].shape)
-                expected_shape = (dims.y, dims.x)
-                if image_shape != expected_shape or mask_shape != expected_shape or labels_shape != expected_shape:
-                    print(
-                        f"[{attempts}/{len(tasks)}] ERROR: rank={result['rank']} dataId={result['dataId']} "
-                        f"error=shape_mismatch expected={expected_shape} got={image_shape}",
-                        flush=True,
-                    )
-                    cleanup_tmp_result(result)
-                    continue
-                train_count, test_count, promote_s = process_result_in_order(
-                    result,
-                    success_count,
-                    test_ordinals,
-                    train_count,
-                    test_count,
-                    paths,
-                )
-                success_count += 1
-                timing["compute_s"] += float(result.get("compute_s", 0.0))
-                timing["stage_s"] += float(result.get("stage_s", 0.0))
-                timing["promote_s"] += float(promote_s)
-                timing["successes"] += 1
-                print(f"[{attempts}/{len(tasks)}] done", flush=True)
-            else:
-                timing["compute_s"] += float(result.get("compute_s", 0.0))
-                timing["failures"] += 1
-                print(
-                    f"[{attempts}/{len(tasks)}] ERROR: rank={result['rank']} dataId={result['dataId']} error={result['error']}",
-                    flush=True,
-                )
-                print(result["traceback"], flush=True)
-            if attempts % 25 == 0:
-                success_denom = max(1, timing["successes"])
-                attempt_denom = max(1, attempts)
-                print(
-                    f"[timing] attempts={attempts} successes={timing['successes']} failures={timing['failures']} "
-                    f"avg_compute={timing['compute_s']/attempt_denom:.2f}s "
-                    f"avg_stage={timing['stage_s']/success_denom:.2f}s "
-                    f"avg_promote={timing['promote_s']/success_denom:.2f}s",
-                    flush=True,
-                )
+    def log_timing():
+        success_denom = max(1, timing["successes"])
+        attempt_denom = max(1, attempts)
+        print(
+            f"[timing] attempts={attempts} successes={timing['successes']} failures={timing['failures']} "
+            f"avg_compute={timing['compute_s']/attempt_denom:.2f}s "
+            f"avg_stage={timing['stage_s']/success_denom:.2f}s "
+            f"avg_promote={timing['promote_s']/success_denom:.2f}s",
+            flush=True,
+        )
 
     if parallel > 1:
         max_workers = max(1, int(parallel))
         max_inflight = max_workers * 2
-        next_submit = 0
-        next_flush_rank = 0
-        completed_by_rank = {}
-        future_to_rank = {}
+        future_to_slot = {}
 
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as ex:
-            while next_submit < len(tasks) and len(future_to_rank) < max_inflight:
-                fut = ex.submit(worker, tasks[next_submit])
-                future_to_rank[fut] = next_submit
-                next_submit += 1
+            while next_slot_to_activate < len(slots) and len(future_to_slot) < max_inflight and next_candidate_idx < len(refs):
+                fut = ex.submit(worker, make_task(next_slot_to_activate, next_candidate_idx))
+                future_to_slot[fut] = next_slot_to_activate
+                next_slot_to_activate += 1
+                next_candidate_idx += 1
 
-            while future_to_rank:
+            while future_to_slot:
                 done, _ = concurrent.futures.wait(
-                    future_to_rank.keys(),
+                    future_to_slot.keys(),
                     return_when=concurrent.futures.FIRST_COMPLETED,
                 )
                 for fut in done:
-                    rank = future_to_rank.pop(fut)
-                    completed_by_rank[rank] = fut.result()
+                    slot_idx = future_to_slot.pop(fut)
+                    result = fut.result()
+                    attempts += 1
+                    timing["compute_s"] += float(result.get("compute_s", 0.0))
+                    if result["status"] == "ok":
+                        filled_slots.add(slot_idx)
+                        success_count += 1
+                        timing["successes"] += 1
+                        timing["stage_s"] += float(result.get("stage_s", 0.0))
+                        timing["promote_s"] += float(result.get("promote_s", 0.0))
+                        print(f"[{attempts}/{len(refs)}] done", flush=True)
+                    else:
+                        timing["failures"] += 1
+                        print(
+                            f"[{attempts}/{len(refs)}] ERROR: rank={result['rank']} dataId={result['dataId']} error={result['error']}",
+                            flush=True,
+                        )
+                        if result.get("traceback"):
+                            print(result["traceback"], flush=True)
+                        if next_candidate_idx < len(refs):
+                            retry_fut = ex.submit(worker, make_task(slot_idx, next_candidate_idx))
+                            future_to_slot[retry_fut] = slot_idx
+                            next_candidate_idx += 1
 
-                flushed = []
-                while next_flush_rank in completed_by_rank:
-                    flushed.append(completed_by_rank.pop(next_flush_rank))
-                    next_flush_rank += 1
-
-                if flushed:
-                    handle_ordered_batch(flushed)
+                if attempts % 25 == 0:
+                    log_timing()
 
                 if success_count >= final_target_total:
-                    for fut in future_to_rank:
+                    for fut in future_to_slot:
                         fut.cancel()
                     break
 
-                while next_submit < len(tasks) and len(future_to_rank) < max_inflight:
-                    fut = ex.submit(worker, tasks[next_submit])
-                    future_to_rank[fut] = next_submit
-                    next_submit += 1
+                while (
+                    next_slot_to_activate < len(slots)
+                    and len(future_to_slot) < max_inflight
+                    and next_candidate_idx < len(refs)
+                ):
+                    fut = ex.submit(worker, make_task(next_slot_to_activate, next_candidate_idx))
+                    future_to_slot[fut] = next_slot_to_activate
+                    next_slot_to_activate += 1
+                    next_candidate_idx += 1
     else:
-        for task in tasks:
+        while next_slot_to_activate < len(slots) and next_candidate_idx < len(refs):
+            slot_idx = next_slot_to_activate
+            next_slot_to_activate += 1
+            while next_candidate_idx < len(refs):
+                result = worker(make_task(slot_idx, next_candidate_idx))
+                next_candidate_idx += 1
+                attempts += 1
+                timing["compute_s"] += float(result.get("compute_s", 0.0))
+                if result["status"] == "ok":
+                    filled_slots.add(slot_idx)
+                    success_count += 1
+                    timing["successes"] += 1
+                    timing["stage_s"] += float(result.get("stage_s", 0.0))
+                    timing["promote_s"] += float(result.get("promote_s", 0.0))
+                    print(f"[{attempts}/{len(refs)}] done", flush=True)
+                    break
+                timing["failures"] += 1
+                print(
+                    f"[{attempts}/{len(refs)}] ERROR: rank={result['rank']} dataId={result['dataId']} error={result['error']}",
+                    flush=True,
+                )
+                if result.get("traceback"):
+                    print(result["traceback"], flush=True)
+            if attempts % 25 == 0 and attempts > 0:
+                log_timing()
             if success_count >= final_target_total:
                 break
-            handle_ordered_batch([worker(task)])
-
-    if train_target > 0:
-        resize_output_file(h5train_path, train_count)
-    if test_target > 0:
-        resize_output_file(h5test_path, test_count)
 
     if success_count < final_target_total:
         print(
@@ -942,8 +931,6 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             f"avg_promote={timing['promote_s']/success_denom:.2f}s",
             flush=True,
         )
-    if os.path.exists(tmp_dir):
-        shutil.rmtree(tmp_dir)
 
 def rng_for_task(seed: int, dataId: dict) -> np.random.Generator:
     # stable across runs
