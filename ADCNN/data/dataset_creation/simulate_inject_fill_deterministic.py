@@ -561,6 +561,17 @@ def _key_from_dataId(d):
     return (int(d["visit"]), int(d["detector"]))
 
 
+def get_allowed_detector_ids(butler, instrument: str, physical_type: str = "E2V") -> set[int]:
+    camera = butler.get("camera", dataId={"instrument": instrument})
+    allowed = set()
+    for det in camera:
+        if det.getType().name != "SCIENCE":
+            continue
+        if str(det.getPhysicalType()) == str(physical_type):
+            allowed.add(int(det.getId()))
+    return allowed
+
+
 def select_candidate_refs_deterministic(
     *,
     repo: str,
@@ -572,6 +583,8 @@ def select_candidate_refs_deterministic(
 ) -> List:
     """Return the full deterministic candidate order for preliminary_visit_image refs."""
     b = Butler(repo, collections=collections)
+    allowed_detector_ids = get_allowed_detector_ids(b, instrument=instrument, physical_type="E2V")
+    print(f"E2V detector filter: {len(allowed_detector_ids)} science detectors allowed", flush=True)
 
     refs_by_key = {}
     all_pvi_iter = b.registry.queryDatasets(
@@ -583,6 +596,8 @@ def select_candidate_refs_deterministic(
     )
     for ref in all_pvi_iter:
         key = _key_from_dataId(ref.dataId)
+        if int(key[1]) not in allowed_detector_ids:
+            continue
         refs_by_key.setdefault(key, ref)
 
     ordered_refs = [refs_by_key[key] for key in sorted(refs_by_key)]
