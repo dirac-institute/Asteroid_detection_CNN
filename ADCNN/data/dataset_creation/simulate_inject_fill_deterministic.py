@@ -443,6 +443,10 @@ def format_dataId(dataId):
                   "band": dataId["band"]}
     return out_dataId
 
+def dimensions_from_exposure(exposure):
+    bbox = exposure.getBBox()
+    return geom.Extent2I(int(bbox.getWidth()), int(bbox.getHeight()))
+
 def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=None, debug=False, mag_mode="psf_mag", psf_template="image", detection_threshold=5.0, reprocess=False):
     try:
         if seed is None:
@@ -451,8 +455,9 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
         if reprocess:
             calexp, pre_injection_Src = calibrate(butler, isr(butler, format_dataId(ref.dataId)), format_dataId(ref.dataId), threshold=detection_threshold)
-            forbidden = build_forbidden_mask(calexp, pre_injection_Src, dimensions)
-            injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp,
+            local_dimensions = dimensions_from_exposure(calexp)
+            forbidden = build_forbidden_mask(calexp, pre_injection_Src, local_dimensions)
+            injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, local_dimensions, seed, calexp,
                                                   mag_mode=mag_mode, psf_template=psf_template,
                                                   forbidden_mask=forbidden)
             injected_calexp, post_injection_Src = calibrate(butler, inject(calexp, injection_catalog),
@@ -460,11 +465,12 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
 
         else:
             calexp, pre_injection_Src, background = fetch_from_butler(butler, dataId=format_dataId(ref.dataId), threshold=detection_threshold)
-            forbidden = build_forbidden_mask(calexp, pre_injection_Src, dimensions)
-            injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode, psf_template=psf_template, forbidden_mask=forbidden)
+            local_dimensions = dimensions_from_exposure(calexp)
+            forbidden = build_forbidden_mask(calexp, pre_injection_Src, local_dimensions)
+            injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, local_dimensions, seed, calexp, mag_mode=mag_mode, psf_template=psf_template, forbidden_mask=forbidden)
             injected_calexp = inject(calexp, injection_catalog)
             post_injection_Src = source_detect(injected_calexp, background, threshold=detection_threshold)
-        mask = np.zeros((dimensions.y, dimensions.x), dtype=np.uint16)
+        mask = np.zeros((local_dimensions.y, local_dimensions.x), dtype=np.uint16)
         for i, row in enumerate(injection_catalog):
             psf_width = injected_calexp.psf.getLocalKernel(Point2D(row["x"], row["y"])).getWidth()
             mask = draw_one_line(mask, [row["x"], row["y"]], row["beta"], row["trail_length"], true_value=i + 1,
@@ -472,14 +478,14 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
         injection_catalog, matched_fp_mask = stack_hits_by_footprints(post_src=crossmatch_catalogs (pre_injection_Src, post_injection_Src),
                                                                        calexp_pre=calexp,
                                                                        calexp_post=injected_calexp,
-                                                                       dimensions=dimensions,
+                                                                       dimensions=local_dimensions,
                                                                        truth_id_mask=mask,
                                                                        injection_catalog=injection_catalog,
                                                                        overlap_minpix=1,
                                                                        overlap_frac=0.0,
                                                                        return_matched_fp_masks=debug)
 
-        real_labels = footprints_to_label_mask(pre_injection_Src, dimensions, dtype=np.uint16)
+        real_labels = footprints_to_label_mask(pre_injection_Src, local_dimensions, dtype=np.uint16)
         if not debug:
             return True, injected_calexp.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog
         else:
@@ -608,6 +614,25 @@ def compute_split_targets(target_total: int, train_test_split: float, test_only:
     return train_target, test_target, test_ordinals
 
 
+def choose_output_dimensions(butler, refs, coll, seed, sample_size=5):
+    sample_size = min(int(sample_size), len(refs))
+    if sample_size <= 0:
+        raise RuntimeError("No refs available to choose output dimensions.")
+
+    rng = random.Random(int(seed) + 17)
+    sample_indices = sorted(rng.sample(range(len(refs)), sample_size))
+    counts = {}
+    dims_by_key = {}
+    for idx in sample_indices:
+        dims = butler.get("preliminary_visit_image.dimensions", dataId=refs[idx].dataId)
+        key = (int(dims.y), int(dims.x))
+        counts[key] = counts.get(key, 0) + 1
+        dims_by_key[key] = dims
+
+    best_key = max(sorted(counts), key=lambda key: counts[key])
+    return dims_by_key[best_key], sample_indices, counts
+
+
 def init_output_file(path, n_rows, dims, chunks, compression=None):
     kwargs = {"chunks": chunks, "maxshape": (n_rows, dims.y, dims.x)}
     if compression is not None:
@@ -692,7 +717,11 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
     final_target_total = test_target if test_only else target_total
     print(f"Target successful outputs: total={final_target_total} train={train_target} test={test_target}", flush=True)
 
-    dims = butler.get("preliminary_visit_image.dimensions", dataId=refs[0].dataId)
+    dims, dim_sample_indices, dim_counts = choose_output_dimensions(butler, refs, coll, seed, sample_size=5)
+    print(
+        f"Chosen output dimensions: ({dims.y}, {dims.x}) from sample_indices={dim_sample_indices} counts={dim_counts}",
+        flush=True,
+    )
     if chunks is not None:
         h5_chunks = (1, min(int(chunks), dims.y), min(int(chunks), dims.x))
     else:
@@ -757,6 +786,19 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             attempts += 1
             if result["status"] == "ok":
                 if success_count >= final_target_total:
+                    cleanup_tmp_result(result)
+                    continue
+                with h5py.File(result["tmp_h5"], "r") as src:
+                    image_shape = tuple(src["image"].shape)
+                    mask_shape = tuple(src["mask"].shape)
+                    labels_shape = tuple(src["real_labels"].shape)
+                expected_shape = (dims.y, dims.x)
+                if image_shape != expected_shape or mask_shape != expected_shape or labels_shape != expected_shape:
+                    print(
+                        f"[{attempts}/{len(tasks)}] ERROR: rank={result['rank']} dataId={result['dataId']} "
+                        f"error=shape_mismatch expected={expected_shape} got={image_shape}",
+                        flush=True,
+                    )
                     cleanup_tmp_result(result)
                     continue
                 train_count, test_count = process_result_in_order(
