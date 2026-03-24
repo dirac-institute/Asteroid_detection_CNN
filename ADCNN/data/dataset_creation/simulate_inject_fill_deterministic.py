@@ -747,14 +747,10 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                     paths,
                 )
                 success_count += 1
-                print(
-                    f"[attempt {attempts}/{len(tasks)}] success rank={result['rank']} "
-                    f"filled total={success_count}/{target_total} train={train_count}/{train_target} test={test_count}/{test_target}",
-                    flush=True,
-                )
+                print(f"[{attempts}/{len(tasks)}] done", flush=True)
             else:
                 print(
-                    f"[attempt {attempts}/{len(tasks)}] failure rank={result['rank']} dataId={result['dataId']} error={result['error']}",
+                    f"[{attempts}/{len(tasks)}] ERROR: rank={result['rank']} dataId={result['dataId']} error={result['error']}",
                     flush=True,
                 )
                 print(result["traceback"], flush=True)
