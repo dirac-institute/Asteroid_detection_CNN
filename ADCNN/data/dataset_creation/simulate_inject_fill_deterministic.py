@@ -493,7 +493,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
                 det_neg_mask = (m.array & detn_bit) != 0
             matched_fp_masks = np.any(np.stack(matched_fp_mask, axis=-1), axis=-1)
             return True, injected_calexp.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog, det_mask, matched_fp_masks
-    except Exception as e:
+    except BaseException as e:
         return False, ref_dataId, repr(e), traceback.format_exc()
 
 
@@ -535,13 +535,13 @@ def worker(args):
             "catalog": catalog.to_pandas(),
         }
 
-    except Exception:
+    except BaseException as e:
         tb = traceback.format_exc()
         return {
             "status": "err",
             "rank": rank,
             "dataId": dataId,
-            "error": "worker_exception",
+            "error": repr(e),
             "traceback": tb,
         }
 
@@ -589,9 +589,6 @@ def compute_target_total(random_subset: int, n_candidates: int) -> int:
 
 
 def compute_split_targets(target_total: int, train_test_split: float, test_only: bool, seed: int):
-    if test_only:
-        return 0, int(target_total), set(range(int(target_total)))
-
     if 0 < train_test_split < 1:
         test_target = int((1 - train_test_split) * int(target_total))
         rng_split = np.random.default_rng(int(seed) + 1)
@@ -600,6 +597,8 @@ def compute_split_targets(target_total: int, train_test_split: float, test_only:
         test_target = 0
         test_ordinals = set()
     train_target = int(target_total) - int(test_target)
+    if test_only:
+        return 0, int(test_target), set(range(int(test_target)))
     return train_target, test_target, test_ordinals
 
 
