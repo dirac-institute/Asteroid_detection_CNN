@@ -37,7 +37,7 @@ if [[ -z "$TEST_ONLY_FLAG" ]]; then
   rm -f "$OUT/train.h5" "$OUT/train.csv"
 fi
 
-srun python3 -u simulate_inject.py \
+srun python3 -u simulate_inject_fill_deterministic.py \
   --repo "$REPO" \
   --collections "$COLL" \
   --save-path "$OUT" \
