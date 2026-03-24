@@ -31,6 +31,7 @@ import h5py
 import concurrent.futures
 from astropy.io import ascii
 import os
+import shutil
 from multiprocessing import Value, Lock
 import logging
 import pandas as pd
@@ -498,7 +499,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
 
 
 def worker(args):
-    rank, dataId, repo, coll, dims, number, trail_length, magnitude, beta, source_type, global_seed, mag_mode, psf_template, detection_threshold = args
+    rank, dataId, repo, coll, dims, number, trail_length, magnitude, beta, source_type, global_seed, mag_mode, psf_template, detection_threshold, tmp_dir = args
     seed = (int(global_seed) * 1_000_003 + int(dataId["visit"]) * 1_003 + int(dataId["detector"])) & 0xFFFFFFFF
     try:
         res = one_detector_injection(
@@ -525,14 +526,19 @@ def worker(args):
                 "traceback": res[3],
             }
         _, img, mask, real_labels, catalog = res
+        tmp_h5 = os.path.join(tmp_dir, f"rank_{rank:09d}.h5")
+        tmp_csv = os.path.join(tmp_dir, f"rank_{rank:09d}.csv")
+        with h5py.File(tmp_h5, "w") as f:
+            f.create_dataset("image", data=img, dtype="float32")
+            f.create_dataset("mask", data=mask, dtype="bool")
+            f.create_dataset("real_labels", data=real_labels, dtype="uint16")
+        catalog.to_pandas().to_csv(tmp_csv, index=False)
         return {
             "status": "ok",
             "rank": rank,
             "dataId": dataId,
-            "image": img,
-            "mask": mask,
-            "real_labels": real_labels,
-            "catalog": catalog.to_pandas(),
+            "tmp_h5": tmp_h5,
+            "tmp_csv": tmp_csv,
         }
 
     except BaseException as e:
@@ -619,10 +625,14 @@ def resize_output_file(path, n_rows):
 
 
 def write_success(path, idx, result):
+    with h5py.File(result["tmp_h5"], "r") as src:
+        image = src["image"][:]
+        mask = src["mask"][:]
+        real_labels = src["real_labels"][:]
     with h5py.File(path, "a") as f:
-        f["images"][idx] = result["image"]
-        f["masks"][idx] = result["mask"]
-        f["real_labels"][idx] = result["real_labels"]
+        f["images"][idx] = image
+        f["masks"][idx] = mask
+        f["real_labels"][idx] = real_labels
 
 
 def append_catalog(csv_path, catalog_df, image_id):
@@ -632,16 +642,31 @@ def append_catalog(csv_path, catalog_df, image_id):
     df.to_csv(csv_path, mode=("a" if file_exists else "w"), header=(not file_exists), index=False)
 
 
+def append_catalog_from_tmp(csv_path, tmp_csv_path, image_id):
+    df = pd.read_csv(tmp_csv_path)
+    append_catalog(csv_path, df, image_id)
+
+
+def cleanup_tmp_result(result):
+    for key in ("tmp_h5", "tmp_csv"):
+        path = result.get(key)
+        if path and os.path.exists(path):
+            os.remove(path)
+
+
 def process_result_in_order(result, success_ordinal, test_ordinals, train_idx, test_idx, paths):
     is_test = success_ordinal in test_ordinals
-    if is_test:
-        write_success(paths["test_h5"], test_idx, result)
-        append_catalog(paths["test_csv"], result["catalog"], test_idx)
-        test_idx += 1
-    else:
-        write_success(paths["train_h5"], train_idx, result)
-        append_catalog(paths["train_csv"], result["catalog"], train_idx)
-        train_idx += 1
+    try:
+        if is_test:
+            write_success(paths["test_h5"], test_idx, result)
+            append_catalog_from_tmp(paths["test_csv"], result["tmp_csv"], test_idx)
+            test_idx += 1
+        else:
+            write_success(paths["train_h5"], train_idx, result)
+            append_catalog_from_tmp(paths["train_csv"], result["tmp_csv"], train_idx)
+            train_idx += 1
+    finally:
+        cleanup_tmp_result(result)
     return train_idx, test_idx
 
 def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitude, beta, where, parallel=4,
@@ -664,7 +689,8 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
 
     target_total = compute_target_total(random_subset, len(refs))
     train_target, test_target, test_ordinals = compute_split_targets(target_total, train_test_split, test_only, seed)
-    print(f"Target successful outputs: total={target_total} train={train_target} test={test_target}", flush=True)
+    final_target_total = test_target if test_only else target_total
+    print(f"Target successful outputs: total={final_target_total} train={train_target} test={test_target}", flush=True)
 
     dims = butler.get("preliminary_visit_image.dimensions", dataId=refs[0].dataId)
     if chunks is not None:
@@ -674,9 +700,13 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
 
     train_csv_path = os.path.join(save_path, "train.csv")
     test_csv_path = os.path.join(save_path, "test.csv")
+    tmp_dir = os.path.join(save_path, ".simulate_inject_fill_deterministic_tmp")
     for path in (h5train_path, h5test_path, train_csv_path, test_csv_path):
         if os.path.exists(path):
             os.remove(path)
+    if os.path.exists(tmp_dir):
+        shutil.rmtree(tmp_dir)
+    os.makedirs(tmp_dir, exist_ok=True)
 
     if train_target > 0:
         init_output_file(h5train_path, train_target, dims, h5_chunks)
@@ -705,6 +735,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             mag_mode,
             psf_template,
             stack_detection_threshold,
+            tmp_dir,
         ]
         for rank, ref in enumerate(refs)
     ]
@@ -725,18 +756,8 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
         for result in sorted(batch_results, key=lambda x: x["rank"]):
             attempts += 1
             if result["status"] == "ok":
-                if (
-                    result["image"].shape != (dims.y, dims.x)
-                    or result["mask"].shape != (dims.y, dims.x)
-                    or result["real_labels"].shape != (dims.y, dims.x)
-                ):
-                    print(
-                        f"[attempt {attempts}/{len(tasks)}] failure rank={result['rank']} dataId={result['dataId']} "
-                        f"error=shape_mismatch expected=({dims.y}, {dims.x}) got={result['image'].shape}",
-                        flush=True,
-                    )
-                    continue
-                if success_count >= target_total:
+                if success_count >= final_target_total:
+                    cleanup_tmp_result(result)
                     continue
                 train_count, test_count = process_result_in_order(
                     result,
@@ -759,7 +780,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
         batch_size = max(1, int(parallel))
         with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as ex:
             for start in range(0, len(tasks), batch_size):
-                if success_count >= target_total:
+                if success_count >= final_target_total:
                     break
                 batch = tasks[start:start + batch_size]
                 futs = [ex.submit(worker, task) for task in batch]
@@ -767,7 +788,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                 handle_ordered_batch(batch_results)
     else:
         for task in tasks:
-            if success_count >= target_total:
+            if success_count >= final_target_total:
                 break
             handle_ordered_batch([worker(task)])
 
@@ -776,12 +797,14 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
     if test_target > 0:
         resize_output_file(h5test_path, test_count)
 
-    if success_count < target_total:
+    if success_count < final_target_total:
         print(
-            f"Candidate pool exhausted before reaching target: successes={success_count}/{target_total}, "
-            f"attempts={attempts}, remaining_shortfall={target_total - success_count}",
+            f"Candidate pool exhausted before reaching target: successes={success_count}/{final_target_total}, "
+            f"attempts={attempts}, remaining_shortfall={final_target_total - success_count}",
             flush=True,
         )
+    if os.path.exists(tmp_dir):
+        shutil.rmtree(tmp_dir)
 
 def rng_for_task(seed: int, dataId: dict) -> np.random.Generator:
     # stable across runs
