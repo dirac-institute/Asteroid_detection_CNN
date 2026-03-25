@@ -165,7 +165,7 @@ def calibrate(butler, postISRCCD, dataId, threshold=5.0):
     calexp = result.exposure
     catalog = source_detect(calexp, result.background, threshold = threshold)
 
-    return calexp, catalog
+    return calexp, catalog, result.background
 
 def fetch_from_butler(butler, dataId, threshold = 5.0):
     calexp = butler.get("preliminary_visit_image", dataId=dataId)

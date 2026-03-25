@@ -43,6 +43,7 @@ completed_counter = Value('i', 0)
 counter_lock = Lock()
 _WORKER_BUTLERS = {}
 TASK_TIMEOUT_SECONDS = 300
+PREINJECTION_DETECTION_THRESHOLD = 3.0
 
 
 def inject(postISRCCD, injection_catalog):
@@ -383,8 +384,8 @@ def build_forbidden_mask(calexp, pre_injection_src, dimensions):
     # Use planes that typically mean "occupied" or should be avoided.
     # Keep this list conservative; you can edit it anytime.
     planes_to_avoid = [
-        "DETECTED",
-        "DETECTED_NEGATIVE",
+        #"DETECTED",
+        #"DETECTED_NEGATIVE",
         "SAT",
         "BAD",
         "CR",
@@ -481,19 +482,37 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
         butler = get_worker_butler(repo, coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
         if reprocess:
-            calexp, pre_injection_Src = calibrate(butler, isr(butler, format_dataId(ref.dataId)), format_dataId(ref.dataId), threshold=detection_threshold)
+            calexp, pre_injection_Src, background = calibrate(
+                butler,
+                isr(butler, format_dataId(ref.dataId)),
+                format_dataId(ref.dataId),
+                threshold=detection_threshold,
+            )
             local_dimensions = dimensions_from_exposure(calexp)
-            forbidden = build_forbidden_mask(calexp, pre_injection_Src, local_dimensions)
+            if PREINJECTION_DETECTION_THRESHOLD != detection_threshold:
+                forbidden_catalog = source_detect(calexp, background, threshold=PREINJECTION_DETECTION_THRESHOLD)
+            else:
+                forbidden_catalog = pre_injection_Src
+            forbidden = build_forbidden_mask(calexp, forbidden_catalog, local_dimensions)
             injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, local_dimensions, seed, calexp,
                                                   mag_mode=mag_mode, psf_template=psf_template,
                                                   forbidden_mask=forbidden)
-            injected_calexp, post_injection_Src = calibrate(butler, inject(calexp, injection_catalog),
-                                                            format_dataId(ref.dataId), threshold=detection_threshold)
+
+            injected_calexp = inject(calexp, injection_catalog)
+            post_injection_Src = source_detect(injected_calexp, background, threshold=detection_threshold)
 
         else:
-            calexp, pre_injection_Src, background = fetch_from_butler(butler, dataId=format_dataId(ref.dataId), threshold=detection_threshold)
+            calexp, pre_injection_Src, background = fetch_from_butler(
+                butler,
+                dataId=format_dataId(ref.dataId),
+                threshold=detection_threshold,
+            )
             local_dimensions = dimensions_from_exposure(calexp)
-            forbidden = build_forbidden_mask(calexp, pre_injection_Src, local_dimensions)
+            if PREINJECTION_DETECTION_THRESHOLD != detection_threshold:
+                forbidden_catalog = source_detect(calexp, background, threshold=PREINJECTION_DETECTION_THRESHOLD)
+            else:
+                forbidden_catalog = pre_injection_Src
+            forbidden = build_forbidden_mask(calexp, forbidden_catalog, local_dimensions)
             injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, local_dimensions, seed, calexp, mag_mode=mag_mode, psf_template=psf_template, forbidden_mask=forbidden)
             injected_calexp = inject(calexp, injection_catalog)
             post_injection_Src = source_detect(injected_calexp, background, threshold=detection_threshold)
