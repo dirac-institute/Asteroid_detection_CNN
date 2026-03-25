@@ -488,6 +488,14 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             dataId=format_dataId(ref.dataId),
             threshold=PREINJECTION_DETECTION_THRESHOLD,
         )
+        if float(detection_threshold) == float(PREINJECTION_DETECTION_THRESHOLD):
+            pre_injection_eval_src = pre_injection_Src
+        else:
+            pre_injection_eval_src = source_detect(
+                calexp,
+                background,
+                threshold=detection_threshold,
+            )
         local_dimensions = dimensions_from_exposure(calexp)
         forbidden = build_forbidden_mask(calexp, pre_injection_Src, local_dimensions)
         injection_catalog = generate_one_line(
@@ -510,7 +518,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             psf_width = injected_calexp.psf.getLocalKernel(Point2D(row["x"], row["y"])).getWidth()
             mask = draw_one_line(mask, [row["x"], row["y"]], row["beta"], row["trail_length"], true_value=i + 1,
                                  line_thickness=int(psf_width/2))
-        injection_catalog, matched_fp_mask = stack_hits_by_footprints(post_src=crossmatch_catalogs (pre_injection_Src, post_injection_Src),
+        injection_catalog, matched_fp_mask = stack_hits_by_footprints(post_src=crossmatch_catalogs (pre_injection_eval_src, post_injection_Src),
                                                                        calexp_pre=calexp,
                                                                        calexp_post=injected_calexp,
                                                                        dimensions=local_dimensions,
