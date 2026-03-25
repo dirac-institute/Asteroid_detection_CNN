@@ -47,7 +47,7 @@ mkdir -p "$OUT"
 
 rm -f "$OUT/test.h5" "$OUT/test.csv"
 
-srun python3 -u simulate_inject.py \
+srun python3 -u simulate_inject_fill_deterministic.py \
   --repo "$REPO" \
   --collections "$COLL" \
   --save-path "$OUT" \
