@@ -49,6 +49,7 @@ _WORKER_BUTLERS = {}
 TASK_TIMEOUT_SECONDS = 900
 PREINJECTION_DETECTION_THRESHOLD = 3.0
 ATTEMPT_DIAGNOSTICS = True
+MAX_PRE_SOURCES = 6000
 
 
 def inject(postISRCCD, injection_catalog):
@@ -562,6 +563,10 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             threshold=PREINJECTION_DETECTION_THRESHOLD,
         )
         log_mem("pre_fixed")
+        if len(pre_injection_fixed_src) > MAX_PRE_SOURCES:
+            raise RuntimeError(
+                f"Too many pre-injection sources: {len(pre_injection_fixed_src)} > {MAX_PRE_SOURCES}"
+            )
         if float(detection_threshold) == float(PREINJECTION_DETECTION_THRESHOLD):
             pre_injection_eval_src = pre_injection_fixed_src
         else:
@@ -570,6 +575,10 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
                 background,
                 threshold=detection_threshold,
             )
+            if len(pre_injection_eval_src) > MAX_PRE_SOURCES:
+                raise RuntimeError(
+                    f"Too many eval pre-injection sources: {len(pre_injection_eval_src)} > {MAX_PRE_SOURCES}"
+                )
         log_mem("pre_eval")
         local_dimensions = dimensions_from_exposure(calexp)
         forbidden = build_forbidden_mask(calexp, pre_injection_fixed_src, local_dimensions)
