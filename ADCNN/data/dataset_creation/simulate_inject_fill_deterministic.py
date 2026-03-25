@@ -479,43 +479,32 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
     try:
         if seed is None:
             seed = np.random.randint(0,10000)
+        if reprocess:
+            raise NotImplementedError("reprocess=True is not supported in simulate_inject_fill_deterministic.py")
         butler = get_worker_butler(repo, coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
-        if reprocess:
-            calexp, pre_injection_Src, background = calibrate(
-                butler,
-                isr(butler, format_dataId(ref.dataId)),
-                format_dataId(ref.dataId),
-                threshold=detection_threshold,
-            )
-            local_dimensions = dimensions_from_exposure(calexp)
-            if PREINJECTION_DETECTION_THRESHOLD != detection_threshold:
-                forbidden_catalog = source_detect(calexp, background, threshold=PREINJECTION_DETECTION_THRESHOLD)
-            else:
-                forbidden_catalog = pre_injection_Src
-            forbidden = build_forbidden_mask(calexp, forbidden_catalog, local_dimensions)
-            injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, local_dimensions, seed, calexp,
-                                                  mag_mode=mag_mode, psf_template=psf_template,
-                                                  forbidden_mask=forbidden)
-
-            injected_calexp = inject(calexp, injection_catalog)
-            post_injection_Src = source_detect(injected_calexp, background, threshold=detection_threshold)
-
-        else:
-            calexp, pre_injection_Src, background = fetch_from_butler(
-                butler,
-                dataId=format_dataId(ref.dataId),
-                threshold=detection_threshold,
-            )
-            local_dimensions = dimensions_from_exposure(calexp)
-            if PREINJECTION_DETECTION_THRESHOLD != detection_threshold:
-                forbidden_catalog = source_detect(calexp, background, threshold=PREINJECTION_DETECTION_THRESHOLD)
-            else:
-                forbidden_catalog = pre_injection_Src
-            forbidden = build_forbidden_mask(calexp, forbidden_catalog, local_dimensions)
-            injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, local_dimensions, seed, calexp, mag_mode=mag_mode, psf_template=psf_template, forbidden_mask=forbidden)
-            injected_calexp = inject(calexp, injection_catalog)
-            post_injection_Src = source_detect(injected_calexp, background, threshold=detection_threshold)
+        calexp, pre_injection_Src, background = fetch_from_butler(
+            butler,
+            dataId=format_dataId(ref.dataId),
+            threshold=PREINJECTION_DETECTION_THRESHOLD,
+        )
+        local_dimensions = dimensions_from_exposure(calexp)
+        forbidden = build_forbidden_mask(calexp, pre_injection_Src, local_dimensions)
+        injection_catalog = generate_one_line(
+            n_inject,
+            trail_length,
+            mag,
+            beta,
+            ref,
+            local_dimensions,
+            seed,
+            calexp,
+            mag_mode=mag_mode,
+            psf_template=psf_template,
+            forbidden_mask=forbidden,
+        )
+        injected_calexp = inject(calexp, injection_catalog)
+        post_injection_Src = source_detect(injected_calexp, background, threshold=detection_threshold)
         mask = np.zeros((local_dimensions.y, local_dimensions.x), dtype=np.uint16)
         for i, row in enumerate(injection_catalog):
             psf_width = injected_calexp.psf.getLocalKernel(Point2D(row["x"], row["y"])).getWidth()
@@ -868,7 +857,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
 
     if parallel > 1:
         max_workers = max(1, int(parallel))
-        max_inflight = max_workers * 2
+        max_inflight = max_workers
         future_to_slot = {}
 
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as ex:
