@@ -6,7 +6,7 @@
 #SBATCH --partition=roma
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=50
-#SBATCH --mem-per-cpu=3G
+#SBATCH --mem-per-cpu=4G
 #SBATCH --time=3-00:00:00
 
 set -eo pipefail

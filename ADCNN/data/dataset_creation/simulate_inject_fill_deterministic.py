@@ -42,7 +42,7 @@ import signal
 completed_counter = Value('i', 0)
 counter_lock = Lock()
 _WORKER_BUTLERS = {}
-TASK_TIMEOUT_SECONDS = 300
+TASK_TIMEOUT_SECONDS = 900
 PREINJECTION_DETECTION_THRESHOLD = 3.0
 
 
@@ -384,8 +384,8 @@ def build_forbidden_mask(calexp, pre_injection_src, dimensions):
     # Use planes that typically mean "occupied" or should be avoided.
     # Keep this list conservative; you can edit it anytime.
     planes_to_avoid = [
-        #"DETECTED",
-        #"DETECTED_NEGATIVE",
+        "DETECTED",
+        "DETECTED_NEGATIVE",
         "SAT",
         "BAD",
         "CR",
@@ -483,21 +483,27 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             raise NotImplementedError("reprocess=True is not supported in simulate_inject_fill_deterministic.py")
         butler = get_worker_butler(repo, coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
-        calexp, pre_injection_Src, background = fetch_from_butler(
-            butler,
-            dataId=format_dataId(ref.dataId),
+        formatted_data_id = format_dataId(ref.dataId)
+        background = butler.get("preliminary_visit_image_background", dataId=formatted_data_id)
+
+        calexp_inject = butler.get("preliminary_visit_image", dataId=formatted_data_id)
+        calexp_pre_fixed = butler.get("preliminary_visit_image", dataId=formatted_data_id)
+        pre_injection_Src = source_detect(
+            calexp_pre_fixed,
+            background,
             threshold=PREINJECTION_DETECTION_THRESHOLD,
         )
         if float(detection_threshold) == float(PREINJECTION_DETECTION_THRESHOLD):
             pre_injection_eval_src = pre_injection_Src
         else:
+            calexp_pre_eval = butler.get("preliminary_visit_image", dataId=formatted_data_id)
             pre_injection_eval_src = source_detect(
-                calexp,
+                calexp_pre_eval,
                 background,
                 threshold=detection_threshold,
             )
-        local_dimensions = dimensions_from_exposure(calexp)
-        forbidden = build_forbidden_mask(calexp, pre_injection_Src, local_dimensions)
+        local_dimensions = dimensions_from_exposure(calexp_inject)
+        forbidden = build_forbidden_mask(calexp_pre_fixed, pre_injection_Src, local_dimensions)
         injection_catalog = generate_one_line(
             n_inject,
             trail_length,
@@ -506,12 +512,12 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             ref,
             local_dimensions,
             seed,
-            calexp,
+            calexp_inject,
             mag_mode=mag_mode,
             psf_template=psf_template,
             forbidden_mask=forbidden,
         )
-        injected_calexp = inject(calexp, injection_catalog)
+        injected_calexp = inject(calexp_inject, injection_catalog)
         post_injection_Src = source_detect(injected_calexp, background, threshold=detection_threshold)
         mask = np.zeros((local_dimensions.y, local_dimensions.x), dtype=np.uint16)
         for i, row in enumerate(injection_catalog):
@@ -519,7 +525,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             mask = draw_one_line(mask, [row["x"], row["y"]], row["beta"], row["trail_length"], true_value=i + 1,
                                  line_thickness=int(psf_width/2))
         injection_catalog, matched_fp_mask = stack_hits_by_footprints(post_src=crossmatch_catalogs (pre_injection_eval_src, post_injection_Src),
-                                                                       calexp_pre=calexp,
+                                                                       calexp_pre=calexp_inject,
                                                                        calexp_post=injected_calexp,
                                                                        dimensions=local_dimensions,
                                                                        truth_id_mask=mask,
