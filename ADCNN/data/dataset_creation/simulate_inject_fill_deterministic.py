@@ -40,6 +40,8 @@ import pandas as pd
 import traceback
 import time
 import signal
+import gc
+import resource
 
 completed_counter = Value('i', 0)
 counter_lock = Lock()
@@ -105,6 +107,11 @@ def load_preliminary_from_butler_checked(butler, dataId):
     validate_preliminary_exposure(calexp)
     background = butler.get("preliminary_visit_image_background", dataId=dataId)
     return calexp, background
+
+
+def current_rss_mb():
+    rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return float(rss_kb) / 1024.0
 
 def estimate_m5_local_from_psf_var(calexp, x, y, snr=5.0):
     """
@@ -509,6 +516,11 @@ def dimensions_from_exposure(exposure):
     return geom.Extent2I(int(bbox.getWidth()), int(bbox.getHeight()))
 
 def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=None, debug=False, mag_mode="psf_mag", psf_template="image", detection_threshold=5.0, reprocess=False):
+    mem_log = []
+
+    def log_mem(phase):
+        mem_log.append((phase, current_rss_mb()))
+
     try:
         if seed is None:
             seed = np.random.randint(0,10000)
@@ -518,11 +530,13 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
         formatted_dataId = format_dataId(ref.dataId)
         calexp, background = load_preliminary_from_butler_checked(butler, dataId=formatted_dataId)
+        log_mem("loaded")
         pre_injection_fixed_src = source_detect(
             calexp,
             background,
             threshold=PREINJECTION_DETECTION_THRESHOLD,
         )
+        log_mem("pre_fixed")
         if float(detection_threshold) == float(PREINJECTION_DETECTION_THRESHOLD):
             pre_injection_eval_src = pre_injection_fixed_src
         else:
@@ -531,8 +545,10 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
                 background,
                 threshold=detection_threshold,
             )
+        log_mem("pre_eval")
         local_dimensions = dimensions_from_exposure(calexp)
         forbidden = build_forbidden_mask(calexp, pre_injection_fixed_src, local_dimensions)
+        log_mem("forbidden")
         injection_catalog = generate_one_line(
             n_inject,
             trail_length,
@@ -546,8 +562,17 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             psf_template=psf_template,
             forbidden_mask=forbidden,
         )
+        del forbidden
+        gc.collect()
+        log_mem("generated")
         injected_calexp = inject(calexp, injection_catalog)
+        log_mem("injected")
+        if pre_injection_fixed_src is not pre_injection_eval_src:
+            del pre_injection_fixed_src
+            gc.collect()
+            log_mem("dropped_pre_fixed")
         post_injection_Src = source_detect(injected_calexp, background, threshold=detection_threshold)
+        log_mem("post_detect")
         mask = np.zeros((local_dimensions.y, local_dimensions.x), dtype=np.uint16)
         for i, row in enumerate(injection_catalog):
             psf_width = injected_calexp.psf.getLocalKernel(Point2D(row["x"], row["y"])).getWidth()
@@ -562,10 +587,22 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
                                                                        overlap_minpix=1,
                                                                        overlap_frac=0.0,
                                                                        return_matched_fp_masks=debug)
+        log_mem("stack_hits")
 
         real_labels = footprints_to_label_mask(pre_injection_eval_src, local_dimensions, dtype=np.uint16)
+        log_mem("real_labels")
+        img = injected_calexp.image.array.astype("float32")
+        mask_out = mask.astype("bool")
+        del post_injection_Src
+        del pre_injection_eval_src
+        if "pre_injection_fixed_src" in locals():
+            del pre_injection_fixed_src
+        del background
+        del calexp
+        gc.collect()
+        log_mem("prepared_return")
         if not debug:
-            return True, injected_calexp.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog
+            return True, img, mask_out, real_labels, injection_catalog, mem_log
         else:
             det_mask = None
             m = injected_calexp.mask
@@ -577,9 +614,13 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
                 detn_bit = m.getPlaneBitMask("DETECTED_NEGATIVE")
                 det_neg_mask = (m.array & detn_bit) != 0
             matched_fp_masks = np.any(np.stack(matched_fp_mask, axis=-1), axis=-1)
-            return True, injected_calexp.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog, det_mask, matched_fp_masks
+            return True, img, mask_out, real_labels, injection_catalog, det_mask, matched_fp_masks, mem_log
     except BaseException as e:
-        return False, ref_dataId, repr(e), traceback.format_exc()
+        tb = traceback.format_exc()
+        if mem_log:
+            rss_text = ", ".join(f"{phase}={rss:.1f}MB" for phase, rss in mem_log)
+            tb = f"{tb}\n[rss]\n{rss_text}"
+        return False, ref_dataId, repr(e), tb
 
 
 def worker(args):
@@ -626,7 +667,7 @@ def worker(args):
                 "traceback": tb,
                 "compute_s": t1 - t0,
             }
-        _, img, mask, real_labels, catalog = res
+        _, img, mask, real_labels, catalog, mem_log = res
         t2 = time.perf_counter()
         with lock:
             with h5py.File(h5path, "a") as f:
@@ -647,6 +688,8 @@ def worker(args):
             "compute_s": t1 - t0,
             "stage_s": t2 - t1,
             "promote_s": t3 - t2,
+            "rss_max_mb": max((rss for _, rss in mem_log), default=0.0),
+            "rss_log": ", ".join(f"{phase}={rss:.1f}MB" for phase, rss in mem_log),
         }
 
     except BaseException as e:
@@ -860,7 +903,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
     slots = build_output_slots(final_target_total, test_ordinals, test_only, h5train_path, h5test_path, train_csv_path, test_csv_path)
     success_count = 0
     attempts = 0
-    timing = {"compute_s": 0.0, "stage_s": 0.0, "promote_s": 0.0, "successes": 0, "failures": 0}
+    timing = {"compute_s": 0.0, "stage_s": 0.0, "promote_s": 0.0, "successes": 0, "failures": 0, "rss_max_mb": 0.0}
     manager = Manager()
     lock = manager.Lock()
     next_candidate_for_slot = [slot_idx for slot_idx in range(len(slots))]
@@ -903,7 +946,8 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             f"[timing] attempts={attempts} successes={timing['successes']} failures={timing['failures']} "
             f"avg_compute={timing['compute_s']/attempt_denom:.2f}s "
             f"avg_stage={timing['stage_s']/success_denom:.2f}s "
-            f"avg_promote={timing['promote_s']/success_denom:.2f}s",
+            f"avg_promote={timing['promote_s']/success_denom:.2f}s "
+            f"peak_rss={timing['rss_max_mb']:.1f}MB",
             flush=True,
         )
 
@@ -941,6 +985,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                         timing["successes"] += 1
                         timing["stage_s"] += float(result.get("stage_s", 0.0))
                         timing["promote_s"] += float(result.get("promote_s", 0.0))
+                        timing["rss_max_mb"] = max(timing["rss_max_mb"], float(result.get("rss_max_mb", 0.0)))
                         print(f"[{success_count}/{final_target_total}] done", flush=True)
                     else:
                         timing["failures"] += 1
@@ -991,6 +1036,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                     timing["successes"] += 1
                     timing["stage_s"] += float(result.get("stage_s", 0.0))
                     timing["promote_s"] += float(result.get("promote_s", 0.0))
+                    timing["rss_max_mb"] = max(timing["rss_max_mb"], float(result.get("rss_max_mb", 0.0)))
                     print(f"[{success_count}/{final_target_total}] done", flush=True)
                     break
                 timing["failures"] += 1
@@ -1018,7 +1064,8 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             f"[timing-final] attempts={attempts} successes={timing['successes']} failures={timing['failures']} "
             f"avg_compute={timing['compute_s']/attempt_denom:.2f}s "
             f"avg_stage={timing['stage_s']/success_denom:.2f}s "
-            f"avg_promote={timing['promote_s']/success_denom:.2f}s",
+            f"avg_promote={timing['promote_s']/success_denom:.2f}s "
+            f"peak_rss={timing['rss_max_mb']:.1f}MB",
             flush=True,
         )
 
