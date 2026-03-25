@@ -11,6 +11,8 @@ the candidate pool is exhausted.
 
 from __future__ import annotations
 import argparse
+import contextlib
+import io
 from pathlib import Path
 
 from common import ensure_dir, draw_one_line, psf_fwhm_arcsec_from_calexp, mag_to_snr, snr_to_mag
@@ -72,6 +74,37 @@ class TaskTimeoutError(TimeoutError):
 
 def _alarm_timeout_handler(signum, frame):
     raise TaskTimeoutError(f"Task exceeded timeout of {TASK_TIMEOUT_SECONDS} seconds")
+
+
+def _require_exposure_attr(exposure, name, getter=None, missing_message=None):
+    try:
+        value = getter(exposure) if getter is not None else getattr(exposure, name)
+    except Exception:
+        value = None
+    if value is None:
+        raise RuntimeError(missing_message or f"Exposure is missing {name}.")
+    return value
+
+
+def validate_preliminary_exposure(calexp):
+    _require_exposure_attr(calexp, "wcs", missing_message="Exposure is missing a WCS.")
+    _require_exposure_attr(calexp, "psf", missing_message="Exposure is missing a PSF.")
+    _require_exposure_attr(calexp, "photoCalib", missing_message="Exposure is missing a photoCalib.")
+    _require_exposure_attr(calexp, "visitInfo", missing_message="Exposure is missing visitInfo.")
+    _require_exposure_attr(calexp, "filter", missing_message="Exposure is missing a filter.")
+    _require_exposure_attr(
+        calexp,
+        "apCorrMap",
+        getter=lambda exp: exp.info.getApCorrMap(),
+        missing_message="Exposure is missing an aperture correction map.",
+    )
+
+
+def load_preliminary_from_butler_checked(butler, dataId):
+    calexp = butler.get("preliminary_visit_image", dataId=dataId)
+    validate_preliminary_exposure(calexp)
+    background = butler.get("preliminary_visit_image_background", dataId=dataId)
+    return calexp, background
 
 def estimate_m5_local_from_psf_var(calexp, x, y, snr=5.0):
     """
@@ -483,9 +516,11 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             raise NotImplementedError("reprocess=True is not supported in simulate_inject_fill_deterministic.py")
         butler = get_worker_butler(repo, coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
-        calexp, pre_injection_fixed_src, background = fetch_from_butler(
-            butler,
-            dataId=format_dataId(ref.dataId),
+        formatted_dataId = format_dataId(ref.dataId)
+        calexp, background = load_preliminary_from_butler_checked(butler, dataId=formatted_dataId)
+        pre_injection_fixed_src = source_detect(
+            calexp,
+            background,
             threshold=PREINJECTION_DETECTION_THRESHOLD,
         )
         if float(detection_threshold) == float(PREINJECTION_DETECTION_THRESHOLD):
@@ -554,27 +589,33 @@ def worker(args):
         t0 = time.perf_counter()
         previous_handler = signal.signal(signal.SIGALRM, _alarm_timeout_handler)
         signal.setitimer(signal.ITIMER_REAL, TASK_TIMEOUT_SECONDS)
+        stderr_buffer = io.StringIO()
         try:
-            res = one_detector_injection(
-                number,
-                trail_length,
-                magnitude,
-                beta,
-                repo,
-                coll,
-                dims,
-                source_type,
-                dataId,
-                seed,
-                mag_mode=mag_mode,
-                psf_template=psf_template,
-                detection_threshold=detection_threshold,
-            )
+            with contextlib.redirect_stderr(stderr_buffer):
+                res = one_detector_injection(
+                    number,
+                    trail_length,
+                    magnitude,
+                    beta,
+                    repo,
+                    coll,
+                    dims,
+                    source_type,
+                    dataId,
+                    seed,
+                    mag_mode=mag_mode,
+                    psf_template=psf_template,
+                    detection_threshold=detection_threshold,
+                )
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)
             signal.signal(signal.SIGALRM, previous_handler)
         t1 = time.perf_counter()
         if res[0] is False:
+            tb = res[3]
+            stderr_text = stderr_buffer.getvalue().strip()
+            if stderr_text:
+                tb = f"{tb}\n[stderr]\n{stderr_text}"
             return {
                 "status": "err",
                 "rank": rank,
@@ -582,7 +623,7 @@ def worker(args):
                 "split": split_name,
                 "dataId": res[1],
                 "error": res[2],
-                "traceback": res[3],
+                "traceback": tb,
                 "compute_s": t1 - t0,
             }
         _, img, mask, real_labels, catalog = res
@@ -610,6 +651,9 @@ def worker(args):
 
     except BaseException as e:
         tb = traceback.format_exc()
+        stderr_text = stderr_buffer.getvalue().strip() if "stderr_buffer" in locals() else ""
+        if stderr_text:
+            tb = f"{tb}\n[stderr]\n{stderr_text}"
         return {
             "status": "err",
             "rank": rank,
@@ -868,7 +912,10 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
         max_inflight = max_workers
         future_to_slot = {}
 
-        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as ex:
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=max_workers,
+            max_tasks_per_child=1,
+        ) as ex:
             while next_slot_to_activate < len(slots) and len(future_to_slot) < max_inflight:
                 task = make_task(next_slot_to_activate)
                 if task is None:
@@ -894,11 +941,11 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                         timing["successes"] += 1
                         timing["stage_s"] += float(result.get("stage_s", 0.0))
                         timing["promote_s"] += float(result.get("promote_s", 0.0))
-                        print(f"[{attempts}/{len(refs)}] done", flush=True)
+                        print(f"[{success_count}/{final_target_total}] done", flush=True)
                     else:
                         timing["failures"] += 1
                         print(
-                            f"[{attempts}/{len(refs)}] ERROR: rank={result['rank']} dataId={result['dataId']} error={result['error']}",
+                            f"[{success_count}/{final_target_total}] ERROR: rank={result['rank']} dataId={result['dataId']} error={result['error']}",
                             flush=True,
                         )
                         if result.get("traceback"):
@@ -944,11 +991,11 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                     timing["successes"] += 1
                     timing["stage_s"] += float(result.get("stage_s", 0.0))
                     timing["promote_s"] += float(result.get("promote_s", 0.0))
-                    print(f"[{attempts}/{len(refs)}] done", flush=True)
+                    print(f"[{success_count}/{final_target_total}] done", flush=True)
                     break
                 timing["failures"] += 1
                 print(
-                    f"[{attempts}/{len(refs)}] ERROR: rank={result['rank']} dataId={result['dataId']} error={result['error']}",
+                    f"[{success_count}/{final_target_total}] ERROR: rank={result['rank']} dataId={result['dataId']} error={result['error']}",
                     flush=True,
                 )
                 if result.get("traceback"):
