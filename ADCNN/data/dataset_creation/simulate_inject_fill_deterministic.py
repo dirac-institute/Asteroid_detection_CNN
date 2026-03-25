@@ -48,6 +48,7 @@ counter_lock = Lock()
 _WORKER_BUTLERS = {}
 TASK_TIMEOUT_SECONDS = 900
 PREINJECTION_DETECTION_THRESHOLD = 3.0
+ATTEMPT_DIAGNOSTICS = True
 
 
 def inject(postISRCCD, injection_catalog):
@@ -112,6 +113,30 @@ def load_preliminary_from_butler_checked(butler, dataId):
 def current_rss_mb():
     rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return float(rss_kb) / 1024.0
+
+
+def format_attempt_diagnostics(result):
+    parts = [
+        f"status={result.get('status')}",
+        f"rank={result.get('rank')}",
+        f"image_id={result.get('image_id')}",
+        f"split={result.get('split')}",
+        f"visit={result.get('dataId', {}).get('visit') if isinstance(result.get('dataId'), dict) else None}",
+        f"detector={result.get('dataId', {}).get('detector') if isinstance(result.get('dataId'), dict) else None}",
+    ]
+    if "compute_s" in result:
+        parts.append(f"compute={float(result['compute_s']):.2f}s")
+    if "stage_s" in result:
+        parts.append(f"stage={float(result['stage_s']):.2f}s")
+    if "promote_s" in result:
+        parts.append(f"write={float(result['promote_s']):.2f}s")
+    if "rss_max_mb" in result:
+        parts.append(f"rss_max={float(result['rss_max_mb']):.1f}MB")
+    if result.get("rss_log"):
+        parts.append(f"rss_log={result['rss_log']}")
+    if result.get("error"):
+        parts.append(f"error={result['error']}")
+    return " | ".join(parts)
 
 def estimate_m5_local_from_psf_var(calexp, x, y, snr=5.0):
     """
@@ -979,6 +1004,8 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                     result = fut.result()
                     attempts += 1
                     timing["compute_s"] += float(result.get("compute_s", 0.0))
+                    if ATTEMPT_DIAGNOSTICS:
+                        print(f"[diag] {format_attempt_diagnostics(result)}", flush=True)
                     if result["status"] == "ok":
                         filled_slots.add(slot_idx)
                         success_count += 1
@@ -1030,6 +1057,8 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                 result = worker(task)
                 attempts += 1
                 timing["compute_s"] += float(result.get("compute_s", 0.0))
+                if ATTEMPT_DIAGNOSTICS:
+                    print(f"[diag] {format_attempt_diagnostics(result)}", flush=True)
                 if result["status"] == "ok":
                     filled_slots.add(slot_idx)
                     success_count += 1
