@@ -1050,7 +1050,7 @@ def main():
     ap.add_argument("--beta-max", type=float, default=180)
     ap.add_argument("--number", type=int, default=20)
     ap.add_argument("--stack-detection-threshold", type=float, default=5.0, help="SNR threshold for the stack (default 5.0)")
-    ap.add_argument("--seed", type=int, default=123)
+    ap.add_argument("--seed", type=int, default=13379)
     ap.add_argument("--chunks", type=int, default=None, help="HDF5 chunk size (square). Example: 128 -> chunks=(1,128,128). None = contiguous")
     ap.add_argument("--test-only", action="store_true", default=False, help="Only generate test set")
     args = ap.parse_args()
