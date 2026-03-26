@@ -18,7 +18,6 @@ from ADCNN.data.datasets import H5TiledDataset
 from ADCNN.utils.dist_utils import init_distributed, is_main_process
 from ADCNN.core.model import UNetResSEASPP
 from ADCNN.train import Trainer
-from ADCNN.training.rescue_validation import RescueValidator
 
 
 # -----------------------------------------------------------------------------
@@ -499,6 +498,15 @@ def run(cfg: Config, args: argparse.Namespace):
     trainer = Trainer(device=device)
     rescue_validator = None
     if bool(cfg.train.enable_rescue_val):
+        try:
+            from ADCNN.training.rescue_validation import RescueValidator
+        except ModuleNotFoundError as e:
+            raise ModuleNotFoundError(
+                "Rescue validation is enabled but ADCNN.training.rescue_validation is not available. "
+                "Make sure the updated repository checkout, including "
+                "'ADCNN/training/rescue_validation.py', is present on the training machine, "
+                "or disable rescue validation in config."
+            ) from e
         val_panel_ids = sorted({int(pid) for pid, _r, _c in (base_ds.indices[k] for k in tiles_va.tolist())})
         rescue_validator = RescueValidator(
             h5_path=cfg.data.train_h5,
