@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Tuple
 
+from ADCNN.inference.postprocess import RECOMMENDED_POSTPROCESS_CONFIG
+
 
 @dataclass
 class DataConfig:
@@ -92,6 +94,25 @@ class TrainConfig:
     auc_batches: int = 0
     auc_bins: int = 256
 
+    # Rescue-oriented validation on a small fixed validation subset.
+    enable_rescue_val: bool = True
+    rescue_val_every: int = 3
+    rescue_val_max_images: int = 8
+    rescue_val_seed_offset: int = 50_000
+    rescue_budget_primary: int = 15000
+    rescue_budget_secondary: int = 5000
+    rescue_overlap_policy: str = "ignore_baseline_duplicates"
+    rescue_val_num_workers: int = 0
+    rescue_val_psf_width: int = 40
+    rescue_post_threshold: float = RECOMMENDED_POSTPROCESS_CONFIG["threshold"]
+    rescue_post_pixel_gap: int = RECOMMENDED_POSTPROCESS_CONFIG["pixel_gap"]
+    rescue_post_min_area: int = RECOMMENDED_POSTPROCESS_CONFIG["min_area"]
+    rescue_post_max_area: Optional[int] = RECOMMENDED_POSTPROCESS_CONFIG["max_area"]
+    rescue_post_min_score: float = RECOMMENDED_POSTPROCESS_CONFIG["min_score"]
+    rescue_post_min_peak_probability: float = RECOMMENDED_POSTPROCESS_CONFIG["min_peak_probability"]
+    rescue_post_score_method: str = RECOMMENDED_POSTPROCESS_CONFIG["score_method"]
+    rescue_post_topk_fraction: float = RECOMMENDED_POSTPROCESS_CONFIG["topk_fraction"]
+
     # EMA defaults (can be overridden via CLI)
     use_ema: bool = False
     ema_decay: float = 0.999
@@ -153,6 +174,11 @@ class Config:
         if self.train.val_real_label_mode not in ("ignore", "downweight", "full"):
             raise ValueError(
                 f"train.val_real_label_mode must be 'ignore', 'downweight', or 'full', got {self.train.val_real_label_mode}"
+            )
+        if self.train.rescue_overlap_policy not in ("ignore_baseline_duplicates", "keep_all"):
+            raise ValueError(
+                "train.rescue_overlap_policy must be 'ignore_baseline_duplicates' or 'keep_all', "
+                f"got {self.train.rescue_overlap_policy}"
             )
 
         # Model metadata sanity

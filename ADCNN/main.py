@@ -18,6 +18,7 @@ from ADCNN.data.datasets import H5TiledDataset
 from ADCNN.utils.dist_utils import init_distributed, is_main_process
 from ADCNN.core.model import UNetResSEASPP
 from ADCNN.train import Trainer
+from ADCNN.training.rescue_validation import RescueValidator
 
 
 # -----------------------------------------------------------------------------
@@ -496,6 +497,30 @@ def run(cfg: Config, args: argparse.Namespace):
             raise FileNotFoundError(f"--resume-epoch set but checkpoint not found: {ckpt_path}")
 
     trainer = Trainer(device=device)
+    rescue_validator = None
+    if bool(cfg.train.enable_rescue_val):
+        val_panel_ids = sorted({int(pid) for pid, _r, _c in (base_ds.indices[k] for k in tiles_va.tolist())})
+        rescue_validator = RescueValidator(
+            h5_path=cfg.data.train_h5,
+            csv_path=str(cfg.data.train_csv),
+            val_panel_ids=val_panel_ids,
+            seed=int(cfg.train.seed) + int(cfg.train.rescue_val_seed_offset),
+            max_images=int(cfg.train.rescue_val_max_images),
+            batch_size=max(1, per_gpu_batch_size),
+            num_workers=int(cfg.train.rescue_val_num_workers),
+            rescue_budget_primary=int(cfg.train.rescue_budget_primary),
+            rescue_budget_secondary=int(cfg.train.rescue_budget_secondary),
+            rescue_overlap_policy=str(cfg.train.rescue_overlap_policy),
+            psf_width=int(cfg.train.rescue_val_psf_width),
+            threshold=float(cfg.train.rescue_post_threshold),
+            pixel_gap=int(cfg.train.rescue_post_pixel_gap),
+            min_area=int(cfg.train.rescue_post_min_area),
+            max_area=cfg.train.rescue_post_max_area,
+            min_score=float(cfg.train.rescue_post_min_score),
+            min_peak_probability=float(cfg.train.rescue_post_min_peak_probability),
+            score_method=str(cfg.train.rescue_post_score_method),
+            topk_fraction=float(cfg.train.rescue_post_topk_fraction),
+        )
 
     model_hparams = {"in_ch": 1, "out_ch": 1}
     # If your model exposes widths, include them for strict validation.
@@ -549,6 +574,9 @@ def run(cfg: Config, args: argparse.Namespace):
         use_ema=cfg.train.use_ema,
         ema_decay=cfg.train.ema_decay,
         ema_eval=cfg.train.ema_eval,
+        rescue_validator=rescue_validator,
+        enable_rescue_val=cfg.train.enable_rescue_val,
+        rescue_val_every=cfg.train.rescue_val_every,
     )
 
     if is_main_process():

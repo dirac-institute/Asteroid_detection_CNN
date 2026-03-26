@@ -211,6 +211,9 @@ class Trainer:
         use_ema: bool = True,
         ema_decay: float = 0.999,
         ema_eval: bool = True,
+        rescue_validator=None,
+        enable_rescue_val: bool = False,
+        rescue_val_every: int = 3,
     ):
         is_dist, rank, local_rank, world_size = init_distributed()
         use_ddp = bool(is_dist and world_size > 1)
@@ -471,6 +474,7 @@ class Trainer:
             # Validation
             do_val = (ep % int(val_every) == 0) or (ep <= 3)
             auc_eval = None
+            rescue_eval = None
 
             if do_val:
                 self._set_loader_epoch(val_loader, seed + 2000 + ep)
@@ -506,6 +510,42 @@ class Trainer:
                     print(f"[VAL ep{ep:03d}] {tag} AUC {float(auc_eval):.4f}")
                 val_auc_last = float(auc_eval)
 
+            do_rescue_val = bool(enable_rescue_val and rescue_validator is not None) and (
+                (ep % int(rescue_val_every) == 0) or (ep == 1)
+            )
+            if do_rescue_val:
+                rescue_model = raw_model
+                if ema is not None and ema_eval:
+                    ema.apply_to(raw_model)
+                    try:
+                        rescue_eval = rescue_validator.evaluate(rescue_model, device=self.device)
+                    finally:
+                        ema.restore(raw_model)
+                else:
+                    rescue_eval = rescue_validator.evaluate(rescue_model, device=self.device)
+
+                if verbose >= 1 and is_main_process():
+                    primary = rescue_eval["primary"]
+                    msg = (
+                        f"[VAL ep{ep:03d}] rescue@{primary.budget} | newTP {primary.new_tp} | "
+                        f"missedRecall {primary.missed_recall:.3f} | unionRecall {primary.union_recall:.3f} | "
+                        f"addedFP {primary.added_fp} | nCand {primary.n_candidates}"
+                    )
+                    if auc_eval is not None:
+                        msg += f" | AUC {float(auc_eval):.3f}"
+                    msg += (
+                        f" | subset {rescue_eval['subset_images']} img / {rescue_eval['subset_objects']} obj"
+                        f" | {rescue_eval['elapsed_s']:.1f}s"
+                    )
+                    print(msg)
+                    secondary = rescue_eval.get("secondary")
+                    if secondary is not None:
+                        print(
+                            f"[VAL ep{ep:03d}] rescue@{secondary.budget} | newTP {secondary.new_tp} | "
+                            f"missedRecall {secondary.missed_recall:.3f} | unionRecall {secondary.union_recall:.3f} | "
+                            f"addedFP {secondary.added_fp}"
+                        )
+
             if epoch_phase == "main" and scheduler is not None:
                 scheduler.step()
 
@@ -521,6 +561,7 @@ class Trainer:
                         "lam": float(lam),
                         "lr": float(lr_actual),
                         "val_auc": float(auc_eval) if auc_eval is not None else float(val_auc_last),
+                        "rescue_val": copy.deepcopy(rescue_eval) if rescue_eval is not None else None,
                         "optimizer": optimizer.state_dict(),
                         "scheduler": scheduler.state_dict() if scheduler is not None else None,
                         "scaler": scaler.state_dict() if scaler is not None else None,
