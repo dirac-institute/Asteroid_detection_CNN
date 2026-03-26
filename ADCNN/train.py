@@ -94,6 +94,26 @@ def focal_tversky_masked(
     return loss.mean()
 
 
+def soft_dice_masked(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    valid: torch.Tensor,
+    *,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    logits_f = logits.float()
+    t = targets.float().clamp(0.0, 1.0)
+    v = valid.float()
+
+    p = torch.sigmoid(logits_f)
+    w = v
+
+    inter = (w * p * t).sum(dim=(1, 2, 3))
+    denom = (w * p).sum(dim=(1, 2, 3)) + (w * t).sum(dim=(1, 2, 3)) + eps
+    dice = (2.0 * inter + eps) / denom
+    return (1.0 - dice).mean()
+
+
 def ramp_lambda(ep: int, *, kind: str, e0: int, e1: int, k: float, max_value: float = 1.0) -> float:
     """
     Blend coefficient for (1-lam)*BCE + lam*FocalTversky
@@ -356,8 +376,12 @@ class Trainer:
                             eta_min=float(current_lr) * float(min_lr_ratio),
                         )
 
+            mode = str(loss_mode).lower()
+            if mode == "blend":
+                mode = "bce_ft"
+
             main_ep = max(0, ep - int(warmup_epochs))
-            if epoch_phase == "warmup" or str(loss_mode) == "bce":
+            if epoch_phase == "warmup" or mode == "bce":
                 lam = 0.0
             else:
                 lam = ramp_lambda(
@@ -401,13 +425,18 @@ class Trainer:
                     )
 
                     loss_bce = masked_bce_with_logits(logits, yb_r, valid, pos_weight_t=posw)
-                    if float(lam) <= 0.0:
+                    if float(lam) <= 0.0 or mode == "bce":
                         loss = loss_bce
                     else:
-                        loss_ft = focal_tversky_masked(
-                            logits, yb_r, valid, alpha=float(ft_alpha), gamma=float(ft_gamma)
-                        )
-                        loss = (1.0 - float(lam)) * loss_bce + float(lam) * loss_ft
+                        if mode == "bce_ft":
+                            loss_aux = focal_tversky_masked(
+                                logits, yb_r, valid, alpha=float(ft_alpha), gamma=float(ft_gamma)
+                            )
+                        elif mode == "bce_dice":
+                            loss_aux = soft_dice_masked(logits, yb_r, valid)
+                        else:
+                            raise ValueError(f"Unknown loss_mode: {loss_mode!r}")
+                        loss = (1.0 - float(lam)) * loss_bce + float(lam) * loss_aux
 
                     if not torch.isfinite(loss):
                         # dump batch stats

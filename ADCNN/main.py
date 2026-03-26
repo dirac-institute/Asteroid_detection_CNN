@@ -629,7 +629,7 @@ def cli():
     ap.add_argument("--warmup-lr", type=float, default=None)
     ap.add_argument("--lr-schedule", choices=["cosine", "constant"], default=None)
     ap.add_argument("--min-lr-ratio", type=float, default=None)
-    ap.add_argument("--loss-mode", choices=["blend", "bce"], default=None)
+    ap.add_argument("--loss-mode", choices=["blend", "bce", "bce_ft", "bce_dice"], default=None)
     ap.add_argument("--lam-max", type=float, default=None)
     ap.add_argument("--ramp-start", type=int, default=None)
     ap.add_argument("--ramp-end", type=int, default=None)

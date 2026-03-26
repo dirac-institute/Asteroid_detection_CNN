@@ -78,8 +78,12 @@ class TrainConfig:
     weight_decay: float = 1e-4
     main_batches: int = 0  # 0 = full loader
 
-    # Blend schedule: BCE -> focal-tversky, relative to the main phase.
-    loss_mode: str = "blend"  # "blend" or "bce"
+    # Loss family:
+    # - "bce": BCE only
+    # - "blend"/"bce_ft": BCE + focal-Tversky
+    # - "bce_dice": BCE + soft Dice
+    # The lam ramp controls the auxiliary overlap-term weight in the non-BCE modes.
+    loss_mode: str = "blend"
     ramp_kind: str = "linear"  # "linear" or "sigmoid"
     ramp_start_epoch: int = 8
     ramp_end_epoch: int = 18
@@ -179,8 +183,11 @@ class Config:
             raise ValueError(f"train.ramp_kind must be 'linear' or 'sigmoid', got {self.train.ramp_kind}")
         if self.train.lr_schedule not in ("cosine", "constant"):
             raise ValueError(f"train.lr_schedule must be 'cosine' or 'constant', got {self.train.lr_schedule}")
-        if self.train.loss_mode not in ("blend", "bce"):
-            raise ValueError(f"train.loss_mode must be 'blend' or 'bce', got {self.train.loss_mode}")
+        if self.train.loss_mode not in ("blend", "bce", "bce_ft", "bce_dice"):
+            raise ValueError(
+                "train.loss_mode must be 'blend', 'bce', 'bce_ft', or 'bce_dice', "
+                f"got {self.train.loss_mode}"
+            )
         if not (0.0 <= float(self.train.ft_alpha) <= 1.0):
             raise ValueError(f"train.ft_alpha must be in [0,1], got {self.train.ft_alpha}")
         if not (0.0 <= float(self.train.lam_max) <= 1.0):
