@@ -345,7 +345,19 @@ def run(cfg: Config, args: argparse.Namespace):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # base tiles dataset
-    base_ds = H5TiledDataset(cfg.data.train_h5, tile=cfg.data.tile, k_sigma=5.0)
+    base_ds = H5TiledDataset(
+        cfg.data.train_h5,
+        tile=cfg.data.tile,
+        k_sigma=5.0,
+        target_mask_mode=str(cfg.data.target_mask_mode),
+        target_csv=str(cfg.data.train_csv) if cfg.data.target_mask_mode == "soft" else None,
+        soft_mask_sigma_pix=float(cfg.data.soft_mask_sigma_pix),
+        soft_mask_line_width=int(cfg.data.soft_mask_line_width),
+        soft_mask_truncate=float(cfg.data.soft_mask_truncate),
+        soft_mask_cache_dir=cfg.data.soft_mask_cache_dir,
+        soft_mask_cache_size=int(cfg.data.soft_mask_cache_size),
+        soft_mask_cache_dtype=str(cfg.data.soft_mask_cache_dtype),
+    )
 
     # split by PANELS
     idx_tr, idx_va = split_indices(cfg.data.train_h5, val_frac=float(cfg.data.val_frac), seed=cfg.train.seed)
@@ -529,6 +541,14 @@ def run(cfg: Config, args: argparse.Namespace):
             score_method=str(cfg.train.rescue_post_score_method),
             topk_fraction=float(cfg.train.rescue_post_topk_fraction),
         )
+        if is_main_process():
+            print(
+                "[rescue-val] fixed subset panels:",
+                ",".join(map(str, rescue_validator.panel_ids)),
+                f"| objects={rescue_validator.total_objects}",
+                f"| baseline_detected={rescue_validator.baseline_detected}",
+                f"| baseline_missed={rescue_validator.missed_total}",
+            )
 
     model_hparams = {"in_ch": 1, "out_ch": 1}
     # If your model exposes widths, include them for strict validation.
@@ -557,6 +577,7 @@ def run(cfg: Config, args: argparse.Namespace):
         min_lr_ratio=cfg.train.min_lr_ratio,
         lr_schedule=cfg.train.lr_schedule,
         weight_decay=cfg.train.weight_decay,
+        loss_mode=cfg.train.loss_mode,
         ramp_kind=cfg.train.ramp_kind,
         ramp_start_epoch=cfg.train.ramp_start_epoch,
         ramp_end_epoch=cfg.train.ramp_end_epoch,
@@ -585,6 +606,8 @@ def run(cfg: Config, args: argparse.Namespace):
         rescue_validator=rescue_validator,
         enable_rescue_val=cfg.train.enable_rescue_val,
         rescue_val_every=cfg.train.rescue_val_every,
+        rescue_val_every_early=cfg.train.rescue_val_every_early,
+        rescue_val_early_epochs=cfg.train.rescue_val_early_epochs,
     )
 
     if is_main_process():
@@ -599,6 +622,21 @@ def cli():
     ap.add_argument("--train-h5", type=str, default="/home/karlo/test.h5", help="Path to training H5 file (required)")
     ap.add_argument("--batch", type=int, default=None)
     ap.add_argument("--epochs", type=int, default=None)
+    ap.add_argument("--target-mask-mode", choices=["hard", "soft"], default=None)
+    ap.add_argument("--soft-mask-sigma-pix", type=float, default=None)
+    ap.add_argument("--soft-mask-cache-dir", type=str, default=None)
+    ap.add_argument("--main-lr", type=float, default=None)
+    ap.add_argument("--warmup-lr", type=float, default=None)
+    ap.add_argument("--lr-schedule", choices=["cosine", "constant"], default=None)
+    ap.add_argument("--min-lr-ratio", type=float, default=None)
+    ap.add_argument("--loss-mode", choices=["blend", "bce"], default=None)
+    ap.add_argument("--lam-max", type=float, default=None)
+    ap.add_argument("--ramp-start", type=int, default=None)
+    ap.add_argument("--ramp-end", type=int, default=None)
+    ap.add_argument("--rescue-val-every", type=int, default=None)
+    ap.add_argument("--rescue-val-every-early", type=int, default=None)
+    ap.add_argument("--rescue-val-early-epochs", type=int, default=None)
+    ap.add_argument("--rescue-val-max-images", type=int, default=None)
 
     # determinism toggle
     ap.add_argument("--deterministic", action="store_true", help="Enable deterministic algorithms (slower).")
@@ -623,6 +661,36 @@ if __name__ == "__main__":
         cfg.loader.batch_size = args.batch
     if args.epochs is not None:
         cfg.train.max_epochs = args.epochs
+    if args.target_mask_mode is not None:
+        cfg.data.target_mask_mode = args.target_mask_mode
+    if args.soft_mask_sigma_pix is not None:
+        cfg.data.soft_mask_sigma_pix = args.soft_mask_sigma_pix
+    if args.soft_mask_cache_dir is not None:
+        cfg.data.soft_mask_cache_dir = args.soft_mask_cache_dir
+    if args.main_lr is not None:
+        cfg.train.main_lr = args.main_lr
+    if args.warmup_lr is not None:
+        cfg.train.warmup_lr = args.warmup_lr
+    if args.lr_schedule is not None:
+        cfg.train.lr_schedule = args.lr_schedule
+    if args.min_lr_ratio is not None:
+        cfg.train.min_lr_ratio = args.min_lr_ratio
+    if args.loss_mode is not None:
+        cfg.train.loss_mode = args.loss_mode
+    if args.lam_max is not None:
+        cfg.train.lam_max = args.lam_max
+    if args.ramp_start is not None:
+        cfg.train.ramp_start_epoch = args.ramp_start
+    if args.ramp_end is not None:
+        cfg.train.ramp_end_epoch = args.ramp_end
+    if args.rescue_val_every is not None:
+        cfg.train.rescue_val_every = args.rescue_val_every
+    if args.rescue_val_every_early is not None:
+        cfg.train.rescue_val_every_early = args.rescue_val_every_early
+    if args.rescue_val_early_epochs is not None:
+        cfg.train.rescue_val_early_epochs = args.rescue_val_early_epochs
+    if args.rescue_val_max_images is not None:
+        cfg.train.rescue_val_max_images = args.rescue_val_max_images
     if args.ema_decay is not None:
         cfg.train.ema_decay = args.ema_decay
     if args.no_ema:

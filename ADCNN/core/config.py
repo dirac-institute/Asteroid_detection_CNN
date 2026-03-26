@@ -22,6 +22,15 @@ class DataConfig:
     # Pixels to ignore in loss/metrics (e.g. real sources)
     real_labels_key: str = "real_labels"
 
+    # Target mask source
+    target_mask_mode: str = "hard"  # "hard" or "soft"
+    soft_mask_sigma_pix: float = 2.0
+    soft_mask_line_width: int = 1
+    soft_mask_truncate: float = 4.0
+    soft_mask_cache_dir: Optional[str] = None
+    soft_mask_cache_size: int = 8
+    soft_mask_cache_dtype: str = "float16"
+
 
 @dataclass
 class LoaderConfig:
@@ -57,24 +66,25 @@ class TrainConfig:
     # Optional short stabilization phase before the main run.
     warmup_epochs: int = 3
     warmup_batches: int = 0
-    warmup_lr: float = 2e-4
+    warmup_lr: float = 1.5e-4
     warmup_pos_weight: float = 12.0
 
     # Main training schedule
-    max_epochs: int = 60
+    max_epochs: int = 24
     val_every: int = 3
-    main_lr: float = 3e-4
-    min_lr_ratio: float = 0.10
+    main_lr: float = 1.5e-4
+    min_lr_ratio: float = 0.20
     lr_schedule: str = "cosine"  # "cosine" or "constant"
     weight_decay: float = 1e-4
     main_batches: int = 0  # 0 = full loader
 
     # Blend schedule: BCE -> focal-tversky, relative to the main phase.
+    loss_mode: str = "blend"  # "blend" or "bce"
     ramp_kind: str = "linear"  # "linear" or "sigmoid"
-    ramp_start_epoch: int = 4
-    ramp_end_epoch: int = 20
+    ramp_start_epoch: int = 8
+    ramp_end_epoch: int = 18
     sigmoid_k: float = 8.0
-    lam_max: float = 0.70
+    lam_max: float = 0.20
 
     # Loss params
     bce_pos_weight_main: float = 8.0
@@ -97,6 +107,8 @@ class TrainConfig:
     # Rescue-oriented validation on a small fixed validation subset.
     enable_rescue_val: bool = True
     rescue_val_every: int = 3
+    rescue_val_every_early: int = 1
+    rescue_val_early_epochs: int = 8
     rescue_val_max_images: int = 8
     rescue_val_seed_offset: int = 50_000
     rescue_budget_primary: int = 15000
@@ -142,6 +154,10 @@ class Config:
             raise ValueError(f"data.val_frac must be in [0,1], got {self.data.val_frac}")
         if self.data.margin_pix < 0.0:
             raise ValueError(f"data.margin_pix must be non-negative, got {self.data.margin_pix}")
+        if self.data.target_mask_mode not in ("hard", "soft"):
+            raise ValueError(
+                f"data.target_mask_mode must be 'hard' or 'soft', got {self.data.target_mask_mode}"
+            )
 
         if self.loader.batch_size <= 0:
             raise ValueError(f"loader.batch_size must be positive, got {self.loader.batch_size}")
@@ -163,6 +179,8 @@ class Config:
             raise ValueError(f"train.ramp_kind must be 'linear' or 'sigmoid', got {self.train.ramp_kind}")
         if self.train.lr_schedule not in ("cosine", "constant"):
             raise ValueError(f"train.lr_schedule must be 'cosine' or 'constant', got {self.train.lr_schedule}")
+        if self.train.loss_mode not in ("blend", "bce"):
+            raise ValueError(f"train.loss_mode must be 'blend' or 'bce', got {self.train.loss_mode}")
         if not (0.0 <= float(self.train.ft_alpha) <= 1.0):
             raise ValueError(f"train.ft_alpha must be in [0,1], got {self.train.ft_alpha}")
         if not (0.0 <= float(self.train.lam_max) <= 1.0):

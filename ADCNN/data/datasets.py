@@ -1,6 +1,8 @@
 import math, h5py, numpy as np, torch
 from torch.utils.data import Dataset
 
+from ADCNN.data.soft_masks import SoftMaskGenerator
+
 def robust_stats_mad(arr: np.ndarray) -> tuple[np.float32, np.float32]:
     med = np.median(arr)
     # Protect against NaN median (e.g., all-NaN input)
@@ -15,11 +17,29 @@ def robust_stats_mad(arr: np.ndarray) -> tuple[np.float32, np.float32]:
 
 class H5TiledDataset(Dataset):
     """Stream tiles from (N,H,W) images; per-image robust norm, k-sigma clip, pad edges."""
-    def __init__(self, h5_path, tile=128, k_sigma=5.0, crop_for_stats=512, precompute_stats=True):
+    def __init__(
+        self,
+        h5_path,
+        tile=128,
+        k_sigma=5.0,
+        crop_for_stats=512,
+        precompute_stats=True,
+        *,
+        target_mask_mode: str = "hard",
+        target_csv: str | None = None,
+        soft_mask_sigma_pix: float = 2.0,
+        soft_mask_line_width: int = 1,
+        soft_mask_truncate: float = 4.0,
+        soft_mask_cache_dir: str | None = None,
+        soft_mask_cache_size: int = 8,
+        soft_mask_cache_dtype: str = "float16",
+    ):
         self.h5_path, self.tile, self.k_sigma, self.crop_for_stats = h5_path, int(tile), float(k_sigma), int(crop_for_stats)
         self._h5 = self._x = self._y = None
         self._stats_cache = {}
         self.precompute_stats = bool(precompute_stats)
+        self.target_mask_mode = str(target_mask_mode)
+        self._soft_masks = None
 
         with h5py.File(self.h5_path, "r") as f:
             self.N, self.H, self.W = f["images"].shape
@@ -31,6 +51,22 @@ class H5TiledDataset(Dataset):
         # Optionally precompute stats at init time for all panels
         if self.precompute_stats and self.N <= 2000:  # Only if reasonable number of panels
             self._precompute_all_stats()
+
+        if self.target_mask_mode not in ("hard", "soft"):
+            raise ValueError(f"target_mask_mode must be 'hard' or 'soft', got {self.target_mask_mode!r}")
+        if self.target_mask_mode == "soft":
+            if not target_csv:
+                raise ValueError("target_csv is required when target_mask_mode='soft'")
+            self._soft_masks = SoftMaskGenerator(
+                csv_path=str(target_csv),
+                image_shape=(self.H, self.W),
+                sigma_pix=float(soft_mask_sigma_pix),
+                line_width=int(soft_mask_line_width),
+                truncate=float(soft_mask_truncate),
+                cache_dir=soft_mask_cache_dir,
+                cache_size=int(soft_mask_cache_size),
+                dtype=str(soft_mask_cache_dtype),
+            )
 
     def _precompute_all_stats(self):
         """Precompute statistics for all panels to avoid per-tile branching."""
@@ -56,7 +92,12 @@ class H5TiledDataset(Dataset):
         self._ensure()
         i, r, c = self.indices[idx]; t = self.tile
         r0, c0 = r*t, c*t; r1, c1 = min(r0+t, self.H), min(c0+t, self.W)
-        x = self._x[i, r0:r1, c0:c1].astype("float32"); y = self._y[i, r0:r1, c0:c1].astype("float32")
+        x = self._x[i, r0:r1, c0:c1].astype("float32")
+        if self.target_mask_mode == "soft":
+            panel_mask = self._soft_masks.panel_mask(int(i))
+            y = panel_mask[r0:r1, c0:c1].astype("float32", copy=False)
+        else:
+            y = self._y[i, r0:r1, c0:c1].astype("float32")
         if x.shape != (t, t):
             xp = np.zeros((t,t), np.float32); yp = np.zeros((t,t), np.float32)
             xp[:x.shape[0], :x.shape[1]] = x; yp[:y.shape[0], :y.shape[1]] = y; x, y = xp, yp

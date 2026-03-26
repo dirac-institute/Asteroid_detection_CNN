@@ -173,6 +173,7 @@ class Trainer:
         lr_schedule: str = "cosine",
         weight_decay: float = 1e-4,
 
+        loss_mode: str = "blend",
         ramp_kind: str = "linear",
         ramp_start_epoch: int = 4,
         ramp_end_epoch: int = 20,
@@ -214,6 +215,8 @@ class Trainer:
         rescue_validator=None,
         enable_rescue_val: bool = False,
         rescue_val_every: int = 3,
+        rescue_val_every_early: int = 1,
+        rescue_val_early_epochs: int = 8,
     ):
         is_dist, rank, local_rank, world_size = init_distributed()
         use_ddp = bool(is_dist and world_size > 1)
@@ -343,24 +346,28 @@ class Trainer:
             else:
                 if train_phase != "main":
                     train_phase = "main"
+                    current_lr = min(self._current_lr(optimizer), float(main_lr))
                     for pg in optimizer.param_groups:
-                        pg["lr"] = float(main_lr)
+                        pg["lr"] = float(current_lr)
                     if str(lr_schedule) == "cosine":
                         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                             optimizer,
                             T_max=max(1, int(max_epochs) - int(warmup_epochs)),
-                            eta_min=float(main_lr) * float(min_lr_ratio),
+                            eta_min=float(current_lr) * float(min_lr_ratio),
                         )
 
             main_ep = max(0, ep - int(warmup_epochs))
-            lam = 0.0 if epoch_phase == "warmup" else ramp_lambda(
-                main_ep,
-                kind=str(ramp_kind),
-                e0=int(ramp_start_epoch),
-                e1=int(ramp_end_epoch),
-                k=float(sigmoid_k),
-                max_value=float(lam_max),
-            )
+            if epoch_phase == "warmup" or str(loss_mode) == "bce":
+                lam = 0.0
+            else:
+                lam = ramp_lambda(
+                    main_ep,
+                    kind=str(ramp_kind),
+                    e0=int(ramp_start_epoch),
+                    e1=int(ramp_end_epoch),
+                    k=float(sigmoid_k),
+                    max_value=float(lam_max),
+                )
 
             posw = self._posw(
                 dtype=torch.float32,
@@ -510,8 +517,9 @@ class Trainer:
                     print(f"[VAL ep{ep:03d}] {tag} AUC {float(auc_eval):.4f}")
                 val_auc_last = float(auc_eval)
 
+            rescue_every = int(rescue_val_every_early) if ep <= int(rescue_val_early_epochs) else int(rescue_val_every)
             do_rescue_val = bool(enable_rescue_val and rescue_validator is not None) and (
-                (ep % int(rescue_val_every) == 0) or (ep == 1)
+                (ep % max(1, rescue_every) == 0) or (ep == 1)
             )
             if do_rescue_val:
                 rescue_model = raw_model

@@ -26,7 +26,7 @@ def resize_masks_to(logits: torch.Tensor, masks: torch.Tensor) -> torch.Tensor:
     Accepts masks with shape:
       - (B, H, W) or (B, 1, H, W) or (H, W) / (1, H, W)
 
-    Returns float mask in {0,1}.
+    Returns resized float mask. Binary masks stay binary; soft masks keep values.
     """
     H, W = int(logits.shape[-2]), int(logits.shape[-1])
 
@@ -37,10 +37,10 @@ def resize_masks_to(logits: torch.Tensor, masks: torch.Tensor) -> torch.Tensor:
 
     masks = masks.float()
     if tuple(masks.shape[-2:]) == (H, W):
-        return (masks > 0.5).float()
+        return masks.clamp(0.0, 1.0)
 
     out = F.interpolate(masks, size=(H, W), mode="nearest")
-    return (out > 0.5).float()
+    return out.clamp(0.0, 1.0)
 
 
 def valid_mask_from_real(
