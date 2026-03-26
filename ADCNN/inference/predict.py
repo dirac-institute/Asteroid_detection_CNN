@@ -1,6 +1,6 @@
 import math, numpy as np, torch, h5py
 import torch.nn.functional as F
-from .models.unet_res_se import UNetResSEASPP
+from ADCNN.core.model import UNetResSEASPP
 
 def load_model(ckpt_path, widths=(32,64,128,256,512)):
     ckpt = torch.load(ckpt_path)

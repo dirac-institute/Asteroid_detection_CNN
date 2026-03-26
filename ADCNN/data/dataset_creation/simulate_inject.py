@@ -3,6 +3,10 @@ import argparse
 from pathlib import Path
 
 from common import ensure_dir, draw_one_line, psf_fwhm_arcsec_from_calexp, mag_to_snr, snr_to_mag
+from pipetasks import calibrate, isr, fetch_from_butler, source_detect
+
+import random
+from typing import List, Sequence
 
 from astroML.crossmatch import crossmatch_angular
 from lsst.daf.butler import Butler
@@ -10,8 +14,6 @@ import numpy as np
 from astropy.table import Table
 from lsst.geom import Point2D
 import lsst.geom as geom
-from lsst.pipe.tasks.calibrate import CalibrateTask
-from lsst.pipe.tasks.characterizeImage import CharacterizeImageTask
 from lsst.source.injection.inject_exposure import ExposureInjectTask
 from lsst.meas.extensions.psfex.psfexPsfDeterminer import PsfexNoGoodStarsError
 import h5py
@@ -26,24 +28,6 @@ import traceback
 
 completed_counter = Value('i', 0)
 counter_lock = Lock()
-
-
-def characterizeCalibrate(postISRCCD):
-    char_config = CharacterizeImageTask.ConfigClass()
-    char_config.doApCorr = True
-    char_config.doDeblend = True
-    #char_config.doApCorr = False
-    #char_config.doDeblend = False
-    char_task = CharacterizeImageTask(config=char_config)
-    char_result = char_task.run(postISRCCD)
-
-    calib_config = CalibrateTask.ConfigClass()
-    calib_config.doAstrometry = False
-    calib_config.doPhotoCal = False
-    calib_task = CalibrateTask(config=calib_config, icSourceSchema=char_result.sourceCat.schema)
-    calib_result = calib_task.run(postISRCCD, background=char_result.background, icSourceCat=char_result.sourceCat)
-    return calib_result.outputExposure, calib_result.sourceCat
-
 
 def inject(postISRCCD, injection_catalog):
     inject_task = ExposureInjectTask()
@@ -165,6 +149,7 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
             else:
                 magnitude = psf_magnitude
                 surface_brightness = magnitude
+            #stack_snr = snr
             stack_snr = mag_to_snr(magnitude, calexp, x_pos, y_pos, use_kernel_image=use_kernel, l_pix=length, theta_deg=angle, snr_definition="measurement")
         elif mag_mode == "psf_mag":
             psf_magnitude = rng.uniform(mag[0], upper_limit_mag)
@@ -219,6 +204,7 @@ def stack_hits_by_footprints(
     injection_catalog,
     overlap_frac=0.02,
     overlap_minpix=100,
+    return_matched_fp_masks = False
 ):
     H, W = int(dimensions.y), int(dimensions.x)
     N = len(injection_catalog)
@@ -227,7 +213,8 @@ def stack_hits_by_footprints(
     det_mag = np.full(N, np.nan)
     det_magerr = np.full(N, np.nan)
     det_snr = np.full(N, np.nan)
-    matched_fp_masks = [np.zeros((H, W), bool) for _ in range(N)]
+    if return_matched_fp_masks:
+        matched_fp_masks = [np.zeros((H, W), bool) for _ in range(N)]
 
     mags = calexp_post.photoCalib.instFluxToMagnitude(post_src, "base_PsfFlux")
 
@@ -291,13 +278,17 @@ def stack_hits_by_footprints(
             f = float(post_src[best_idx].get("base_PsfFlux_instFlux"))
             fe = float(post_src[best_idx].get("base_PsfFlux_instFluxErr"))
             det_snr[inj_id] = f / fe if (np.isfinite(f) and np.isfinite(fe) and fe > 0) else np.nan
-            matched_fp_masks[inj_id][y0:y1+1, x0:x1+1] |= best_fp
+            if return_matched_fp_masks:
+                matched_fp_masks[inj_id][y0:y1+1, x0:x1+1] |= best_fp
 
     injection_catalog["stack_detection"] = det_flag
     injection_catalog["stack_mag"] = det_mag
     injection_catalog["stack_mag_err"] = det_magerr
     injection_catalog["stack_snr"] = det_snr
-    return injection_catalog, matched_fp_masks
+    if return_matched_fp_masks:
+        return injection_catalog, matched_fp_masks
+    else:
+        return injection_catalog, None
 
 def crossmatch_catalogs (pre, post):
     # Crossmatch POST vs PRE on-sky (inputs in radians, radius in radians)
@@ -433,18 +424,36 @@ def _try_place_trail_no_overlap(
 
     raise RuntimeError(f"Could not place trail without overlap after {max_tries} tries")
 
-def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=None, debug=False, mag_mode="psf_mag", psf_template="image"):
+def format_dataId(dataId):
+    out_dataId = {"instrument": dataId["instrument"],
+                  "detector": dataId["detector"],
+                  "exposure": dataId["exposure"] if "exposure" in dataId else dataId["visit"],
+                  "visit": dataId["exposure"] if "exposure" in dataId else dataId["visit"],
+                  "band": dataId["band"]}
+    return out_dataId
+
+def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=None, debug=False, mag_mode="psf_mag", psf_template="image", detection_threshold=5.0, reprocess=False):
     try:
         if seed is None:
             seed = np.random.randint(0,10000)
         butler = Butler(repo, collections=coll)
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
-        calexp = butler.get("preliminary_visit_image", dataId=ref.dataId)
-        pre_injection_Src = butler.get("single_visit_star_footprints", dataId=ref.dataId)
-        forbidden = build_forbidden_mask(calexp, pre_injection_Src, dimensions)
-        injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode, psf_template=psf_template, forbidden_mask=forbidden)
-        injected_calexp, post_injection_Src = characterizeCalibrate(inject(calexp, injection_catalog))
-        mask = np.zeros((dimensions.y, dimensions.x), dtype=int)
+        if reprocess:
+            calexp, pre_injection_Src = calibrate(butler, isr(butler, format_dataId(ref.dataId)), format_dataId(ref.dataId), threshold=detection_threshold)
+            forbidden = build_forbidden_mask(calexp, pre_injection_Src, dimensions)
+            injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp,
+                                                  mag_mode=mag_mode, psf_template=psf_template,
+                                                  forbidden_mask=forbidden)
+            injected_calexp, post_injection_Src = calibrate(butler, inject(calexp, injection_catalog),
+                                                            format_dataId(ref.dataId), threshold=detection_threshold)
+
+        else:
+            calexp, pre_injection_Src, background = fetch_from_butler(butler, dataId=format_dataId(ref.dataId), threshold=detection_threshold)
+            forbidden = build_forbidden_mask(calexp, pre_injection_Src, dimensions)
+            injection_catalog = generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, calexp, mag_mode=mag_mode, psf_template=psf_template, forbidden_mask=forbidden)
+            injected_calexp = inject(calexp, injection_catalog)
+            post_injection_Src = source_detect(injected_calexp, background, threshold=detection_threshold)
+        mask = np.zeros((dimensions.y, dimensions.x), dtype=np.uint16)
         for i, row in enumerate(injection_catalog):
             psf_width = injected_calexp.psf.getLocalKernel(Point2D(row["x"], row["y"])).getWidth()
             mask = draw_one_line(mask, [row["x"], row["y"]], row["beta"], row["trail_length"], true_value=i + 1,
@@ -456,7 +465,8 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
                                                                        truth_id_mask=mask,
                                                                        injection_catalog=injection_catalog,
                                                                        overlap_minpix=1,
-                                                                       overlap_frac=0.0,)
+                                                                       overlap_frac=0.0,
+                                                                       return_matched_fp_masks=debug)
 
         real_labels = footprints_to_label_mask(pre_injection_Src, dimensions, dtype=np.uint16)
         if not debug:
@@ -475,15 +485,14 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             return True, injected_calexp.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog, det_mask, matched_fp_masks
     except Exception as e:
         return False, ref_dataId, repr(e), traceback.format_exc()
-        return {"ok": False, "dataId": ref_dataId, "error": repr(e), "traceback": traceback.format_exc()}
 
 
 def worker(args):
-    idx, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta, source_type, global_seed, mag_mode, psf_template = args
+    idx, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta, source_type, global_seed, mag_mode, psf_template, detection_threshold = args
     seed = (int(global_seed) * 1_000_003 + int(dataId["visit"]) * 1_003 + int(dataId["detector"])) & 0xFFFFFFFF
     try:
         res = one_detector_injection(number, trail_length, magnitude, beta, repo, coll, dims, source_type, dataId, seed,
-                                     mag_mode=mag_mode, psf_template=psf_template)
+                                     mag_mode=mag_mode, psf_template=psf_template, detection_threshold=detection_threshold)
         if res[0] is False:
             return ("err", res[1], res[2], res[3])
         _, img, mask, real_labels, catalog = res
@@ -505,23 +514,197 @@ def worker(args):
         tb = traceback.format_exc()
         return ("err", idx, dataId, tb)
 
+def _key_from_dataId(d):
+    return (int(d["visit"]), int(d["detector"]))
+
+
+def reservoir_sample(iterable, k: int, seed: int = 123):
+    """Uniform sample of size k from an iterable without materializing it."""
+    rng = random.Random(int(seed))
+    sample = []
+    for i, item in enumerate(iterable, 1):
+        if i <= k:
+            sample.append(item)
+        else:
+            j = rng.randrange(i)
+            if j < k:
+                sample[j] = item
+    return sample
+
+def select_good_refs_random_check(
+    *,
+    repo: str,
+    collections: str | Sequence[str],
+    where: str,
+    instrument: str = "LSSTCam",
+    k: int = 200,
+    seed: int = 123,
+    pool_size: int = 5000,
+    max_checks: int = 200000,
+    check_refs: bool = True,
+    verbose: bool = False,
+) -> List:
+    """
+    Deterministically sample refs from preliminary_visit_image.
+
+    If check_refs=False:
+      - return a deterministic random sample of size k (or fewer if dataset smaller)
+
+    If check_refs=True:
+      - build a deterministic random pool of size pool_size
+      - shuffle it deterministically
+      - keep refs that satisfy:
+          * single_visit_star_footprints exists
+          * preliminary_visit_image.photoCalib loads and is not None
+          * dimensions match the most common dimensions from a small sampled subset
+      - stop when k good refs are collected or max_checks reached
+      - if the initial pool is insufficient, extend it deterministically and continue
+    """
+    b = Butler(repo, collections=collections)
+
+    refs_by_key = {}
+    all_pvi_iter = b.registry.queryDatasets(
+        "preliminary_visit_image",
+        instrument=instrument,
+        where=where,
+        collections=collections,
+        findFirst=True,
+    )
+    for ref in all_pvi_iter:
+        key = _key_from_dataId(ref.dataId)
+        refs_by_key.setdefault(key, ref)
+
+    ordered_refs = [refs_by_key[key] for key in sorted(refs_by_key)]
+    rng = random.Random(int(seed))
+    rng.shuffle(ordered_refs)
+
+    # Fast path: no checks, just return the deterministic sample up to k
+    if not check_refs:
+        out = sorted(ordered_refs[:int(k)], key=lambda r: _key_from_dataId(r.dataId))
+        if verbose:
+            print(f"Selected refs without checks: {len(out)} (requested k={k})", flush=True)
+        return out
+
+    initial_pool = min(len(ordered_refs), max(int(k), int(pool_size)))
+    dims_x = []
+    dims_y = []
+    small_n = min(100, initial_pool)
+    for i in range(small_n):
+        try:
+            dims = b.get(
+                "preliminary_visit_image.dimensions",
+                dataId=ordered_refs[i].dataId,
+                collections=collections,
+            )
+            dims_x.append(int(dims.x))
+            dims_y.append(int(dims.y))
+        except Exception:
+            continue
+
+    dim_x = None
+    dim_y = None
+    if len(dims_x) > 0:
+        dim_x = np.bincount(np.array(dims_x, dtype=int)).argmax()
+        dim_y = np.bincount(np.array(dims_y, dtype=int)).argmax()
+
+    slurm_cpus = os.environ.get("SLURM_CPUS_PER_TASK")
+    if slurm_cpus:
+        try:
+            n_workers = max(1, int(slurm_cpus) - 1)
+        except ValueError:
+            n_workers = max(1, (os.cpu_count() or 1) - 1)
+    else:
+        n_workers = max(1, (os.cpu_count() or 1) - 1)
+
+    def _validate_ref(ref):
+        local_b = Butler(repo, collections=collections)
+        try:
+            svsf = local_b.registry.findDataset(
+                "single_visit_star_footprints",
+                dataId=ref.dataId,
+                collections=collections,
+            )
+            if svsf is None:
+                return False
+
+            try:
+                pc = local_b.get("preliminary_visit_image.photoCalib", dataId=ref.dataId, collections=collections)
+            except Exception:
+                return False
+            if pc is None:
+                return False
+
+            if dim_x is not None and dim_y is not None:
+                try:
+                    dims = local_b.get(
+                        "preliminary_visit_image.dimensions",
+                        dataId=ref.dataId,
+                        collections=collections,
+                    )
+                    if int(dims.x) != int(dim_x) or int(dims.y) != int(dim_y):
+                        return False
+                except Exception:
+                    return False
+
+            return True
+        except Exception:
+            return False
+
+    good = []
+    checks = 0
+    next_start = 0
+    refill_size = max(1, int(pool_size))
+    batch_size = max(1, min(256, refill_size))
+
+    while len(good) < int(k) and checks < int(max_checks) and next_start < len(ordered_refs):
+        pool_end = min(len(ordered_refs), next_start + (initial_pool if next_start == 0 else refill_size))
+        pool = ordered_refs[next_start:pool_end]
+        next_start = pool_end
+
+        for batch_start in range(0, len(pool), batch_size):
+            if len(good) >= int(k) or checks >= int(max_checks):
+                break
+            batch = pool[batch_start:batch_start + batch_size]
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(n_workers, len(batch))) as ex:
+                results = list(ex.map(_validate_ref, batch))
+
+            for ref, ok in zip(batch, results):
+                if len(good) >= int(k) or checks >= int(max_checks):
+                    break
+                checks += 1
+                if ok:
+                    good.append(ref)
+
+    good = sorted(good, key=lambda r: _key_from_dataId(r.dataId))
+
+    if verbose:
+        print(
+            f"Selected good refs: {len(good)} (requested k={k}), "
+            f"from pool_size={pool_size}, checks={checks}",
+            flush=True,
+        )
+
+    return good
 
 def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitude, beta, where, parallel=4,
-                           random_subset=0, train_test_split=0, seed=123, chunks=None, test_only=False, bad_visits_file=None, mag_mode="psf_mag",
-                           psf_template="image"):
+                           random_subset=0, train_test_split=0, seed=123, chunks=None, test_only=False, mag_mode="psf_mag",
+                           psf_template="image", stack_detection_threshold=5.0):
     butler = Butler(repo, collections=coll)
     h5train_path = os.path.join(save_path, "train.h5")
     h5test_path = os.path.join(save_path, "test.h5")
 
-    refs = list(set(butler.registry.queryDatasets("preliminary_visit_image", where=where, instrument="LSSTComCam", findFirst=True)))
-    refs = sorted(refs, key=lambda r: str(r.dataId["visit"]*1000+r.dataId["detector"]))
-    if bad_visits_file is not None:
-        bad_df = pd.read_csv(bad_visits_file)
-        bad_set = set(zip(bad_df["visit"].astype(int), bad_df["detector"].astype(int)))
-        refs = [r for r in refs if (int(r.dataId["visit"]), int(r.dataId["detector"])) not in bad_set]
-    if random_subset > 0:
-        rng_subset = np.random.default_rng(seed)
-        refs = list(rng_subset.choice(refs, random_subset, replace=False))
+    refs = select_good_refs_random_check(
+        repo=repo,
+        collections=coll,
+        where=where,
+        instrument="LSSTCam",
+        k=int(random_subset) if int(random_subset) > 0 else 200,
+        seed=seed,
+        pool_size=5000,  # increase if acceptance rate is low
+        max_checks=200000,  # safety cap
+    )
+    print("Selected datasets:", len(refs))
+
     global total_tasks
     total_tasks = len(refs)  # Needed for progress display
     rng_split = np.random.default_rng(seed + 1)
@@ -578,14 +761,14 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             count = count_test
             count_test += 1
             tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
-                          "preliminary_visit_image", seed, mag_mode, psf_template])
+                          "preliminary_visit_image", seed, mag_mode, psf_template, stack_detection_threshold])
         elif not test_only:
             h5path = h5train_path
             csvpath = os.path.join(save_path, "train.csv")
             count = count_train
             count_train += 1
             tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
-                          "preliminary_visit_image", seed, mag_mode, psf_template])
+                          "preliminary_visit_image", seed, mag_mode, psf_template, stack_detection_threshold])
     if parallel > 1:
         completed = 0
         total_tasks = len(tasks)
@@ -618,11 +801,11 @@ def rng_for_task(seed: int, dataId: dict) -> np.random.Generator:
 
 def main():
     ap = argparse.ArgumentParser("Build a SIMULATED (injected) dataset")
-    ap.add_argument("--repo", type=str, default="/repo/main")
-    ap.add_argument("--collections", type=str, default="LSSTComCam/runs/DRP/DP1/w_2025_17/DM-50530")
-    ap.add_argument("--save-path", default="../../../DATA/")
-    ap.add_argument("--where", default="")
-    ap.add_argument("--bad-visits-file", type=str, default="./bad_visits.csv",)
+    ap.add_argument("--repo", type=str, default="dp2_prep")
+    ap.add_argument("--collections", type=str, default="LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage2")
+    ap.add_argument("--save-path", default="../DATA/")
+    ap.add_argument("--where",
+                    default="instrument='LSSTCam' AND day_obs>=20250801 AND day_obs<=20250921 AND band in ('u','g','r','i','z','y') ")
     ap.add_argument("--parallel", type=int, default=4)
     ap.add_argument("--random-subset", type=int, default=10)
     ap.add_argument("--train-test-split", type=float, default=0.1)
@@ -636,6 +819,7 @@ def main():
     ap.add_argument("--beta-min", type=float, default=0)
     ap.add_argument("--beta-max", type=float, default=180)
     ap.add_argument("--number", type=int, default=20)
+    ap.add_argument("--stack-detection-threshold", type=float, default=5.0, help="SNR threshold for the stack (default 5.0)")
     ap.add_argument("--seed", type=int, default=123)
     ap.add_argument("--chunks", type=int, default=None, help="HDF5 chunk size (square). Example: 128 -> chunks=(1,128,128). None = contiguous")
     ap.add_argument("--test-only", action="store_true", default=False, help="Only generate test set")
@@ -661,8 +845,8 @@ def main():
         chunks=args.chunks,
         test_only=args.test_only,
         seed=args.seed,
-        bad_visits_file=args.bad_visits_file,
         psf_template=args.psf_template,
+        stack_detection_threshold=args.stack_detection_threshold,
     )
 
 if __name__ == "__main__":

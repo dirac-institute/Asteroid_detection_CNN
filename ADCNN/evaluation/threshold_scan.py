@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from ADCNN.utils.utils import draw_one_line
-import ADCNN.evals.eval_utils as eval_utils
+from ADCNN.utils.helpers import draw_one_line
+from ADCNN.utils.angle_utils import deg2rad
+from ADCNN.evaluation.geometry import label_components
+from ADCNN.evaluation.metrics import precision, recall, f1_score, f2_score, fppi, make_monotone_increasing
 import os, gc
 import numpy as np
 import matplotlib.pyplot as plt
@@ -74,7 +76,7 @@ def _objectwise_one_image(args):
     psf_width = _G_PSF_WIDTH
 
     pred_bin = (pred2d >= thr) if pred2d.dtype != np.bool_ else pred2d.copy()
-    lab, n = eval_utils._label_components_fds(pred_bin, pixel_gap=pixel_gap)
+    lab, n = label_components(pred_bin, pixel_gap=pixel_gap)
     predicted_positive = int(n)
 
     removed_labels = np.zeros(predicted_positive + 1, dtype=bool)
@@ -88,8 +90,10 @@ def _objectwise_one_image(args):
     for x, y, beta, trail_length in rows_np:
         pad = half + 4
 
-        dx = abs(np.cos(beta)) * trail_length
-        dy = abs(np.sin(beta)) * trail_length
+        # CRITICAL: beta from CSV is in DEGREES, must convert to radians
+        beta_rad = deg2rad(beta)
+        dx = abs(np.cos(beta_rad)) * trail_length
+        dy = abs(np.sin(beta_rad)) * trail_length
 
         x0 = int(max(0, np.floor(x - dx - pad)))
         x1 = int(min(W, np.ceil(x + dx + pad)))
@@ -336,15 +340,15 @@ def scan_thresholds(
         "obj_fn": acc_fn,
     }).sort_values("thr").reset_index(drop=True)
 
-    df["obj_precision"] = eval_utils.precision(df["obj_tp"], df["obj_fp"])
-    df["obj_recall"] = eval_utils.recall(df["obj_tp"], df["obj_fn"])
-    df["obj_f1"] = eval_utils.f1(df["obj_tp"], df["obj_fp"], df["obj_fn"])
-    df["obj_f2"] = eval_utils.f2(df["obj_tp"], df["obj_fp"], df["obj_fn"])
+    df["obj_precision"] = precision(df["obj_tp"], df["obj_fp"])
+    df["obj_recall"] = recall(df["obj_tp"], df["obj_fn"])
+    df["obj_f1"] = f1_score(df["obj_tp"], df["obj_fp"], df["obj_fn"])
+    df["obj_f2"] = f2_score(df["obj_tp"], df["obj_fp"], df["obj_fn"])
 
-    df["pix_precision"] = eval_utils.precision(df["pix_tp"], df["pix_fp"])
-    df["pix_recall"] = eval_utils.recall(df["pix_tp"], df["pix_fn"])
-    df["pix_f1"] = eval_utils.f1(df["pix_tp"], df["pix_fp"], df["pix_fn"])
-    df["pix_f2"] = eval_utils.f2(df["pix_tp"], df["pix_fp"], df["pix_fn"])
+    df["pix_precision"] = precision(df["pix_tp"], df["pix_fp"])
+    df["pix_recall"] = recall(df["pix_tp"], df["pix_fn"])
+    df["pix_f1"] = f1_score(df["pix_tp"], df["pix_fp"], df["pix_fn"])
+    df["pix_f2"] = f2_score(df["pix_tp"], df["pix_fp"], df["pix_fn"])
 
     return df
 
@@ -382,19 +386,19 @@ def compute_froc(
     if denom_images is None or int(denom_images) <= 0:
         raise ValueError("Provide n_neg_images > 0 when fp_denom='neg'")
 
-    fppi = eval_utils.fppi(fp, int(denom_images))
-    recall = eval_utils.recall(tp, fn)
+    fppi_vals = fppi(fp, int(denom_images))
+    recall_vals = recall(tp, fn)
 
     if sort_by == "fppi":
-        order = np.argsort(fppi, kind="mergesort")
+        order = np.argsort(fppi_vals, kind="mergesort")
     elif sort_by == "thr":
         order = np.argsort(thr, kind="mergesort")
     else:
         raise ValueError("sort_by must be 'fppi' or 'thr'")
 
     thr_s = thr[order]
-    fppi_s = fppi[order]
-    recall_s = recall[order]
+    fppi_s = fppi_vals[order]
+    recall_s = recall_vals[order]
 
     if make_monotonic and sort_by != "fppi":
         # monotonicity is defined w.r.t. FPPI; enforce in FPPI order
@@ -403,7 +407,7 @@ def compute_froc(
         fppi_s = fppi_s[order2]
         recall_s = recall_s[order2]
 
-    recall_plot = eval_utils.make_monotone_increasing(recall_s) if make_monotonic else recall_s
+    recall_plot = make_monotone_increasing(recall_s) if make_monotonic else recall_s
 
     return {
         "thr": thr_s,

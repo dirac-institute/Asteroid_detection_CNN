@@ -27,7 +27,8 @@ class BCEIoUEdge(nn.Module):
         self.lambda_bce = float(lambda_bce)
         self.lambda_edge = float(lambda_edge)
         self.iou = SoftIoULoss()
-        self.posw = float(pos_weight)
+        # Register pos_weight as buffer to avoid recreating tensor every forward
+        self.register_buffer("_posw", torch.tensor(float(pos_weight)))
         kx = torch.tensor([[[-1,0,1],[-2,0,2],[-1,0,1]]], dtype=torch.float32).unsqueeze(0)
         ky = torch.tensor([[[-1,-2,-1],[0,0,0],[1,2,1]]], dtype=torch.float32).unsqueeze(0)
         self.register_buffer("kx", kx); self.register_buffer("ky", ky)
@@ -37,8 +38,7 @@ class BCEIoUEdge(nn.Module):
         return torch.sqrt(gx*gx + gy*gy + 1e-12)
     def forward(self, logits, targets):
         t = targets.clamp(0,1)
-        posw = torch.tensor(self.posw, device=logits.device)
-        bce  = F.binary_cross_entropy_with_logits(logits, t, pos_weight=posw)
+        bce  = F.binary_cross_entropy_with_logits(logits, t, pos_weight=self._posw)
         siou = self.iou(logits, t)
         loss = self.lambda_bce*bce + (1.0-self.lambda_bce)*siou
         if self.lambda_edge>0:
