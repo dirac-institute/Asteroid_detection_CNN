@@ -59,5 +59,6 @@ PYTHONUNBUFFERED=1 torchrun \
   --nproc_per_node="${NGPU}" \
   -m main \
   --train-h5 "${DATA_DIR}/train.h5" \
+  --train-csv "${DATA_DIR}/train.csv" \
   --epochs 50 \
   --batch 256

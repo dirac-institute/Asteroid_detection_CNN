@@ -43,16 +43,32 @@ def resize_masks_to(logits: torch.Tensor, masks: torch.Tensor) -> torch.Tensor:
     return (out > 0.5).float()
 
 
-def valid_mask_from_real(real: torch.Tensor) -> torch.Tensor:
+def valid_mask_from_real(
+    real: torch.Tensor,
+    *,
+    mode: str = "ignore",
+    real_weight: float = 0.0,
+) -> torch.Tensor:
     """
-    Convert real source mask to valid evaluation mask.
+    Convert real source mask to pixel weights for training/evaluation.
 
-    real: mask of pixels that belong to REAL sources/labels (to be ignored).
-    Returns valid mask = 1 where training/eval should count pixels.
+    real: mask of pixels that belong to REAL sources/labels.
+    mode:
+      - "ignore": zero weight on real pixels (old behavior)
+      - "downweight": keep real pixels with reduced weight
+      - "full": treat real pixels like all other pixels
     """
     if real.dtype != torch.bool:
         real = real > 0.5
-    return (~real).to(dtype=torch.float32)
+    if mode == "ignore":
+        return (~real).to(dtype=torch.float32)
+    if mode == "downweight":
+        out = torch.ones_like(real, dtype=torch.float32)
+        out[real] = float(real_weight)
+        return out
+    if mode == "full":
+        return torch.ones_like(real, dtype=torch.float32)
+    raise ValueError(f"Unknown real-label mode: {mode!r}")
 
 
 # =============================================================================
@@ -67,6 +83,8 @@ def masked_pixel_auc(
     device: torch.device,
     n_bins: int = 256,
     max_batches: int = 12,
+    real_label_mode: str = "ignore",
+    real_label_weight: float = 0.0,
 ) -> float:
     """
     Compute ROC AUC over pixels, masking out "real" pixels.
@@ -119,21 +137,22 @@ def masked_pixel_auc(
             valid = torch.ones_like(yb_r, dtype=torch.float32, device=device)
         else:
             rb_r = resize_masks_to(logits, rb)
-            valid = valid_mask_from_real(rb_r)
+            valid = valid_mask_from_real(rb_r, mode=real_label_mode, real_weight=real_label_weight)
 
         # Compute scores and accumulate histograms
         p = torch.sigmoid(logits.float()).reshape(-1)
         t = yb_r.reshape(-1)
         v = valid.reshape(-1)
 
-        m = v > 0.5
+        m = v > 0.0
         if m.any():
             p = p[m]
             t = t[m]
+            w = v[m].to(torch.float64)
 
             idx = torch.clamp((p * n_bins).to(torch.int64), 0, n_bins - 1)
-            wpos = t.to(torch.float64)
-            wneg = (1.0 - t).to(torch.float64)
+            wpos = t.to(torch.float64) * w
+            wneg = (1.0 - t).to(torch.float64) * w
 
             hist_pos += torch.bincount(idx, weights=wpos, minlength=n_bins).to(torch.float64)
             hist_neg += torch.bincount(idx, weights=wneg, minlength=n_bins).to(torch.float64)
@@ -175,7 +194,16 @@ def masked_pixel_auc(
     return float(out.item())
 
 @torch.no_grad()
-def masked_pixel_auc_agg(model, loader, device, *, n_bins=256, max_batches=0):
+def masked_pixel_auc_agg(
+    model,
+    loader,
+    device,
+    *,
+    n_bins=256,
+    max_batches=0,
+    real_label_mode: str = "ignore",
+    real_label_weight: float = 0.0,
+):
     """
     Aggregated pixel ROC-AUC via histogram accumulation across many batches.
     DDP-safe (all_reduce on histograms).
@@ -200,13 +228,13 @@ def masked_pixel_auc_agg(model, loader, device, *, n_bins=256, max_batches=0):
         logits = model(xb)
         yb_r = resize_masks_to(logits, yb)
         rb_r = resize_masks_to(logits, rb)
-        valid = valid_mask_from_real(rb_r)
+        valid = valid_mask_from_real(rb_r, mode=real_label_mode, real_weight=real_label_weight)
 
         probs = torch.sigmoid(logits).detach().float()
         t = yb_r.detach().float()
         v = valid.detach().float()
 
-        m = (v > 0.5).reshape(-1)
+        m = (v > 0.0).reshape(-1)
         if not bool(m.any()):
             if use_limit and nb >= mb:
                 break
@@ -214,10 +242,13 @@ def masked_pixel_auc_agg(model, loader, device, *, n_bins=256, max_batches=0):
 
         p = probs.reshape(-1)[m]
         t = t.reshape(-1)[m]
+        w = v.reshape(-1)[m].to(torch.float64)
 
         idx = torch.clamp((p * int(n_bins)).to(torch.int64), 0, int(n_bins) - 1)
-        hist_pos += torch.bincount(idx, weights=t.to(torch.float64), minlength=int(n_bins)).to(torch.float64)
-        hist_neg += torch.bincount(idx, weights=(1.0 - t).to(torch.float64), minlength=int(n_bins)).to(torch.float64)
+        hist_pos += torch.bincount(idx, weights=t.to(torch.float64) * w, minlength=int(n_bins)).to(torch.float64)
+        hist_neg += torch.bincount(
+            idx, weights=(1.0 - t).to(torch.float64) * w, minlength=int(n_bins)
+        ).to(torch.float64)
 
         if use_limit and nb >= mb:
             break
@@ -322,4 +353,3 @@ def make_monotone_increasing(y: np.ndarray) -> np.ndarray:
     """Force array to be monotone increasing (useful for recall in FROC)."""
     y = np.asarray(y, dtype=np.float64)
     return np.maximum.accumulate(y)
-

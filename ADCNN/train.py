@@ -1,7 +1,7 @@
 import copy
 import time
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any, Iterable
+from typing import Optional, Dict, Any
 
 import numpy as np
 import torch
@@ -17,12 +17,7 @@ from ADCNN.evaluation.metrics import (
     valid_mask_from_real,
 )
 from ADCNN.training.ema import EMAModel
-from ADCNN.phases import (
-    maybe_init_head_bias_to_prior,
-    apply_phase,
-    freeze_all,
-    _unfreeze_if_exists,
-)
+from ADCNN.phases import maybe_init_head_bias_to_prior
 
 # =============================================================================
 # Small utils
@@ -99,19 +94,19 @@ def focal_tversky_masked(
     return loss.mean()
 
 
-def ramp_lambda(ep: int, *, kind: str, e0: int, e1: int, k: float) -> float:
+def ramp_lambda(ep: int, *, kind: str, e0: int, e1: int, k: float, max_value: float = 1.0) -> float:
     """
     Blend coefficient for (1-lam)*BCE + lam*FocalTversky
     """
     if e1 <= e0:
-        return 1.0 if ep >= e0 else 0.0
+        return float(max_value) if ep >= e0 else 0.0
     if kind == "linear":
         x = (ep - e0) / float(e1 - e0)
-        return float(np.clip(x, 0.0, 1.0))
+        return float(max_value) * float(np.clip(x, 0.0, 1.0))
     if kind == "sigmoid":
         x = np.clip((ep - e0) / float(e1 - e0), 0.0, 1.0)
         z = (x * 2.0 - 1.0) * float(k)
-        return float(1.0 / (1.0 + np.exp(-z)))
+        return float(max_value) * float(1.0 / (1.0 + np.exp(-z)))
     raise ValueError(kind)
 
 
@@ -138,31 +133,11 @@ class Trainer:
         if s is not None and hasattr(s, "set_epoch"):
             s.set_epoch(int(epoch))
 
-    def _sync_optimizer_params(self, opt: torch.optim.Optimizer, model: torch.nn.Module) -> None:
-        tracked = set()
-        for g in opt.param_groups:
-            for p in g["params"]:
-                tracked.add(id(p))
-
-        new_params = [p for p in model.parameters() if p.requires_grad and id(p) not in tracked]
-        if new_params:
-            base = opt.param_groups[0]
-            opt.add_param_group(
-                {
-                    "params": new_params,
-                    "lr": base.get("lr", 1e-4),
-                    "weight_decay": base.get("weight_decay", 0.0),
-                    "betas": base.get("betas", (0.9, 0.999)),
-                    "eps": base.get("eps", 1e-8),
-                }
-            )
-
-    def _stage_lr(self, ep: int, base_lrs: Tuple[float, float, float]) -> float:
-        if ep <= 12:
-            return float(base_lrs[0])
-        if ep <= 25:
-            return float(base_lrs[1])
-        return float(base_lrs[2])
+    @staticmethod
+    def _current_lr(opt: torch.optim.Optimizer) -> float:
+        if not opt.param_groups:
+            return float("nan")
+        return float(opt.param_groups[0]["lr"])
 
     def train_full_probe(
         self,
@@ -173,45 +148,56 @@ class Trainer:
         seed: int = 1337,
         init_head_prior: float = 0.70,
 
-        warmup_epochs: int = 1,
-        warmup_batches: int = 800,
+        warmup_epochs: int = 0,
+        warmup_batches: int = 0,
         warmup_lr: float = 2e-4,
-        warmup_pos_weight: float = 40.0,
+        warmup_pos_weight: float = 12.0,
 
-        head_epochs: int = 2,
-        head_batches: int = 2000,
-        head_lr: float = 3e-5,
-        head_pos_weight: float = 5.0,
-
-        tail_epochs: int = 2,
-        tail_batches: int = 2500,
-        tail_lr: float = 1.5e-4,
-        tail_pos_weight: float = 2.0,
+        # Kept as no-op compatibility knobs for older helper scripts.
+        head_epochs: int = 0,
+        head_batches: int = 0,
+        head_lr: float = 0.0,
+        head_pos_weight: float = 0.0,
+        tail_epochs: int = 0,
+        tail_batches: int = 0,
+        tail_lr: float = 0.0,
+        tail_pos_weight: float = 0.0,
+        base_lrs=None,
+        long_batches: int = 0,
+        bce_pos_weight_long: Optional[float] = None,
 
         max_epochs: int = 60,
         val_every: int = 3,
-        base_lrs: Tuple[float, float, float] = (3e-4, 2e-4, 1e-4),
+        main_lr: float = 3e-4,
+        min_lr_ratio: float = 0.10,
+        lr_schedule: str = "cosine",
         weight_decay: float = 1e-4,
 
         ramp_kind: str = "linear",
-        ramp_start_epoch: int = 11,
-        ramp_end_epoch: int = 40,
+        ramp_start_epoch: int = 4,
+        ramp_end_epoch: int = 20,
         sigmoid_k: float = 8.0,
+        lam_max: float = 0.70,
 
-        bce_pos_weight_long: float = 8.0,
+        bce_pos_weight_main: float = 8.0,
         ft_alpha: float = 0.45,
         ft_gamma: float = 1.3,
+
+        train_real_label_mode: str = "downweight",
+        train_real_label_weight: float = 0.25,
+        val_real_label_mode: str = "ignore",
+        val_real_label_weight: float = 0.0,
 
         fixed_thr: float = 0.5,
 
         auc_batches: int = 12,
         auc_bins: int = 256,
 
-        long_batches: int = 0,
+        main_batches: int = 0,
 
         resume_epoch: Optional[int] = None,
 
-        save_best_to: str = "ckpt_best.pt",
+        save_best_to: Optional[str] = None,
         save_last_to: str = "ckpt_last.pt",
 
         verbose: int = 2,
@@ -239,7 +225,7 @@ class Trainer:
                 model,
                 device_ids=[local_rank],
                 output_device=local_rank,
-                find_unused_parameters=True,
+                find_unused_parameters=False,
                 gradient_as_bucket_view=True,
             )
 
@@ -258,14 +244,14 @@ class Trainer:
         # Optional full resume (model + optimizer + scheduler + scaler + ema)
         # -------------------------
         start_epoch = 1
-        best_auc = -1.0
-        best_ep = 0
-        best_state = None
-        best_state_ema = None
-
-        long_opt: Optional[torch.optim.Optimizer] = None
-        long_sched: Optional[torch.optim.lr_scheduler._LRScheduler] = None
-        long_stage_lr: Optional[float] = None
+        train_phase = "warmup" if int(warmup_epochs) > 0 else "main"
+        val_auc_last = float("nan")
+        optimizer = torch.optim.AdamW(
+            [p for p in raw_model.parameters() if p.requires_grad],
+            lr=float(warmup_lr if int(warmup_epochs) > 0 else main_lr),
+            weight_decay=float(weight_decay),
+        )
+        scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None
 
         if resume_epoch is not None:
             ckpt_path = Path(save_last_to) if save_last_to else None
@@ -305,37 +291,29 @@ class Trainer:
                 except Exception:
                     pass
 
-            best_auc = float(ckpt.get("best_auc", -1.0))
-            best_ep = int(ckpt.get("best_ep", 0))
-            best_state = ckpt.get("best_state", None)
-            best_state_ema = ckpt.get("best_state_ema", None)
+            train_phase = str(ckpt.get("train_phase", train_phase))
+            val_auc_last = float(ckpt.get("val_auc", float("nan")))
 
             if ckpt.get("ep") is not None:
                 start_epoch = int(ckpt["ep"]) + 1
             else:
                 start_epoch = int(resume_epoch) + 1
 
-            if ckpt.get("long_opt") is not None:
-                # placeholder; will be synced after apply_phase in first long epoch
-                long_opt = torch.optim.Adam(
-                    [p for p in raw_model.parameters() if p.requires_grad],
-                    lr=1e-4,
-                    weight_decay=float(weight_decay),
-                )
-                long_opt.load_state_dict(ckpt["long_opt"])
+            if ckpt.get("optimizer") is not None:
+                optimizer.load_state_dict(ckpt["optimizer"])
 
-            if ckpt.get("long_sched") is not None and long_opt is not None:
-                long_sched = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-                    long_opt, T_0=6, T_mult=2, eta_min=1e-5
+            if train_phase == "main" and str(lr_schedule) == "cosine":
+                t_max = max(1, int(max_epochs) - int(warmup_epochs))
+                scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                    optimizer,
+                    T_max=t_max,
+                    eta_min=float(main_lr) * float(min_lr_ratio),
                 )
-                try:
-                    long_sched.load_state_dict(ckpt["long_sched"])
-                except Exception:
-                    long_sched = None
-
-            long_stage_lr = ckpt.get("long_stage_lr", None)
-            if long_stage_lr is not None:
-                long_stage_lr = float(long_stage_lr)
+                if ckpt.get("scheduler") is not None:
+                    try:
+                        scheduler.load_state_dict(ckpt["scheduler"])
+                    except Exception:
+                        scheduler = None
 
             if ema is not None and ckpt.get("ema") is not None:
                 try:
@@ -345,323 +323,46 @@ class Trainer:
 
             if verbose >= 1 and is_main_process():
                 print(
-                    f"[RESUME] loaded {ckpt_path} -> start_epoch={start_epoch} best_auc={best_auc:.4f} best_ep={best_ep}"
+                    f"[RESUME] loaded {ckpt_path} -> start_epoch={start_epoch} phase={train_phase} val_auc={val_auc_last}"
                 )
 
-        # -------------------------
-        # Warmup / Head / Tail (only if not resuming)
-        # -------------------------
-        if resume_epoch is None:
-            # Warmup
-            freeze_all(raw_model)
-            for p in raw_model.parameters():
-                p.requires_grad = True
-
-            opt = torch.optim.Adam(
-                [p for p in raw_model.parameters() if p.requires_grad],
-                lr=float(warmup_lr),
-                weight_decay=0.0,
-            )
-
-            posw_warm = self._posw(dtype=torch.float32, value=float(warmup_pos_weight))
-
-            for ep in range(1, int(warmup_epochs) + 1):
-                t0 = time.time()
-                self._set_loader_epoch(train_loader, seed + 100 + ep)
-                model.train()
-
-                loss_sum_t = torch.tensor(0.0, device=self.device)
-                seen_t = torch.tensor(0, device=self.device)
-
-                for b, batch in enumerate(train_loader, 1):
-                    xb, yb, rb, _missed, _detected = batch
-                    xb = xb.to(self.device, non_blocking=True)
-                    yb = yb.to(self.device, non_blocking=True)
-                    rb = rb.to(self.device, non_blocking=True)
-
-                    with amp.autocast("cuda", enabled=self.amp, dtype=torch.bfloat16):
-                        logits = model(xb)
-                        yb_r = resize_masks_to(logits, yb)
-                        rb_r = resize_masks_to(logits, rb)
-                        valid = valid_mask_from_real(rb_r)
-                        loss = masked_bce_with_logits(logits, yb_r, valid, pos_weight_t=posw_warm)
-                        if not torch.isfinite(loss):
-                            raise RuntimeError(f"Non-finite loss at warmup epoch {ep} iter {b}: {loss.item()}")
-
-                    if verbose >= 3 and is_main_process():
-                        print(f"[WARMUP ep{ep} iter {b}] loss {loss.item():.4f}")
-                    opt.zero_grad(set_to_none=True)
-                    scaler.scale(loss).backward()
-                    scaler.unscale_(opt)
-                    torch.nn.utils.clip_grad_norm_(raw_model.parameters(), 1.0)
-                    scaler.step(opt)
-                    scaler.update()
-
-                    # EMA update per step
-                    if ema is not None:
-                        ema.update(raw_model)
-
-                    loss_sum_t += loss.detach() * xb.size(0)
-                    seen_t += xb.size(0)
-
-                    if int(warmup_batches) > 0 and b >= int(warmup_batches):
-                        break
-
-                train_loss = float((loss_sum_t / seen_t.clamp_min(1)).item())
-
-                auc = None
-                if verbose >= 2 and ep == int(warmup_epochs):
-                    if ema is not None and ema_eval:
-                        ema.apply_to(raw_model)
-                        try:
-                            auc = masked_pixel_auc_agg(
-                                model, val_loader, device=self.device, n_bins=int(auc_bins),
-                                max_batches=int(auc_batches)
-                            )
-                        finally:
-                            ema.restore(raw_model)
-                    else:
-                        auc = masked_pixel_auc_agg(
-                            model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
-                        )
-
-                if verbose >= 2 and is_main_process():
-                    dt = time.time() - t0
-                    # print auc only when it was computed
-                    if auc is not None:
-                        print(f"[WARMUP ep{ep}] train_loss {train_loss:.4f} | val AUC {auc:.4f} | {dt:.1f}s")
-                    else:
-                        print(f"[WARMUP ep{ep}] train_loss {train_loss:.4f} | {dt:.1f}s")
-
-
-
-            # Head
-            freeze_all(raw_model)
-            if hasattr(raw_model, "head"):
-                for p in raw_model.head.parameters():
-                    p.requires_grad = True
-            for g in ["u4", "u3", "aspp"]:
-                _unfreeze_if_exists(raw_model, g)
-
-            opt = torch.optim.Adam(
-                [p for p in raw_model.parameters() if p.requires_grad],
-                lr=float(head_lr),
-                weight_decay=float(weight_decay),
-            )
-            posw_head = self._posw(dtype=torch.float32, value=float(head_pos_weight))
-
-            for ep in range(1, int(head_epochs) + 1):
-                t0 = time.time()
-                self._set_loader_epoch(train_loader, seed + 200 + ep)
-                model.train()
-
-                loss_sum_t = torch.tensor(0.0, device=self.device)
-                seen_t = torch.tensor(0, device=self.device)
-
-                for b, batch in enumerate(train_loader, 1):
-                    xb, yb, rb, _missed, _detected = batch
-                    xb = xb.to(self.device, non_blocking=True)
-                    yb = yb.to(self.device, non_blocking=True)
-                    rb = rb.to(self.device, non_blocking=True)
-
-                    with amp.autocast("cuda", enabled=self.amp, dtype=torch.bfloat16):
-                        logits = model(xb)
-                        yb_r = resize_masks_to(logits, yb)
-                        rb_r = resize_masks_to(logits, rb)
-                        valid = valid_mask_from_real(rb_r)
-                        loss = masked_bce_with_logits(logits, yb_r, valid, pos_weight_t=posw_head)
-                        if not torch.isfinite(loss):
-                            raise RuntimeError(f"Non-finite loss at head epoch {ep} iter {b}: {loss.item()}")
-
-                    opt.zero_grad(set_to_none=True)
-                    scaler.scale(loss).backward()
-                    scaler.unscale_(opt)
-                    torch.nn.utils.clip_grad_norm_(raw_model.parameters(), 1.0)
-                    scaler.step(opt)
-                    scaler.update()
-
-                    if verbose >= 3 and is_main_process():
-                        print(f"[HEAD ep{ep} iter {b}] loss {loss.item():.4f}")
-
-                    if ema is not None:
-                        ema.update(raw_model)
-
-                    loss_sum_t += loss.detach() * xb.size(0)
-                    seen_t += xb.size(0)
-
-                    if int(head_batches) > 0 and b >= int(head_batches):
-                        break
-
-                train_loss = float((loss_sum_t / seen_t.clamp_min(1)).item())
-
-                auc = None
-                if verbose >= 2 and ep == int(head_epochs):
-                    # IMPORTANT: must be called on ALL ranks because it does all_reduce internally
-                    if ema is not None and ema_eval:
-                        ema.apply_to(raw_model)
-                        try:
-                            auc = masked_pixel_auc_agg(
-                                model, val_loader, device=self.device, n_bins=int(auc_bins),
-                                max_batches=int(auc_batches)
-                            )
-                        finally:
-                            ema.restore(raw_model)
-                    else:
-                        auc = masked_pixel_auc_agg(
-                            model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
-                        )
-
-                if verbose >= 2 and is_main_process():
-                    dt = time.time() - t0
-                    # print auc only when it was computed
-                    if auc is not None:
-                        print(f"[HEAD ep{ep}] train_loss {train_loss:.4f} | val AUC {auc:.4f} | {dt:.1f}s")
-                    else:
-                        print(f"[HEAD ep{ep}] train_loss {train_loss:.4f} | {dt:.1f}s")
-
-            # Tail
-            freeze_all(raw_model)
-            if hasattr(raw_model, "head"):
-                for p in raw_model.head.parameters():
-                    p.requires_grad = True
-            for g in ["u4", "u3", "aspp"]:
-                _unfreeze_if_exists(raw_model, g)
-
-            opt = torch.optim.Adam(
-                [p for p in raw_model.parameters() if p.requires_grad],
-                lr=float(tail_lr),
-                weight_decay=float(weight_decay),
-            )
-            posw_tail = self._posw(dtype=torch.float32, value=float(tail_pos_weight))
-
-            for ep in range(1, int(tail_epochs) + 1):
-                t0 = time.time()
-                self._set_loader_epoch(train_loader, seed + 300 + ep)
-                model.train()
-
-                loss_sum_t = torch.tensor(0.0, device=self.device)
-                seen_t = torch.tensor(0, device=self.device)
-
-                for b, batch in enumerate(train_loader, 1):
-                    xb, yb, rb, _missed, _detected = batch
-                    xb = xb.to(self.device, non_blocking=True)
-                    yb = yb.to(self.device, non_blocking=True)
-                    rb = rb.to(self.device, non_blocking=True)
-
-                    with amp.autocast("cuda", enabled=self.amp, dtype=torch.bfloat16):
-                        logits = model(xb)
-                        yb_r = resize_masks_to(logits, yb)
-                        rb_r = resize_masks_to(logits, rb)
-                        valid = valid_mask_from_real(rb_r)
-                        loss = masked_bce_with_logits(logits, yb_r, valid, pos_weight_t=posw_tail)
-                        if not torch.isfinite(loss):
-                            raise RuntimeError(f"Non-finite loss at tail epoch {ep} iter {b}: {loss.item()}")
-
-                        if verbose >= 3 and is_main_process():
-                            print(f"[TAIL ep{ep} iter {b}] loss {loss.item():.4f}")
-
-                    opt.zero_grad(set_to_none=True)
-                    scaler.scale(loss).backward()
-                    scaler.unscale_(opt)
-                    torch.nn.utils.clip_grad_norm_(raw_model.parameters(), 1.0)
-                    scaler.step(opt)
-                    scaler.update()
-
-                    if ema is not None:
-                        ema.update(raw_model)
-
-                    loss_sum_t += loss.detach() * xb.size(0)
-                    seen_t += xb.size(0)
-
-                    if int(tail_batches) > 0 and b >= int(tail_batches):
-                        break
-
-                train_loss = float((loss_sum_t / seen_t.clamp_min(1)).item())
-
-                auc = None
-                if verbose >= 2 and ep == int(tail_epochs):
-                    # IMPORTANT: must be called on ALL ranks because it does all_reduce internally
-                    if ema is not None and ema_eval:
-                        ema.apply_to(raw_model)
-                        try:
-                            auc = masked_pixel_auc_agg(
-                                model, val_loader, device=self.device, n_bins=int(auc_bins),
-                                max_batches=int(auc_batches)
-                            )
-                        finally:
-                            ema.restore(raw_model)
-                    else:
-                        auc = masked_pixel_auc_agg(
-                            model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
-                        )
-
-                if verbose >= 2 and is_main_process():
-                    dt = time.time() - t0
-                    # print auc only when it was computed
-                    if auc is not None:
-                        print(f"[TAIL ep{ep}] train_loss {train_loss:.4f} | val AUC {auc:.4f} | {dt:.1f}s")
-                    else:
-                        print(f"[TAIL ep{ep}] train_loss {train_loss:.4f} | {dt:.1f}s")
-
-        # -------------------------
-        # Long training
-        # -------------------------
         nan_checks = False # set True to enable NaN checks (expensive, only for debugging)
-        best: Dict[str, Any] = {
-            "auc": float(best_auc),
-            "ep": int(best_ep),
-            "state": best_state,
-            "state_ema": best_state_ema,
-        }
-
         for ep in range(int(start_epoch), int(max_epochs) + 1):
             t0 = time.time()
             self._set_loader_epoch(train_loader, seed + 1000 + ep)
+            raw_model.train()
+            epoch_phase = "warmup" if ep <= int(warmup_epochs) else "main"
 
-            # schedule freeze/unfreeze
-            _groups = apply_phase(raw_model, ep)
-
-            stage_lr = self._stage_lr(ep, base_lrs)
-
-            if long_opt is None:
-                long_opt = torch.optim.Adam(
-                    [p for p in raw_model.parameters() if p.requires_grad],
-                    lr=stage_lr,
-                    weight_decay=float(weight_decay),
-                )
-                long_stage_lr = stage_lr
-                long_sched = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-                    long_opt, T_0=6, T_mult=2, eta_min=stage_lr / 10.0
-                )
+            if epoch_phase == "warmup":
+                train_phase = "warmup"
+                for pg in optimizer.param_groups:
+                    pg["lr"] = float(warmup_lr)
             else:
-                self._sync_optimizer_params(long_opt, raw_model)
-                # update LR in-place; do NOT recreate scheduler (keeps continuity)
-                if long_stage_lr is None or abs(stage_lr - float(long_stage_lr)) > 0:
-                    for pg in long_opt.param_groups:
-                        pg["lr"] = stage_lr
-                        pg["weight_decay"] = float(weight_decay)
-                    long_stage_lr = stage_lr
-                    # keep existing scheduler; optionally adjust eta_min if present
-                    if hasattr(long_sched, "eta_min"):
-                        try:
-                            long_sched.eta_min = stage_lr / 10.0
-                        except Exception:
-                            pass
+                if train_phase != "main":
+                    train_phase = "main"
+                    for pg in optimizer.param_groups:
+                        pg["lr"] = float(main_lr)
+                    if str(lr_schedule) == "cosine":
+                        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                            optimizer,
+                            T_max=max(1, int(max_epochs) - int(warmup_epochs)),
+                            eta_min=float(main_lr) * float(min_lr_ratio),
+                        )
 
-            assert long_opt is not None
-            assert long_sched is not None
-
-            model.train()
-
-            lam = ramp_lambda(
-                ep,
+            main_ep = max(0, ep - int(warmup_epochs))
+            lam = 0.0 if epoch_phase == "warmup" else ramp_lambda(
+                main_ep,
                 kind=str(ramp_kind),
                 e0=int(ramp_start_epoch),
                 e1=int(ramp_end_epoch),
                 k=float(sigmoid_k),
+                max_value=float(lam_max),
             )
 
-            posw_long = self._posw(dtype=torch.float32, value=float(bce_pos_weight_long))
+            posw = self._posw(
+                dtype=torch.float32,
+                value=float(warmup_pos_weight if epoch_phase == "warmup" else bce_pos_weight_main),
+            )
 
             loss_sum_t = torch.tensor(0.0, device=self.device)
             seen_t = torch.tensor(0, device=self.device)
@@ -683,9 +384,13 @@ class Trainer:
                     logits = model(xb)
                     yb_r = resize_masks_to(logits, yb)
                     rb_r = resize_masks_to(logits, rb)
-                    valid = valid_mask_from_real(rb_r)
+                    valid = valid_mask_from_real(
+                        rb_r,
+                        mode=str(train_real_label_mode),
+                        real_weight=float(train_real_label_weight),
+                    )
 
-                    loss_bce = masked_bce_with_logits(logits, yb_r, valid, pos_weight_t=posw_long)
+                    loss_bce = masked_bce_with_logits(logits, yb_r, valid, pos_weight_t=posw)
                     if float(lam) <= 0.0:
                         loss = loss_bce
                     else:
@@ -709,11 +414,11 @@ class Trainer:
                         raise RuntimeError(f"Non-finite loss at long epoch {ep} iter {i}: {loss.item()}")
 
                     if verbose >= 3 and is_main_process():
-                        print(f"[LONG ep{ep} iter {i}] loss {loss.item():.4f} | lam {lam:.3f}")
+                        print(f"[TRAIN ep{ep} iter {i}] loss {loss.item():.4f} | lam {lam:.3f}")
 
-                long_opt.zero_grad(set_to_none=True)
+                optimizer.zero_grad(set_to_none=True)
                 scaler.scale(loss).backward()
-                scaler.unscale_(long_opt)
+                scaler.unscale_(optimizer)
 
                 # NaN check 2/3
                 if nan_checks:
@@ -726,13 +431,13 @@ class Trainer:
                         if bad is not None:
                             if is_main_process():
                                 print(f"[ep{ep} it{i}] non-finite grad in {bad} -> skipping step")
-                            long_opt.zero_grad(set_to_none=True)
+                            optimizer.zero_grad(set_to_none=True)
                             scaler.update()
                             continue
 
 
                 torch.nn.utils.clip_grad_norm_(raw_model.parameters(), 1.0)
-                scaler.step(long_opt)
+                scaler.step(optimizer)
                 scaler.update()
 
                 # NaN check 3/3
@@ -742,9 +447,6 @@ class Trainer:
                             if not torch.isfinite(p).all():
                                 raise RuntimeError(f"Non-finite PARAM after step at ep{ep} it{i}: {name}")
 
-                # scheduler step with fractional epoch
-                long_sched.step(ep + i / max(1, len(train_loader)))
-
                 # EMA update
                 if ema is not None:
                     ema.update(raw_model)
@@ -752,14 +454,19 @@ class Trainer:
                 loss_sum_t += loss.detach() * xb.size(0)
                 seen_t += xb.size(0)
 
-                if int(long_batches) > 0 and i >= int(long_batches):
+                limit_batches = int(warmup_batches) if epoch_phase == "warmup" else int(main_batches)
+                if limit_batches > 0 and i >= limit_batches:
                     break
 
             train_loss = float((loss_sum_t / seen_t.clamp_min(1)).item())
+            lr_actual = self._current_lr(optimizer)
 
             if verbose >= 2 and is_main_process():
                 dt = time.time() - t0
-                print(f"[EP{ep:03d}] loss {train_loss:.4f} | lam {lam:.3f} | lr {stage_lr:.2e} | {dt:.1f}s")
+                print(
+                    f"[EP{ep:03d}] phase {epoch_phase.upper()} | loss {train_loss:.4f} | "
+                    f"lam {lam:.3f} | lr {lr_actual:.2e} | {dt:.1f}s"
+                )
 
             # Validation
             do_val = (ep % int(val_every) == 0) or (ep <= 3)
@@ -773,46 +480,34 @@ class Trainer:
                     ema.apply_to(raw_model)
                     try:
                         auc_eval = masked_pixel_auc_agg(
-                            model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
+                            model,
+                            val_loader,
+                            device=self.device,
+                            n_bins=int(auc_bins),
+                            max_batches=int(auc_batches),
+                            real_label_mode=str(val_real_label_mode),
+                            real_label_weight=float(val_real_label_weight),
                         )
                     finally:
                         ema.restore(raw_model)
                 else:
                     auc_eval = masked_pixel_auc_agg(
-                        model, val_loader, device=self.device, n_bins=int(auc_bins), max_batches=int(auc_batches)
+                        model,
+                        val_loader,
+                        device=self.device,
+                        n_bins=int(auc_bins),
+                        max_batches=int(auc_batches),
+                        real_label_mode=str(val_real_label_mode),
+                        real_label_weight=float(val_real_label_weight),
                     )
 
                 if verbose >= 1 and is_main_process():
                     tag = "EMA" if (ema is not None and ema_eval) else "RAW"
                     print(f"[VAL ep{ep:03d}] {tag} AUC {float(auc_eval):.4f}")
+                val_auc_last = float(auc_eval)
 
-                # best selection based on eval AUC
-                if float(auc_eval) > float(best["auc"]):
-                    best["auc"] = float(auc_eval)
-                    best["ep"] = int(ep)
-                    best["state"] = copy.deepcopy(raw_model.state_dict())
-
-                    # also store EMA state if enabled (shadow weights)
-                    if ema is not None:
-                        best["state_ema"] = copy.deepcopy(ema.state_dict())
-
-                    if is_main_process() and save_best_to:
-                        ensure_parent_dir(save_best_to)
-                        torch.save(
-                            {
-                                "state": best["state"],
-                                "ep": best["ep"],
-                                "auc": best["auc"],
-                                "best_state_ema": best.get("state_ema", None),
-                                "model_metadata": {
-                                    "model_name": raw_model.__class__.__name__,
-                                    "model_hparams": dict(model_hparams) if model_hparams is not None else None,
-                                    "tile": int(expected_tile) if expected_tile is not None else None,
-                                    "norm": str(norm_name) if norm_name is not None else None,
-                                },
-                            },
-                            save_best_to,
-                        )
+            if epoch_phase == "main" and scheduler is not None:
+                scheduler.step()
 
             # Save last (full resume)
             if is_main_process() and save_last_to:
@@ -821,18 +516,14 @@ class Trainer:
                     {
                         "state": raw_model.state_dict(),
                         "ep": int(ep),
+                        "train_phase": str(train_phase),
                         "train_loss": float(train_loss),
                         "lam": float(lam),
-                        "stage_lr": float(stage_lr),
-                        "auc": float(auc_eval) if auc_eval is not None else None,
-                        "long_opt": long_opt.state_dict() if long_opt is not None else None,
-                        "long_sched": long_sched.state_dict() if long_sched is not None else None,
-                        "long_stage_lr": float(long_stage_lr) if long_stage_lr is not None else None,
+                        "lr": float(lr_actual),
+                        "val_auc": float(auc_eval) if auc_eval is not None else float(val_auc_last),
+                        "optimizer": optimizer.state_dict(),
+                        "scheduler": scheduler.state_dict() if scheduler is not None else None,
                         "scaler": scaler.state_dict() if scaler is not None else None,
-                        "best_auc": float(best["auc"]),
-                        "best_ep": int(best["ep"]),
-                        "best_state": best["state"],
-                        "best_state_ema": best.get("state_ema", None),
                         "ema": ema.state_dict() if ema is not None else None,
                         "model_metadata": {
                             "model_name": raw_model.__class__.__name__,
@@ -844,21 +535,18 @@ class Trainer:
                     save_last_to,
                 )
 
-        # Load best (raw)
-        if best["state"] is not None:
-            raw_model.load_state_dict(best["state"], strict=True)
-
         summary = {
-            "best_ep": int(best["ep"]),
-            "best_auc": float(best["auc"]),
+            "last_ep": int(max_epochs),
+            "last_val_auc": float(val_auc_last),
             "ema_enabled": bool(use_ema),
             "ema_decay": float(ema_decay),
             "ema_eval": bool(ema_eval),
+            "primary_checkpoint": str(save_last_to),
         }
 
         if is_main_process() and verbose >= 1:
             print("=== DONE ===")
-            print("Best summary:", summary)
+            print("Last summary:", summary)
 
         trained_model = raw_model
         return trained_model, float(fixed_thr), summary

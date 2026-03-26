@@ -41,48 +41,52 @@ class TrainConfig:
     seed: int = 1337
     deterministic: bool = False  # optional default; can still override via CLI flag
 
-    # Mixture fractions (train sampler stream)
-    frac_missed: float = 0.60
-    frac_detected: float = 0.25
-    frac_background: float = 0.15
+    # Mixture fractions (train sampler stream).
+    # Default is still rescue-aware, but less extreme than the previous setup.
+    frac_missed: float = 0.40
+    frac_detected: float = 0.35
+    frac_background: float = 0.25
     epoch_size: int = 0  # per-rank samples per epoch (0 -> ceil(N/world_size))
 
-    fixed_thr: float = 0.5  # kept for compatibility; selection is by AUC
+    fixed_thr: float = 0.5  # kept for compatibility with downstream evaluation
 
     init_head_prior: float = 0.70
 
-    warmup_epochs: int = 5
-    warmup_batches: int = 800
+    # Optional short stabilization phase before the main run.
+    warmup_epochs: int = 3
+    warmup_batches: int = 0
     warmup_lr: float = 2e-4
-    warmup_pos_weight: float = 40.0
+    warmup_pos_weight: float = 12.0
 
-    head_epochs: int = 10
-    head_batches: int = 2000
-    head_lr: float = 3e-5
-    head_pos_weight: float = 5.0
-
-    tail_epochs: int = 6
-    tail_batches: int = 2500
-    tail_lr: float = 1.5e-4
-    tail_pos_weight: float = 2.0
-
-    # Long training schedule
+    # Main training schedule
     max_epochs: int = 60
     val_every: int = 3
-    base_lrs: Tuple[float, float, float] = (3e-4, 2e-4, 1e-4)
+    main_lr: float = 3e-4
+    min_lr_ratio: float = 0.10
+    lr_schedule: str = "cosine"  # "cosine" or "constant"
     weight_decay: float = 1e-4
-    long_batches: int = 0  # 0 = full loader
+    main_batches: int = 0  # 0 = full loader
 
-    # Ramp: BCE -> focal-tversky
+    # Blend schedule: BCE -> focal-tversky, relative to the main phase.
     ramp_kind: str = "linear"  # "linear" or "sigmoid"
-    ramp_start_epoch: int = 11
-    ramp_end_epoch: int = 40
+    ramp_start_epoch: int = 4
+    ramp_end_epoch: int = 20
     sigmoid_k: float = 8.0
+    lam_max: float = 0.70
 
-    # Loss params (long)
-    bce_pos_weight_long: float = 8.0
+    # Loss params
+    bce_pos_weight_main: float = 8.0
     ft_alpha: float = 0.45
     ft_gamma: float = 1.3
+
+    # Real-label handling.
+    # ignore: old behavior (remove from loss/metric)
+    # downweight: keep them with reduced weight
+    # full: treat them like all other pixels
+    train_real_label_mode: str = "downweight"
+    train_real_label_weight: float = 0.25
+    val_real_label_mode: str = "ignore"
+    val_real_label_weight: float = 0.0
 
     # Validation AUC control
     auc_batches: int = 0
@@ -93,8 +97,8 @@ class TrainConfig:
     ema_decay: float = 0.999
     ema_eval: bool = False
 
-    # Checkpoints
-    save_best_to: str = "../checkpoints/ckpt_best.pt"
+    # Checkpoints. The primary artifact is the last checkpoint.
+    save_best_to: Optional[str] = None
     save_last_to: str = "../checkpoints/ckpt_last.pt"
 
     verbose: int = 2
@@ -129,15 +133,27 @@ class Config:
         if not (0.0 <= float(self.train.fixed_thr) <= 1.0):
             raise ValueError(f"train.fixed_thr must be in [0,1], got {self.train.fixed_thr}")
 
-        if self.train.warmup_epochs < 0 or self.train.head_epochs < 0 or self.train.tail_epochs < 0:
-            raise ValueError("warmup/head/tail epochs must be non-negative")
+        if self.train.warmup_epochs < 0:
+            raise ValueError("warmup_epochs must be non-negative")
         if self.train.max_epochs <= 0:
             raise ValueError(f"train.max_epochs must be positive, got {self.train.max_epochs}")
 
         if self.train.ramp_kind not in ("linear", "sigmoid"):
             raise ValueError(f"train.ramp_kind must be 'linear' or 'sigmoid', got {self.train.ramp_kind}")
+        if self.train.lr_schedule not in ("cosine", "constant"):
+            raise ValueError(f"train.lr_schedule must be 'cosine' or 'constant', got {self.train.lr_schedule}")
         if not (0.0 <= float(self.train.ft_alpha) <= 1.0):
             raise ValueError(f"train.ft_alpha must be in [0,1], got {self.train.ft_alpha}")
+        if not (0.0 <= float(self.train.lam_max) <= 1.0):
+            raise ValueError(f"train.lam_max must be in [0,1], got {self.train.lam_max}")
+        if self.train.train_real_label_mode not in ("ignore", "downweight", "full"):
+            raise ValueError(
+                f"train.train_real_label_mode must be 'ignore', 'downweight', or 'full', got {self.train.train_real_label_mode}"
+            )
+        if self.train.val_real_label_mode not in ("ignore", "downweight", "full"):
+            raise ValueError(
+                f"train.val_real_label_mode must be 'ignore', 'downweight', or 'full', got {self.train.val_real_label_mode}"
+            )
 
         # Model metadata sanity
         hp = dict(self.model.model_hparams)
