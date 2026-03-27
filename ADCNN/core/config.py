@@ -115,8 +115,8 @@ class TrainConfig:
     rescue_val_early_epochs: int = 8
     rescue_val_max_images: int = 8
     rescue_val_seed_offset: int = 50_000
-    rescue_budget_primary: int = 15000
-    rescue_budget_secondary: int = 5000
+    rescue_budget_primary: int = 50
+    rescue_budget_secondary: int = 15000
     rescue_overlap_policy: str = "ignore_baseline_duplicates"
     rescue_val_num_workers: int = 0
     rescue_val_psf_width: int = 40

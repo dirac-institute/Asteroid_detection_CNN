@@ -637,6 +637,8 @@ def cli():
     ap.add_argument("--rescue-val-every-early", type=int, default=None)
     ap.add_argument("--rescue-val-early-epochs", type=int, default=None)
     ap.add_argument("--rescue-val-max-images", type=int, default=None)
+    ap.add_argument("--rescue-budget-primary", type=int, default=None)
+    ap.add_argument("--rescue-budget-secondary", type=int, default=None)
 
     # determinism toggle
     ap.add_argument("--deterministic", action="store_true", help="Enable deterministic algorithms (slower).")
@@ -691,6 +693,10 @@ if __name__ == "__main__":
         cfg.train.rescue_val_early_epochs = args.rescue_val_early_epochs
     if args.rescue_val_max_images is not None:
         cfg.train.rescue_val_max_images = args.rescue_val_max_images
+    if args.rescue_budget_primary is not None:
+        cfg.train.rescue_budget_primary = args.rescue_budget_primary
+    if args.rescue_budget_secondary is not None:
+        cfg.train.rescue_budget_secondary = args.rescue_budget_secondary
     if args.ema_decay is not None:
         cfg.train.ema_decay = args.ema_decay
     if args.no_ema:

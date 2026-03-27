@@ -13,7 +13,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from ADCNN.utils.dist_utils import init_distributed, is_main_process
 from ADCNN.evaluation.metrics import (
     resize_masks_to,
-    masked_pixel_auc_agg,
     valid_mask_from_real,
 )
 from ADCNN.training.ema import EMAModel
@@ -128,6 +127,106 @@ def ramp_lambda(ep: int, *, kind: str, e0: int, e1: int, k: float, max_value: fl
         z = (x * 2.0 - 1.0) * float(k)
         return float(max_value) * float(1.0 / (1.0 + np.exp(-z)))
     raise ValueError(kind)
+
+
+@torch.no_grad()
+def masked_val_stats_agg(
+    model,
+    loader,
+    *,
+    device,
+    loss_mode: str,
+    lam: float,
+    pos_weight_t: torch.Tensor,
+    ft_alpha: float,
+    ft_gamma: float,
+    real_label_mode: str = "ignore",
+    real_label_weight: float = 0.0,
+    n_bins: int = 256,
+    max_batches: int = 0,
+):
+    """
+    Aggregate validation loss and pixel AUC in one pass.
+
+    The loss matches the currently active loss family for the epoch.
+    """
+    model.eval()
+
+    mb = int(max_batches) if max_batches is not None else 0
+    use_limit = mb > 0
+
+    hist_pos = torch.zeros(int(n_bins), device=device, dtype=torch.float64)
+    hist_neg = torch.zeros(int(n_bins), device=device, dtype=torch.float64)
+    loss_sum = torch.tensor(0.0, device=device, dtype=torch.float64)
+    seen = torch.tensor(0.0, device=device, dtype=torch.float64)
+
+    mode = str(loss_mode).lower()
+    if mode == "blend":
+        mode = "bce_ft"
+
+    for nb, batch in enumerate(loader, 1):
+        xb, yb, rb, *_ = batch
+        xb = xb.to(device, non_blocking=True)
+        yb = yb.to(device, non_blocking=True)
+        rb = rb.to(device, non_blocking=True)
+
+        logits = model(xb)
+        yb_r = resize_masks_to(logits, yb)
+        rb_r = resize_masks_to(logits, rb)
+        valid = valid_mask_from_real(rb_r, mode=real_label_mode, real_weight=real_label_weight)
+
+        loss_bce = masked_bce_with_logits(logits, yb_r, valid, pos_weight_t=pos_weight_t)
+        if float(lam) <= 0.0 or mode == "bce":
+            loss = loss_bce
+        else:
+            if mode == "bce_ft":
+                loss_aux = focal_tversky_masked(logits, yb_r, valid, alpha=float(ft_alpha), gamma=float(ft_gamma))
+            elif mode == "bce_dice":
+                loss_aux = soft_dice_masked(logits, yb_r, valid)
+            else:
+                raise ValueError(f"Unknown loss_mode: {loss_mode!r}")
+            loss = (1.0 - float(lam)) * loss_bce + float(lam) * loss_aux
+
+        bs = xb.size(0)
+        loss_sum += loss.detach().to(torch.float64) * float(bs)
+        seen += float(bs)
+
+        probs = torch.sigmoid(logits).detach().float()
+        t = yb_r.detach().float()
+        v = valid.detach().float()
+        m = (v > 0.0).reshape(-1)
+        if bool(m.any()):
+            p = probs.reshape(-1)[m]
+            t = t.reshape(-1)[m]
+            w = v.reshape(-1)[m].to(torch.float64)
+            idx = torch.clamp((p * int(n_bins)).to(torch.int64), 0, int(n_bins) - 1)
+            hist_pos += torch.bincount(idx, weights=t.to(torch.float64) * w, minlength=int(n_bins)).to(torch.float64)
+            hist_neg += torch.bincount(
+                idx, weights=(1.0 - t).to(torch.float64) * w, minlength=int(n_bins)
+            ).to(torch.float64)
+
+        if use_limit and nb >= mb:
+            break
+
+    if dist.is_available() and dist.is_initialized():
+        dist.all_reduce(hist_pos, op=dist.ReduceOp.SUM)
+        dist.all_reduce(hist_neg, op=dist.ReduceOp.SUM)
+        dist.all_reduce(loss_sum, op=dist.ReduceOp.SUM)
+        dist.all_reduce(seen, op=dist.ReduceOp.SUM)
+
+    val_loss = float((loss_sum / seen.clamp_min(1.0)).item())
+    P = float(hist_pos.sum().item())
+    N = float(hist_neg.sum().item())
+    if P <= 0.0 or N <= 0.0:
+        auc = float("nan")
+    else:
+        tp = torch.cumsum(torch.flip(hist_pos, dims=[0]), dim=0)
+        fp = torch.cumsum(torch.flip(hist_neg, dims=[0]), dim=0)
+        tpr = tp / max(P, 1e-12)
+        fpr = fp / max(N, 1e-12)
+        auc = float(torch.trapz(tpr, fpr).item())
+
+    return {"loss": val_loss, "auc": auc}
 
 
 
@@ -507,22 +606,30 @@ class Trainer:
                     f"lam {lam:.3f} | lr {lr_actual:.2e} | {dt:.1f}s"
                 )
 
-            # Validation
-            do_val = (ep % int(val_every) == 0) or (ep <= 3)
-            auc_eval = None
+            rescue_every = int(rescue_val_every_early) if ep <= int(rescue_val_early_epochs) else int(rescue_val_every)
+            do_rescue_val = bool(enable_rescue_val and rescue_validator is not None) and (
+                (ep % max(1, rescue_every) == 0) or (ep == 1)
+            )
+            do_val = (ep % int(val_every) == 0) or (ep <= 3) or do_rescue_val
+            val_stats = None
             rescue_eval = None
 
             if do_val:
                 self._set_loader_epoch(val_loader, seed + 2000 + ep)
 
-                # evaluate RAW or EMA
+                # evaluate RAW or EMA once for both val loss and AUC
                 if ema is not None and ema_eval:
                     ema.apply_to(raw_model)
                     try:
-                        auc_eval = masked_pixel_auc_agg(
+                        val_stats = masked_val_stats_agg(
                             model,
                             val_loader,
                             device=self.device,
+                            loss_mode=mode,
+                            lam=float(lam),
+                            pos_weight_t=posw,
+                            ft_alpha=float(ft_alpha),
+                            ft_gamma=float(ft_gamma),
                             n_bins=int(auc_bins),
                             max_batches=int(auc_batches),
                             real_label_mode=str(val_real_label_mode),
@@ -531,25 +638,22 @@ class Trainer:
                     finally:
                         ema.restore(raw_model)
                 else:
-                    auc_eval = masked_pixel_auc_agg(
+                    val_stats = masked_val_stats_agg(
                         model,
                         val_loader,
                         device=self.device,
+                        loss_mode=mode,
+                        lam=float(lam),
+                        pos_weight_t=posw,
+                        ft_alpha=float(ft_alpha),
+                        ft_gamma=float(ft_gamma),
                         n_bins=int(auc_bins),
                         max_batches=int(auc_batches),
                         real_label_mode=str(val_real_label_mode),
                         real_label_weight=float(val_real_label_weight),
                     )
+                val_auc_last = float(val_stats["auc"])
 
-                if verbose >= 1 and is_main_process():
-                    tag = "EMA" if (ema is not None and ema_eval) else "RAW"
-                    print(f"[VAL ep{ep:03d}] {tag} AUC {float(auc_eval):.4f}")
-                val_auc_last = float(auc_eval)
-
-            rescue_every = int(rescue_val_every_early) if ep <= int(rescue_val_early_epochs) else int(rescue_val_every)
-            do_rescue_val = bool(enable_rescue_val and rescue_validator is not None) and (
-                (ep % max(1, rescue_every) == 0) or (ep == 1)
-            )
             if do_rescue_val:
                 rescue_model = raw_model
                 if ema is not None and ema_eval:
@@ -561,27 +665,32 @@ class Trainer:
                 else:
                     rescue_eval = rescue_validator.evaluate(rescue_model, device=self.device)
 
-                if verbose >= 1 and is_main_process():
-                    primary = rescue_eval["primary"]
-                    msg = (
-                        f"[VAL ep{ep:03d}] rescue@{primary.budget} | newTP {primary.new_tp} | "
-                        f"missedRecall {primary.missed_recall:.3f} | unionRecall {primary.union_recall:.3f} | "
-                        f"addedFP {primary.added_fp} | nCand {primary.n_candidates}"
-                    )
-                    if auc_eval is not None:
-                        msg += f" | AUC {float(auc_eval):.3f}"
-                    msg += (
-                        f" | subset {rescue_eval['subset_images']} img / {rescue_eval['subset_objects']} obj"
-                        f" | {rescue_eval['elapsed_s']:.1f}s"
-                    )
-                    print(msg)
+            if verbose >= 1 and is_main_process() and (do_val or do_rescue_val):
+                msg = f"[VAL ep{ep:03d}]"
+                if val_stats is not None:
+                    msg += f" loss {float(val_stats['loss']):.4f}"
+
+                if rescue_eval is not None:
+                    budgets = [rescue_eval["primary"]]
                     secondary = rescue_eval.get("secondary")
                     if secondary is not None:
-                        print(
-                            f"[VAL ep{ep:03d}] rescue@{secondary.budget} | newTP {secondary.new_tp} | "
-                            f"missedRecall {secondary.missed_recall:.3f} | unionRecall {secondary.union_recall:.3f} | "
-                            f"addedFP {secondary.added_fp}"
+                        budgets.append(secondary)
+                    budgets = sorted(budgets, key=lambda item: int(item.budget))
+                    for budget_res in budgets:
+                        msg += (
+                            f" | rescue@{budget_res.budget} newTP {budget_res.new_tp} "
+                            f"missedRecall {budget_res.missed_recall:.3f} "
+                            f"unionRecall {budget_res.union_recall:.3f} "
+                            f"addedFP {budget_res.added_fp}"
                         )
+                    msg += f" | nCand {int(rescue_eval['primary'].n_candidates)}"
+                    msg += f" | subset {int(rescue_eval['subset_images'])} img / {int(rescue_eval['subset_objects'])} obj"
+
+                if val_stats is not None and np.isfinite(float(val_stats["auc"])):
+                    msg += f" | AUC {float(val_stats['auc']):.3f}"
+                if rescue_eval is not None:
+                    msg += f" | {float(rescue_eval['elapsed_s']):.1f}s"
+                print(msg)
 
             if epoch_phase == "main" and scheduler is not None:
                 scheduler.step()
@@ -597,7 +706,7 @@ class Trainer:
                         "train_loss": float(train_loss),
                         "lam": float(lam),
                         "lr": float(lr_actual),
-                        "val_auc": float(auc_eval) if auc_eval is not None else float(val_auc_last),
+                        "val_auc": float(val_stats["auc"]) if val_stats is not None else float(val_auc_last),
                         "rescue_val": copy.deepcopy(rescue_eval) if rescue_eval is not None else None,
                         "optimizer": optimizer.state_dict(),
                         "scheduler": scheduler.state_dict() if scheduler is not None else None,
