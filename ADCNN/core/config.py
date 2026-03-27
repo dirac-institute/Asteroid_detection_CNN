@@ -30,6 +30,9 @@ class DataConfig:
     soft_mask_cache_dir: Optional[str] = None
     soft_mask_cache_size: int = 64
     soft_mask_cache_dtype: str = "float16"
+    # Optional positive-strength correction for soft targets:
+    # output_target = clip(gain * soft_target, 0, 1)
+    soft_target_gain: float = 1.0
 
 
 @dataclass
@@ -82,6 +85,7 @@ class TrainConfig:
     # - "bce": BCE only
     # - "blend"/"bce_ft": BCE + focal-Tversky
     # - "bce_dice": BCE + soft Dice
+    # - "asl": Asymmetric Loss
     # The lam ramp controls the auxiliary overlap-term weight in the non-BCE modes.
     loss_mode: str = "blend"
     ramp_kind: str = "linear"  # "linear" or "sigmoid"
@@ -94,6 +98,9 @@ class TrainConfig:
     bce_pos_weight_main: float = 8.0
     ft_alpha: float = 0.45
     ft_gamma: float = 1.3
+    asl_gamma_neg: float = 4.0
+    asl_gamma_pos: float = 0.0
+    asl_clip: float = 0.05
 
     # Real-label handling.
     # ignore: old behavior (remove from loss/metric)
@@ -117,8 +124,10 @@ class TrainConfig:
     rescue_val_seed_offset: int = 50_000
     rescue_budget_primary: int = 50
     rescue_budget_secondary: int = 15000
+    rescue_budget_grid: Tuple[int, ...] = (50, 200, 1000, 15000)
     rescue_overlap_policy: str = "ignore_baseline_duplicates"
     rescue_val_num_workers: int = 0
+    rescue_val_summary_path: str = "../checkpoints/rescue_frontier_history.jsonl"
     rescue_val_psf_width: int = 40
     rescue_post_threshold: float = RECOMMENDED_POSTPROCESS_CONFIG["threshold"]
     rescue_post_pixel_gap: int = RECOMMENDED_POSTPROCESS_CONFIG["pixel_gap"]
@@ -162,6 +171,8 @@ class Config:
             raise ValueError(
                 f"data.target_mask_mode must be 'hard' or 'soft', got {self.data.target_mask_mode}"
             )
+        if float(self.data.soft_target_gain) <= 0.0:
+            raise ValueError(f"data.soft_target_gain must be positive, got {self.data.soft_target_gain}")
 
         if self.loader.batch_size <= 0:
             raise ValueError(f"loader.batch_size must be positive, got {self.loader.batch_size}")
@@ -183,9 +194,9 @@ class Config:
             raise ValueError(f"train.ramp_kind must be 'linear' or 'sigmoid', got {self.train.ramp_kind}")
         if self.train.lr_schedule not in ("cosine", "constant"):
             raise ValueError(f"train.lr_schedule must be 'cosine' or 'constant', got {self.train.lr_schedule}")
-        if self.train.loss_mode not in ("blend", "bce", "bce_ft", "bce_dice"):
+        if self.train.loss_mode not in ("blend", "bce", "bce_ft", "bce_dice", "asl"):
             raise ValueError(
-                "train.loss_mode must be 'blend', 'bce', 'bce_ft', or 'bce_dice', "
+                "train.loss_mode must be 'blend', 'bce', 'bce_ft', 'bce_dice', or 'asl', "
                 f"got {self.train.loss_mode}"
             )
         if not (0.0 <= float(self.train.ft_alpha) <= 1.0):
@@ -205,6 +216,8 @@ class Config:
                 "train.rescue_overlap_policy must be 'ignore_baseline_duplicates' or 'keep_all', "
                 f"got {self.train.rescue_overlap_policy}"
             )
+        if len(tuple(self.train.rescue_budget_grid)) == 0:
+            raise ValueError("train.rescue_budget_grid must contain at least one budget")
 
         # Model metadata sanity
         hp = dict(self.model.model_hparams)

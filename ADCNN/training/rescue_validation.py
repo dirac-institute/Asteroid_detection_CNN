@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import math
 import time
+from dataclasses import asdict
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -61,6 +62,7 @@ class RescueValidator:
         num_workers: int,
         rescue_budget_primary: int,
         rescue_budget_secondary: Optional[int],
+        rescue_budget_grid: Optional[Sequence[int]],
         rescue_overlap_policy: str,
         psf_width: int,
         threshold: float,
@@ -78,6 +80,11 @@ class RescueValidator:
         self.num_workers = int(num_workers)
         self.primary_budget = int(rescue_budget_primary)
         self.secondary_budget = int(rescue_budget_secondary) if rescue_budget_secondary else None
+        budgets = list(int(x) for x in (rescue_budget_grid or ()))
+        budgets.extend([self.primary_budget])
+        if self.secondary_budget is not None:
+            budgets.append(self.secondary_budget)
+        self.budgets = sorted(set(int(x) for x in budgets if int(x) >= 0))
         self.overlap_policy = str(rescue_overlap_policy)
         self.psf_width = int(psf_width)
         self.post_cfg = {
@@ -202,6 +209,19 @@ class RescueValidator:
             added_fp=int(added_fp),
         )
 
+    def _make_result_dict(self, candidates: list[dict]) -> Dict[str, Any]:
+        by_budget = {int(b): self._score_budget(candidates, int(b)) for b in self.budgets}
+        primary = by_budget[int(self.primary_budget)]
+        secondary = None
+        if self.secondary_budget is not None and int(self.secondary_budget) in by_budget:
+            secondary = by_budget[int(self.secondary_budget)]
+        return {
+            "primary": primary,
+            "secondary": secondary,
+            "frontier": [asdict(by_budget[int(b)]) for b in self.budgets],
+            "frontier_map": {str(int(b)): asdict(by_budget[int(b)]) for b in self.budgets},
+        }
+
     @torch.no_grad()
     def evaluate(self, model: torch.nn.Module, device: torch.device) -> Dict[str, Any]:
         t0 = time.time()
@@ -239,17 +259,63 @@ class RescueValidator:
 
         all_candidates.sort(key=lambda x: x["score"], reverse=True)
 
-        primary = self._score_budget(all_candidates, self.primary_budget)
-        secondary = None
-        if self.secondary_budget is not None and self.secondary_budget != self.primary_budget:
-            secondary = self._score_budget(all_candidates, self.secondary_budget)
-
+        result = self._make_result_dict(all_candidates)
         return {
             "subset_images": len(self.panel_ids),
             "subset_objects": self.total_objects,
             "baseline_detected": self.baseline_detected,
             "baseline_missed": self.missed_total,
-            "primary": primary,
-            "secondary": secondary,
+            "budgets": list(self.budgets),
+            **result,
+            "elapsed_s": float(time.time() - t0),
+        }
+
+    @torch.no_grad()
+    def evaluate_predictions(self, preds: np.ndarray, *, threshold: Optional[float] = None) -> Dict[str, Any]:
+        t0 = time.time()
+        post_cfg = dict(self.post_cfg)
+        if threshold is not None:
+            post_cfg["threshold"] = float(threshold)
+        label_masks, detections_per_image = postprocess_predictions(preds, **post_cfg)
+
+        all_candidates: list[dict] = []
+        for img_id, detections in enumerate(detections_per_image):
+            labels = label_masks[img_id]
+            missed_map = self.missed_maps[img_id]
+            detected_map = self.detected_maps[img_id]
+
+            for det in detections:
+                lid = int(det["label_id"])
+                comp = labels == lid
+                if not bool(comp.any()):
+                    continue
+
+                missed_ids = set(np.unique(missed_map[comp]).tolist())
+                missed_ids.discard(0)
+                detected_ids = set(np.unique(detected_map[comp]).tolist())
+                detected_ids.discard(0)
+
+                if self.overlap_policy == "ignore_baseline_duplicates" and detected_ids and not missed_ids:
+                    continue
+
+                all_candidates.append(
+                    {
+                        "score": float(det["score"]),
+                        "missed_ids": missed_ids,
+                        "is_fp": (len(missed_ids) == 0 and len(detected_ids) == 0),
+                    }
+                )
+
+        all_candidates.sort(key=lambda x: x["score"], reverse=True)
+        result = self._make_result_dict(all_candidates)
+        return {
+            "subset_images": len(self.panel_ids),
+            "subset_objects": self.total_objects,
+            "baseline_detected": self.baseline_detected,
+            "baseline_missed": self.missed_total,
+            "budgets": list(self.budgets),
+            **result,
+            "threshold": float(post_cfg["threshold"]),
+            "n_candidates_total": len(all_candidates),
             "elapsed_s": float(time.time() - t0),
         }

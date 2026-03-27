@@ -31,14 +31,16 @@ class H5TiledDataset(Dataset):
         soft_mask_line_width: int = 1,
         soft_mask_truncate: float = 4.0,
         soft_mask_cache_dir: str | None = None,
-        soft_mask_cache_size: int = 8,
+        soft_mask_cache_size: int = 64,
         soft_mask_cache_dtype: str = "float16",
+        soft_target_gain: float = 1.0,
     ):
         self.h5_path, self.tile, self.k_sigma, self.crop_for_stats = h5_path, int(tile), float(k_sigma), int(crop_for_stats)
         self._h5 = self._x = self._y = None
         self._stats_cache = {}
         self.precompute_stats = bool(precompute_stats)
         self.target_mask_mode = str(target_mask_mode)
+        self.soft_target_gain = float(soft_target_gain)
         self._soft_masks = None
 
         with h5py.File(self.h5_path, "r") as f:
@@ -96,6 +98,8 @@ class H5TiledDataset(Dataset):
         if self.target_mask_mode == "soft":
             panel_mask = self._soft_masks.panel_mask(int(i))
             y = panel_mask[r0:r1, c0:c1].astype("float32", copy=False)
+            if self.soft_target_gain != 1.0:
+                y = np.clip(y * self.soft_target_gain, 0.0, 1.0).astype("float32", copy=False)
         else:
             y = self._y[i, r0:r1, c0:c1].astype("float32")
         if x.shape != (t, t):

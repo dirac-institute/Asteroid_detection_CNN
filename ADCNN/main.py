@@ -357,6 +357,7 @@ def run(cfg: Config, args: argparse.Namespace):
         soft_mask_cache_dir=cfg.data.soft_mask_cache_dir,
         soft_mask_cache_size=int(cfg.data.soft_mask_cache_size),
         soft_mask_cache_dtype=str(cfg.data.soft_mask_cache_dtype),
+        soft_target_gain=float(cfg.data.soft_target_gain),
     )
 
     # split by PANELS
@@ -530,6 +531,7 @@ def run(cfg: Config, args: argparse.Namespace):
             num_workers=int(cfg.train.rescue_val_num_workers),
             rescue_budget_primary=int(cfg.train.rescue_budget_primary),
             rescue_budget_secondary=int(cfg.train.rescue_budget_secondary),
+            rescue_budget_grid=tuple(int(x) for x in cfg.train.rescue_budget_grid),
             rescue_overlap_policy=str(cfg.train.rescue_overlap_policy),
             psf_width=int(cfg.train.rescue_val_psf_width),
             threshold=float(cfg.train.rescue_post_threshold),
@@ -586,6 +588,9 @@ def run(cfg: Config, args: argparse.Namespace):
         bce_pos_weight_main=cfg.train.bce_pos_weight_main,
         ft_alpha=cfg.train.ft_alpha,
         ft_gamma=cfg.train.ft_gamma,
+        asl_gamma_neg=cfg.train.asl_gamma_neg,
+        asl_gamma_pos=cfg.train.asl_gamma_pos,
+        asl_clip=cfg.train.asl_clip,
         train_real_label_mode=cfg.train.train_real_label_mode,
         train_real_label_weight=cfg.train.train_real_label_weight,
         val_real_label_mode=cfg.train.val_real_label_mode,
@@ -608,6 +613,7 @@ def run(cfg: Config, args: argparse.Namespace):
         rescue_val_every=cfg.train.rescue_val_every,
         rescue_val_every_early=cfg.train.rescue_val_every_early,
         rescue_val_early_epochs=cfg.train.rescue_val_early_epochs,
+        rescue_val_summary_path=str(cfg.train.rescue_val_summary_path),
     )
 
     if is_main_process():
@@ -626,20 +632,26 @@ def cli():
     ap.add_argument("--soft-mask-sigma-pix", type=float, default=None)
     ap.add_argument("--soft-mask-cache-dir", type=str, default=None)
     ap.add_argument("--soft-mask-cache-size", type=int, default=None)
+    ap.add_argument("--soft-target-gain", type=float, default=None)
     ap.add_argument("--main-lr", type=float, default=None)
     ap.add_argument("--warmup-lr", type=float, default=None)
     ap.add_argument("--lr-schedule", choices=["cosine", "constant"], default=None)
     ap.add_argument("--min-lr-ratio", type=float, default=None)
-    ap.add_argument("--loss-mode", choices=["blend", "bce", "bce_ft", "bce_dice"], default=None)
+    ap.add_argument("--loss-mode", choices=["blend", "bce", "bce_ft", "bce_dice", "asl"], default=None)
     ap.add_argument("--lam-max", type=float, default=None)
     ap.add_argument("--ramp-start", type=int, default=None)
     ap.add_argument("--ramp-end", type=int, default=None)
+    ap.add_argument("--asl-gamma-neg", type=float, default=None)
+    ap.add_argument("--asl-gamma-pos", type=float, default=None)
+    ap.add_argument("--asl-clip", type=float, default=None)
     ap.add_argument("--rescue-val-every", type=int, default=None)
     ap.add_argument("--rescue-val-every-early", type=int, default=None)
     ap.add_argument("--rescue-val-early-epochs", type=int, default=None)
     ap.add_argument("--rescue-val-max-images", type=int, default=None)
     ap.add_argument("--rescue-budget-primary", type=int, default=None)
     ap.add_argument("--rescue-budget-secondary", type=int, default=None)
+    ap.add_argument("--rescue-budget-grid", type=str, default=None, help="Comma-separated rescue budgets, e.g. 50,200,1000,15000")
+    ap.add_argument("--rescue-val-summary-path", type=str, default=None)
 
     # determinism toggle
     ap.add_argument("--deterministic", action="store_true", help="Enable deterministic algorithms (slower).")
@@ -672,6 +684,8 @@ if __name__ == "__main__":
         cfg.data.soft_mask_cache_dir = args.soft_mask_cache_dir
     if args.soft_mask_cache_size is not None:
         cfg.data.soft_mask_cache_size = args.soft_mask_cache_size
+    if args.soft_target_gain is not None:
+        cfg.data.soft_target_gain = args.soft_target_gain
     if args.main_lr is not None:
         cfg.train.main_lr = args.main_lr
     if args.warmup_lr is not None:
@@ -688,6 +702,12 @@ if __name__ == "__main__":
         cfg.train.ramp_start_epoch = args.ramp_start
     if args.ramp_end is not None:
         cfg.train.ramp_end_epoch = args.ramp_end
+    if args.asl_gamma_neg is not None:
+        cfg.train.asl_gamma_neg = args.asl_gamma_neg
+    if args.asl_gamma_pos is not None:
+        cfg.train.asl_gamma_pos = args.asl_gamma_pos
+    if args.asl_clip is not None:
+        cfg.train.asl_clip = args.asl_clip
     if args.rescue_val_every is not None:
         cfg.train.rescue_val_every = args.rescue_val_every
     if args.rescue_val_every_early is not None:
@@ -700,6 +720,10 @@ if __name__ == "__main__":
         cfg.train.rescue_budget_primary = args.rescue_budget_primary
     if args.rescue_budget_secondary is not None:
         cfg.train.rescue_budget_secondary = args.rescue_budget_secondary
+    if args.rescue_budget_grid is not None:
+        cfg.train.rescue_budget_grid = tuple(int(x.strip()) for x in args.rescue_budget_grid.split(",") if x.strip())
+    if args.rescue_val_summary_path is not None:
+        cfg.train.rescue_val_summary_path = args.rescue_val_summary_path
     if args.ema_decay is not None:
         cfg.train.ema_decay = args.ema_decay
     if args.no_ema:

@@ -1,7 +1,8 @@
 import copy
+import json
 import time
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 import numpy as np
 import torch
@@ -113,6 +114,40 @@ def soft_dice_masked(
     return (1.0 - dice).mean()
 
 
+def asymmetric_bce_masked(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    valid: torch.Tensor,
+    *,
+    gamma_neg: float,
+    gamma_pos: float,
+    clip: float = 0.05,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    logits_f = logits.float()
+    t = targets.float().clamp(0.0, 1.0)
+    v = valid.float()
+
+    p = torch.sigmoid(logits_f).clamp(eps, 1.0 - eps)
+    p_neg = 1.0 - p
+    if float(clip) > 0.0:
+        p_neg = (p_neg + float(clip)).clamp(max=1.0)
+
+    loss_pos = t * torch.log(p.clamp_min(eps))
+    loss_neg = (1.0 - t) * torch.log(p_neg.clamp_min(eps))
+    loss = loss_pos + loss_neg
+
+    if float(gamma_neg) > 0.0 or float(gamma_pos) > 0.0:
+        pt = p * t + p_neg * (1.0 - t)
+        gamma = float(gamma_pos) * t + float(gamma_neg) * (1.0 - t)
+        loss = loss * torch.pow((1.0 - pt).clamp_min(eps), gamma)
+
+    loss = -loss
+    num = (loss * v).sum()
+    den = v.sum().clamp_min(1.0)
+    return num / den
+
+
 def ramp_lambda(ep: int, *, kind: str, e0: int, e1: int, k: float, max_value: float = 1.0) -> float:
     """
     Blend coefficient for (1-lam)*BCE + lam*FocalTversky
@@ -140,6 +175,9 @@ def masked_val_stats_agg(
     pos_weight_t: torch.Tensor,
     ft_alpha: float,
     ft_gamma: float,
+    asl_gamma_neg: float,
+    asl_gamma_pos: float,
+    asl_clip: float,
     real_label_mode: str = "ignore",
     real_label_weight: float = 0.0,
     n_bins: int = 256,
@@ -176,7 +214,16 @@ def masked_val_stats_agg(
         valid = valid_mask_from_real(rb_r, mode=real_label_mode, real_weight=real_label_weight)
 
         loss_bce = masked_bce_with_logits(logits, yb_r, valid, pos_weight_t=pos_weight_t)
-        if float(lam) <= 0.0 or mode == "bce":
+        if mode == "asl":
+            loss = asymmetric_bce_masked(
+                logits,
+                yb_r,
+                valid,
+                gamma_neg=float(asl_gamma_neg),
+                gamma_pos=float(asl_gamma_pos),
+                clip=float(asl_clip),
+            )
+        elif float(lam) <= 0.0 or mode == "bce":
             loss = loss_bce
         else:
             if mode == "bce_ft":
@@ -302,6 +349,9 @@ class Trainer:
         bce_pos_weight_main: float = 8.0,
         ft_alpha: float = 0.45,
         ft_gamma: float = 1.3,
+        asl_gamma_neg: float = 4.0,
+        asl_gamma_pos: float = 0.0,
+        asl_clip: float = 0.05,
 
         train_real_label_mode: str = "downweight",
         train_real_label_weight: float = 0.25,
@@ -336,6 +386,7 @@ class Trainer:
         rescue_val_every: int = 3,
         rescue_val_every_early: int = 1,
         rescue_val_early_epochs: int = 8,
+        rescue_val_summary_path: Optional[str] = None,
     ):
         is_dist, rank, local_rank, world_size = init_distributed()
         use_ddp = bool(is_dist and world_size > 1)
@@ -480,7 +531,7 @@ class Trainer:
                 mode = "bce_ft"
 
             main_ep = max(0, ep - int(warmup_epochs))
-            if epoch_phase == "warmup" or mode == "bce":
+            if epoch_phase == "warmup" or mode in ("bce", "asl"):
                 lam = 0.0
             else:
                 lam = ramp_lambda(
@@ -524,7 +575,16 @@ class Trainer:
                     )
 
                     loss_bce = masked_bce_with_logits(logits, yb_r, valid, pos_weight_t=posw)
-                    if float(lam) <= 0.0 or mode == "bce":
+                    if mode == "asl":
+                        loss = asymmetric_bce_masked(
+                            logits,
+                            yb_r,
+                            valid,
+                            gamma_neg=float(asl_gamma_neg),
+                            gamma_pos=float(asl_gamma_pos),
+                            clip=float(asl_clip),
+                        )
+                    elif float(lam) <= 0.0 or mode == "bce":
                         loss = loss_bce
                     else:
                         if mode == "bce_ft":
@@ -630,6 +690,9 @@ class Trainer:
                             pos_weight_t=posw,
                             ft_alpha=float(ft_alpha),
                             ft_gamma=float(ft_gamma),
+                            asl_gamma_neg=float(asl_gamma_neg),
+                            asl_gamma_pos=float(asl_gamma_pos),
+                            asl_clip=float(asl_clip),
                             n_bins=int(auc_bins),
                             max_batches=int(auc_batches),
                             real_label_mode=str(val_real_label_mode),
@@ -647,6 +710,9 @@ class Trainer:
                         pos_weight_t=posw,
                         ft_alpha=float(ft_alpha),
                         ft_gamma=float(ft_gamma),
+                        asl_gamma_neg=float(asl_gamma_neg),
+                        asl_gamma_pos=float(asl_gamma_pos),
+                        asl_clip=float(asl_clip),
                         n_bins=int(auc_bins),
                         max_batches=int(auc_batches),
                         real_label_mode=str(val_real_label_mode),
@@ -671,19 +737,17 @@ class Trainer:
                     msg += f" loss {float(val_stats['loss']):.4f}"
 
                 if rescue_eval is not None:
-                    budgets = [rescue_eval["primary"]]
-                    secondary = rescue_eval.get("secondary")
-                    if secondary is not None:
-                        budgets.append(secondary)
-                    budgets = sorted(budgets, key=lambda item: int(item.budget))
+                    frontier = rescue_eval.get("frontier", [])
+                    budgets = sorted(frontier, key=lambda item: int(item["budget"])) if frontier else []
                     for budget_res in budgets:
                         msg += (
-                            f" | rescue@{budget_res.budget} newTP {budget_res.new_tp} "
-                            f"missedRecall {budget_res.missed_recall:.3f} "
-                            f"unionRecall {budget_res.union_recall:.3f} "
-                            f"addedFP {budget_res.added_fp}"
+                            f" | rescue@{int(budget_res['budget'])} newTP {int(budget_res['new_tp'])} "
+                            f"missedRecall {float(budget_res['missed_recall']):.3f} "
+                            f"unionRecall {float(budget_res['union_recall']):.3f} "
+                            f"addedFP {int(budget_res['added_fp'])}"
                         )
-                    msg += f" | nCand {int(rescue_eval['primary'].n_candidates)}"
+                    if budgets:
+                        msg += f" | nCand {int(budgets[-1]['n_candidates'])}"
                     msg += f" | subset {int(rescue_eval['subset_images'])} img / {int(rescue_eval['subset_objects'])} obj"
 
                 if val_stats is not None and np.isfinite(float(val_stats["auc"])):
@@ -691,6 +755,25 @@ class Trainer:
                 if rescue_eval is not None:
                     msg += f" | {float(rescue_eval['elapsed_s']):.1f}s"
                 print(msg)
+
+            if is_main_process() and rescue_eval is not None and rescue_val_summary_path:
+                ensure_parent_dir(str(rescue_val_summary_path))
+                rec = {
+                    "epoch": int(ep),
+                    "phase": str(epoch_phase),
+                    "train_loss": float(train_loss),
+                    "val_loss": None if val_stats is None else float(val_stats["loss"]),
+                    "val_auc": None if val_stats is None else float(val_stats["auc"]),
+                    "lam": float(lam),
+                    "lr": float(lr_actual),
+                    "subset_images": int(rescue_eval["subset_images"]),
+                    "subset_objects": int(rescue_eval["subset_objects"]),
+                    "baseline_detected": int(rescue_eval["baseline_detected"]),
+                    "baseline_missed": int(rescue_eval["baseline_missed"]),
+                    "frontier": rescue_eval.get("frontier", []),
+                }
+                with open(str(rescue_val_summary_path), "a", encoding="utf-8") as f:
+                    f.write(json.dumps(rec) + "\n")
 
             if epoch_phase == "main" and scheduler is not None:
                 scheduler.step()
