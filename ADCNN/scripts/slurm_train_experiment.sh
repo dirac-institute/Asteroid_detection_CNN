@@ -9,11 +9,9 @@
 #SBATCH --mem=60G
 #SBATCH --time=5-00:00:00
 #SBATCH --array=1-3
-#SBATCH --output=/sdf/home/m/mrakovci/logs/%x_%A_%a.out
+#SBATCH --output=/sdf/home/m/mrakovci/%x_%A_%a.out
 
 set -euo pipefail
-
-mkdir -p /sdf/home/m/mrakovci/logs
 
 # === Activate Conda environment ===
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
