@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=60G
 #SBATCH --time=5-00:00:00
-#SBATCH --array=0-3
+#SBATCH --array=1-3
 #SBATCH --output=/sdf/home/m/mrakovci/logs/%x_%A_%a.out
 
 set -euo pipefail
@@ -23,7 +23,9 @@ echo "CUDA_VISIBLE_DEVICES (pre): ${CUDA_VISIBLE_DEVICES-<unset>}"
 
 REPO_DIR="${REPO_DIR:-/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN}"
 DATA_DIR="${DATA_DIR:-/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/DATA}"
-SOFT_MASK_CACHE_DIR="${SOFT_MASK_CACHE_DIR:-${DATA_DIR}/soft_mask_cache}"
+SOFT_MASK_CACHE_ROOT="${SOFT_MASK_CACHE_ROOT:-${SLURM_TMPDIR:-/tmp}/adc_nn_soft_mask_cache}"
+SOFT_MASK_CACHE_SIZE="${SOFT_MASK_CACHE_SIZE:-64}"
+SOFT_MASK_SIGMA_PIX="${SOFT_MASK_SIGMA_PIX:-2.0}"
 EXPERIMENT_SET="${EXPERIMENT_SET:-loss_ablation_v1}"
 EPOCHS="${EPOCHS:-18}"
 BATCH_SIZE="${BATCH_SIZE:-256}"
@@ -71,17 +73,13 @@ declare -a EXP_ARGS
 
 case "${TASK_ID}" in
   0)
-    EXP_NAME="hard_bce_baseline"
-    EXP_ARGS=(
-      --target-mask-mode hard
-      --loss-mode bce
-    )
+    echo "[launcher] Task 0 (hard_bce_baseline) has already been completed and is no longer included by default."
+    exit 0
     ;;
   1)
     EXP_NAME="soft_bce_baseline"
     EXP_ARGS=(
       --target-mask-mode soft
-      --soft-mask-cache-dir "${SOFT_MASK_CACHE_DIR}"
       --loss-mode bce
     )
     ;;
@@ -89,7 +87,6 @@ case "${TASK_ID}" in
     EXP_NAME="soft_bce_dice_weak"
     EXP_ARGS=(
       --target-mask-mode soft
-      --soft-mask-cache-dir "${SOFT_MASK_CACHE_DIR}"
       --loss-mode bce_dice
       --lam-max 0.05
       --ramp-start 10
@@ -100,7 +97,6 @@ case "${TASK_ID}" in
     EXP_NAME="soft_bce_ft_weak"
     EXP_ARGS=(
       --target-mask-mode soft
-      --soft-mask-cache-dir "${SOFT_MASK_CACHE_DIR}"
       --loss-mode bce_ft
       --lam-max 0.05
       --ramp-start 10
@@ -118,11 +114,24 @@ echo "Set: ${EXPERIMENT_SET}"
 echo "Task: ${TASK_ID}"
 echo "Name: ${EXP_NAME}"
 echo "Data: ${DATA_DIR}"
+SOFT_MASK_CACHE_DIR="${SOFT_MASK_CACHE_ROOT}/${EXPERIMENT_SET}/${EXP_NAME}"
+mkdir -p "${SOFT_MASK_CACHE_DIR}"
 echo "Soft mask cache: ${SOFT_MASK_CACHE_DIR}"
+echo "Soft mask cache size: ${SOFT_MASK_CACHE_SIZE}"
+echo "Soft mask sigma: ${SOFT_MASK_SIGMA_PIX}"
 echo "Epochs: ${EPOCHS}"
 echo "Batch size: ${BATCH_SIZE}"
 echo "Main LR: ${MAIN_LR}"
 echo "Warmup LR: ${WARMUP_LR}"
+
+if [[ "${EXP_NAME}" == soft_* ]]; then
+  echo "[launcher] Precomputing soft masks into local cache..."
+  python scripts/precompute_soft_masks.py \
+    --train-h5 "${DATA_DIR}/train.h5" \
+    --train-csv "${DATA_DIR}/train.csv" \
+    --cache-dir "${SOFT_MASK_CACHE_DIR}" \
+    --sigma-pix "${SOFT_MASK_SIGMA_PIX}"
+fi
 
 RUN_CMD=(
   torchrun
@@ -141,6 +150,13 @@ RUN_CMD=(
   --rescue-val-early-epochs "${RESCUE_VAL_EARLY_EPOCHS}"
   --rescue-val-every "${RESCUE_VAL_EVERY}"
 )
+if [[ "${EXP_NAME}" == soft_* ]]; then
+  RUN_CMD+=(
+    --soft-mask-cache-dir "${SOFT_MASK_CACHE_DIR}"
+    --soft-mask-cache-size "${SOFT_MASK_CACHE_SIZE}"
+    --soft-mask-sigma-pix "${SOFT_MASK_SIGMA_PIX}"
+  )
+fi
 RUN_CMD+=("${EXP_ARGS[@]}")
 
 printf '[launcher] Command:'

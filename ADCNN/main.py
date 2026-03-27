@@ -625,6 +625,7 @@ def cli():
     ap.add_argument("--target-mask-mode", choices=["hard", "soft"], default=None)
     ap.add_argument("--soft-mask-sigma-pix", type=float, default=None)
     ap.add_argument("--soft-mask-cache-dir", type=str, default=None)
+    ap.add_argument("--soft-mask-cache-size", type=int, default=None)
     ap.add_argument("--main-lr", type=float, default=None)
     ap.add_argument("--warmup-lr", type=float, default=None)
     ap.add_argument("--lr-schedule", choices=["cosine", "constant"], default=None)
@@ -669,6 +670,8 @@ if __name__ == "__main__":
         cfg.data.soft_mask_sigma_pix = args.soft_mask_sigma_pix
     if args.soft_mask_cache_dir is not None:
         cfg.data.soft_mask_cache_dir = args.soft_mask_cache_dir
+    if args.soft_mask_cache_size is not None:
+        cfg.data.soft_mask_cache_size = args.soft_mask_cache_size
     if args.main_lr is not None:
         cfg.train.main_lr = args.main_lr
     if args.warmup_lr is not None:

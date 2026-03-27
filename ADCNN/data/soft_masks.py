@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
@@ -66,17 +68,70 @@ class SoftMaskGenerator:
         path = self._cache_path(image_id)
         if path is None or not path.exists():
             return None
-        arr = np.load(path, mmap_mode=None)
-        return np.asarray(arr, dtype=np.float32)
+        try:
+            arr = np.load(path, mmap_mode="r")
+            if arr.shape != (self.H, self.W):
+                raise ValueError(f"bad soft-mask shape {arr.shape}, expected {(self.H, self.W)}")
+            return arr
+        except (EOFError, ValueError, OSError):
+            # Concurrent writers on shared storage can leave behind truncated or
+            # otherwise invalid .npy files. Treat them as cache misses.
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            return None
 
     def _save_to_disk(self, image_id: int, arr: np.ndarray) -> None:
         path = self._cache_path(image_id)
         if path is None:
             return
-        np.save(path, np.asarray(arr, dtype=self.cache_dtype))
+        tmp = path.with_suffix(path.suffix + f".tmp-{os.getpid()}")
+        with open(tmp, "wb") as f:
+            np.save(f, np.asarray(arr, dtype=self.cache_dtype))
+        os.replace(tmp, path)
+
+    def _lock_path(self, image_id: int) -> Optional[Path]:
+        path = self._cache_path(image_id)
+        if path is None:
+            return None
+        return path.with_suffix(path.suffix + ".lock")
+
+    def _acquire_lock(self, image_id: int, *, poll_s: float = 0.1, timeout_s: float = 600.0) -> Optional[Path]:
+        lock_path = self._lock_path(image_id)
+        if lock_path is None:
+            return None
+
+        t0 = time.time()
+        while True:
+            try:
+                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                try:
+                    os.write(fd, f"{os.getpid()}\n".encode("ascii", errors="ignore"))
+                finally:
+                    os.close(fd)
+                return lock_path
+            except FileExistsError:
+                cached = self._load_from_disk(image_id)
+                if cached is not None:
+                    return None
+                if (time.time() - t0) >= float(timeout_s):
+                    try:
+                        lock_path.unlink()
+                    except OSError:
+                        pass
+                time.sleep(float(poll_s))
+
+    def _release_lock(self, lock_path: Optional[Path]) -> None:
+        if lock_path is None:
+            return
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
 
     def _remember(self, image_id: int, arr: np.ndarray) -> np.ndarray:
-        self._cache[int(image_id)] = np.asarray(arr, dtype=np.float32)
+        self._cache[int(image_id)] = arr
         self._cache.move_to_end(int(image_id))
         while len(self._cache) > self.cache_size:
             self._cache.popitem(last=False)
@@ -142,7 +197,13 @@ class SoftMaskGenerator:
 
         arr = self._load_from_disk(image_id)
         if arr is None:
-            arr = self._build_panel_mask(image_id)
-            self._save_to_disk(image_id, arr)
+            lock_path = self._acquire_lock(image_id)
+            try:
+                arr = self._load_from_disk(image_id)
+                if arr is None:
+                    arr = self._build_panel_mask(image_id)
+                    self._save_to_disk(image_id, arr)
+            finally:
+                self._release_lock(lock_path)
 
         return self._remember(image_id, arr)

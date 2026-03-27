@@ -28,7 +28,7 @@ class DataConfig:
     soft_mask_line_width: int = 1
     soft_mask_truncate: float = 4.0
     soft_mask_cache_dir: Optional[str] = None
-    soft_mask_cache_size: int = 8
+    soft_mask_cache_size: int = 64
     soft_mask_cache_dtype: str = "float16"
 
 
