@@ -111,6 +111,14 @@ def load_preliminary_from_butler_checked(butler, dataId):
     return calexp, background
 
 
+def preliminary_ref_is_usable(butler, dataId) -> bool:
+    try:
+        load_preliminary_from_butler_checked(butler, dataId=dataId)
+    except Exception:
+        return False
+    return True
+
+
 def current_rss_mb():
     rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return float(rss_kb) / 1024.0
@@ -208,7 +216,7 @@ def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed, 
         half = S // 2 + 2  # +2 pixels slack
         #x_pos = rng.uniform(half, dimensions.x - 1 - half)
         #y_pos = rng.uniform(half, dimensions.y - 1 - half)
-        angle = rng.uniform(*beta)
+        angle = rng.uniform(*beta) if inject_length > 0 else 0.0
         x_pos, y_pos, stamp = _try_place_trail_no_overlap(
             rng,
             forbidden,
@@ -395,13 +403,26 @@ def stack_hits_by_footprints(
     else:
         return injection_catalog, None
 
+def _catalog_radec_array(cat):
+    rows = np.empty((len(cat), 2), dtype=np.float64)
+    for idx, record in enumerate(cat):
+        try:
+            rows[idx, 0] = float(record["coord_ra"])
+            rows[idx, 1] = float(record["coord_dec"])
+        except Exception:
+            coord = record.getCoord()
+            rows[idx, 0] = coord.getRa().asRadians()
+            rows[idx, 1] = coord.getDec().asRadians()
+    return rows
+
+
 def crossmatch_catalogs (pre, post):
     # Crossmatch POST vs PRE on-sky (inputs in radians, radius in radians)
     #    post-only detections -> "new" sources likely caused by injections
     if len(pre) > 0 and len(post) > 0:
         # arrays of [ra, dec] in radians
-        P = post.asAstropy().to_pandas()[["coord_ra", "coord_dec"]].values
-        R = pre.asAstropy().to_pandas()[["coord_ra", "coord_dec"]].values
+        P = _catalog_radec_array(post)
+        R = _catalog_radec_array(pre)
         max_sep = np.deg2rad(0.40 / 3600.0)  # 0.40 arcsec -> radians
         dist, ind = crossmatch_angular(P, R, max_sep)
         is_new = np.isinf(dist)  # no match in PRE → likely injected
@@ -781,6 +802,9 @@ def select_candidate_refs_deterministic(
     for ref in all_pvi_iter:
         key = _key_from_dataId(ref.dataId)
         if int(key[1]) not in allowed_detector_ids:
+            continue
+        formatted_data_id = format_dataId(ref.dataId)
+        if not preliminary_ref_is_usable(b, formatted_data_id):
             continue
         refs_by_key.setdefault(key, ref)
 
