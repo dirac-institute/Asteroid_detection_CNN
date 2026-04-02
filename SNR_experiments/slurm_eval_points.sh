@@ -10,10 +10,11 @@
 #SBATCH --array=0-2
 #SBATCH --time=3-00:00:00
 
-set -euo pipefail
-
+set -eo pipefail
+set +u
 source /cvmfs/sw.lsst.eu/almalinux-x86_64/lsst_distrib/w_2026_09/loadLSST.sh
 setup lsst_distrib
+set -u
 
 PROJECT_ROOT="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"
 SCRIPT_DIR="${PROJECT_ROOT}/SNR_experiments"
