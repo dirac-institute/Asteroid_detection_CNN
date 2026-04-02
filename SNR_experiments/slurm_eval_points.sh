@@ -2,7 +2,7 @@
 #SBATCH --requeue
 #SBATCH --job-name=adc-points
 #SBATCH --account=rubin:developers
-#SBATCH --output=/sdf/home/m/mrakovci/logs/ADCNN_eval_points_%A_%a.out
+#SBATCH --output=/sdf/home/m/mrakovci/logs/ADCNN_eval_points_%a.out
 #SBATCH --partition=roma
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=100
