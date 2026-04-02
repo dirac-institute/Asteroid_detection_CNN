@@ -66,16 +66,24 @@ def source_detect(exposure, input_background, threshold = 5.0, release_id=0):
 
     cfg.id_generator.release_id = release_id
 
+    cfg.detection.thresholdType = "stdev"
     cfg.detection.thresholdValue = threshold
     cfg.detection.includeThresholdMultiplier = 1.0
-    cfg.detection.reEstimateBackground = True
-    cfg.detection.doTempLocalBackground = True
+    #cfg.detection.reEstimateBackground = True
+    #cfg.detection.doTempLocalBackground = True
 
-    cfg.deblend.maxFootprintArea = -1
+    #cfg.deblend.maxFootprintArea = -1
 
     task = SingleFrameDetectAndMeasureTask(config=cfg)
     result = task.run(exposure=exposure, input_background=input_background)
-    return result.sources_footprints
+    src = result.sources_footprints
+    bad_fields = ["base_PixelFlags_flag_bad", "base_PixelFlags_flag_edge", "base_PixelFlags_flag_interpolated",
+                  "base_PixelFlags_flag_interpolatedCenter", "base_PixelFlags_flag_nodata", "base_PixelFlags_flag_cr",
+                  "base_PixelFlags_flag_saturated", "base_PixelFlags_flag_saturatedCenter", "base_PixelFlags_flag_suspect"]
+    #src = src[src["parent"] == 0]
+    for field in bad_fields:
+        src = src[src[field] == False]
+    return src
 
 def calibrate(butler, postISRCCD, dataId, threshold=5.0):
     expanded = butler.registry.expandDataId(dataId)
