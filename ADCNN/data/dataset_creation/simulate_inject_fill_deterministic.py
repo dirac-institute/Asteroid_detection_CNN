@@ -111,14 +111,6 @@ def load_preliminary_from_butler_checked(butler, dataId):
     return calexp, background
 
 
-def preliminary_ref_is_usable(butler, dataId) -> bool:
-    try:
-        load_preliminary_from_butler_checked(butler, dataId=dataId)
-    except Exception:
-        return False
-    return True
-
-
 def current_rss_mb():
     rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return float(rss_kb) / 1024.0
@@ -802,9 +794,6 @@ def select_candidate_refs_deterministic(
     for ref in all_pvi_iter:
         key = _key_from_dataId(ref.dataId)
         if int(key[1]) not in allowed_detector_ids:
-            continue
-        formatted_data_id = format_dataId(ref.dataId)
-        if not preliminary_ref_is_usable(b, formatted_data_id):
             continue
         refs_by_key.setdefault(key, ref)
 

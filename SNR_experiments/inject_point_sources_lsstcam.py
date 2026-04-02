@@ -15,6 +15,7 @@ import numpy as np
 
 from ADCNN.data.dataset_creation.common import ensure_dir
 from ADCNN.data.dataset_creation.simulate_inject_fill_deterministic import (
+    ATTEMPT_DIAGNOSTICS,
     TASK_TIMEOUT_SECONDS,
     _alarm_timeout_handler,
     compute_split_targets,
@@ -227,11 +228,11 @@ def run_parallel_injection(
             lock,
         ]
 
-    def log_timing():
+    def log_timing(tag="timing"):
         success_denom = max(1, timing["successes"])
         attempt_denom = max(1, attempts)
         print(
-            f"[timing] attempts={attempts} successes={timing['successes']} failures={timing['failures']} "
+            f"[{tag}] attempts={attempts} successes={timing['successes']} failures={timing['failures']} "
             f"avg_compute={timing['compute_s']/attempt_denom:.2f}s "
             f"avg_stage={timing['stage_s']/success_denom:.2f}s "
             f"avg_promote={timing['promote_s']/success_denom:.2f}s "
@@ -266,7 +267,8 @@ def run_parallel_injection(
                     result = future.result()
                     attempts += 1
                     timing["compute_s"] += float(result.get("compute_s", 0.0))
-                    print(f"[diag] {format_attempt_diagnostics(result)}", flush=True)
+                    if ATTEMPT_DIAGNOSTICS:
+                        print(f"[diag] {format_attempt_diagnostics(result)}", flush=True)
 
                     if result["status"] == "ok":
                         success_count += 1
@@ -315,7 +317,8 @@ def run_parallel_injection(
                 result = worker(task)
                 attempts += 1
                 timing["compute_s"] += float(result.get("compute_s", 0.0))
-                print(f"[diag] {format_attempt_diagnostics(result)}", flush=True)
+                if ATTEMPT_DIAGNOSTICS:
+                    print(f"[diag] {format_attempt_diagnostics(result)}", flush=True)
 
                 if result["status"] == "ok":
                     success_count += 1
@@ -346,7 +349,7 @@ def run_parallel_injection(
             flush=True,
         )
     if attempts > 0:
-        log_timing()
+        log_timing(tag="timing-final")
 
 
 def main():
