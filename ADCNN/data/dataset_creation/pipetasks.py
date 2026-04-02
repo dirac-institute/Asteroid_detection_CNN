@@ -66,7 +66,7 @@ def source_detect(exposure, input_background, threshold = 5.0, release_id=0):
 
     cfg.id_generator.release_id = release_id
 
-    cfg.detection.thresholdType = "stdev"
+    #cfg.detection.thresholdType = "stdev"
     cfg.detection.thresholdValue = threshold
     cfg.detection.includeThresholdMultiplier = 1.0
     #cfg.detection.reEstimateBackground = True

@@ -18,7 +18,7 @@ set -u
 
 PROJECT_ROOT="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"
 SCRIPT_DIR="${PROJECT_ROOT}/SNR_experiments"
-BASE_OUT="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/DATA/point_sources"
+BASE_OUT="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/DATA/point_sources1"
 REPO="dp2_prep"
 COLL="LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage2"
 WHERE="instrument='LSSTCam' AND day_obs>=20250801 AND day_obs<=20250921 AND band in ('u','g','r','i','z','y') "
