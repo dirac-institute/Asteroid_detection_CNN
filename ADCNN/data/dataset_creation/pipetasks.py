@@ -77,12 +77,13 @@ def source_detect(exposure, input_background, threshold = 5.0, release_id=0):
     task = SingleFrameDetectAndMeasureTask(config=cfg)
     result = task.run(exposure=exposure, input_background=input_background)
     src = result.sources_footprints
+    """
     bad_fields = ["base_PixelFlags_flag_bad", "base_PixelFlags_flag_edge", "base_PixelFlags_flag_interpolated",
                   "base_PixelFlags_flag_interpolatedCenter", "base_PixelFlags_flag_nodata", "base_PixelFlags_flag_cr",
                   "base_PixelFlags_flag_saturated", "base_PixelFlags_flag_saturatedCenter", "base_PixelFlags_flag_suspect"]
     #src = src[src["parent"] == 0]
     for field in bad_fields:
-        src = src[src[field] == False]
+        src = src[src[field] == False]"""
     return src
 
 def calibrate(butler, postISRCCD, dataId, threshold=5.0):
