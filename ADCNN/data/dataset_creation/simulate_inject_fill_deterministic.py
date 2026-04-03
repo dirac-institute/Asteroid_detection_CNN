@@ -50,6 +50,7 @@ TASK_TIMEOUT_SECONDS = 900
 PREINJECTION_DETECTION_THRESHOLD = 3.0
 ATTEMPT_DIAGNOSTICS = True
 MAX_PRE_SOURCES = 12000
+TEMP_REPLACE_IMAGE_WITH_VARIANCE_NOISE = True
 
 
 def inject(postISRCCD, injection_catalog):
@@ -569,6 +570,15 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
         ref = butler.registry.findDataset(source_type, dataId=ref_dataId)
         formatted_dataId = format_dataId(ref.dataId)
         calexp, background = load_preliminary_from_butler_checked(butler, dataId=formatted_dataId)
+        # TEMP EXPERIMENT: replace the image plane with Gaussian noise drawn
+        # from the variance plane. Remove this block and
+        # TEMP_REPLACE_IMAGE_WITH_VARIANCE_NOISE after the experiment.
+        if TEMP_REPLACE_IMAGE_WITH_VARIANCE_NOISE:
+            rng_noise = np.random.default_rng(int(seed) + 17)
+            calexp = calexp.clone()
+            variance = calexp.variance.array.astype(np.float32, copy=False)
+            sigma = np.sqrt(np.clip(variance, 0.0, None)).astype(np.float32, copy=False)
+            calexp.image.array[:, :] = rng_noise.normal(loc=0.0, scale=sigma).astype(np.float32, copy=False)
         log_mem("loaded")
         pre_injection_fixed_src = source_detect(
             calexp,
