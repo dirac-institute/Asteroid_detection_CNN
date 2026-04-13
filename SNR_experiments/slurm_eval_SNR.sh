@@ -35,6 +35,7 @@ fi
 
 source /cvmfs/sw.lsst.eu/almalinux-x86_64/lsst_distrib/w_2026_09/loadLSST.sh
 setup lsst_distrib
+setup meas_extensions_trailedSources
 
 cd /sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/ADCNN/data/dataset_creation
 
@@ -60,6 +61,7 @@ srun python3 -u simulate_inject_fill_deterministic.py \
   --beta-min 0 --beta-max 180 \
   --number 20 \
   --stack-detection-threshold "$SNR" \
+  --measueTrails \
   --chunks 128 \
   --test-only \
   --where "$WHERE"
