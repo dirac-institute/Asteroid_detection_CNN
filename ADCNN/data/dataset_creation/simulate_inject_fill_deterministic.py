@@ -16,7 +16,7 @@ import io
 from pathlib import Path
 
 from common import ensure_dir, draw_one_line, psf_fwhm_arcsec_from_calexp, mag_to_snr, snr_to_mag
-from pipetasks import calibrate, isr, fetch_from_butler, source_detect
+from pipetasks import calibrate, isr, fetch_from_butler, source_detect, catalog_to_pandas
 
 import random
 from typing import List, Sequence
@@ -541,7 +541,7 @@ def dimensions_from_exposure(exposure):
     bbox = exposure.getBBox()
     return geom.Extent2I(int(bbox.getWidth()), int(bbox.getHeight()))
 
-def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=None, debug=False, mag_mode="psf_mag", psf_template="image", detection_threshold=5.0, reprocess=False):
+def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions, source_type, ref_dataId, seed=None, debug=False, mag_mode="psf_mag", psf_template="image", detection_threshold=5.0, reprocess=False, measueTrails=False):
     mem_log = []
 
     def log_mem(phase):
@@ -561,6 +561,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             calexp,
             background,
             threshold=PREINJECTION_DETECTION_THRESHOLD,
+            measueTrails=measueTrails,
         )
         log_mem("pre_fixed")
         if len(pre_injection_fixed_src) > MAX_PRE_SOURCES:
@@ -574,6 +575,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
                 calexp,
                 background,
                 threshold=detection_threshold,
+                measueTrails=measueTrails,
             )
             if len(pre_injection_eval_src) > MAX_PRE_SOURCES:
                 raise RuntimeError(
@@ -605,7 +607,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             del pre_injection_fixed_src
             gc.collect()
             log_mem("dropped_pre_fixed")
-        post_injection_Src = source_detect(injected_calexp, background, threshold=detection_threshold)
+        post_injection_Src = source_detect(injected_calexp, background, threshold=detection_threshold, measueTrails=measueTrails)
         log_mem("post_detect")
         mask = np.zeros((local_dimensions.y, local_dimensions.x), dtype=np.uint16)
         for i, row in enumerate(injection_catalog):
@@ -658,7 +660,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
 
 
 def worker(args):
-    rank, image_id, split_name, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta, source_type, global_seed, mag_mode, psf_template, detection_threshold = args
+    rank, image_id, split_name, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta, source_type, global_seed, mag_mode, psf_template, detection_threshold, measueTrails = args
     seed = (int(global_seed) * 1_000_003 + int(dataId["visit"]) * 1_003 + int(dataId["detector"])) & 0xFFFFFFFF
     try:
         t0 = time.perf_counter()
@@ -681,6 +683,7 @@ def worker(args):
                     mag_mode=mag_mode,
                     psf_template=psf_template,
                     detection_threshold=detection_threshold,
+                    measueTrails=measueTrails,
                 )
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)
@@ -708,7 +711,7 @@ def worker(args):
                 f["images"][image_id] = img
                 f["masks"][image_id] = mask
                 f["real_labels"][image_id] = real_labels
-            df = catalog.to_pandas()
+            df = catalog_to_pandas(catalog, measueTrails=measueTrails)
             df["image_id"] = image_id
             file_exists = os.path.exists(csvpath)
             df.to_csv(csvpath, mode=("a" if file_exists else "w"), header=(not file_exists), index=False)
@@ -886,7 +889,7 @@ def build_output_slots(target_total, test_ordinals, test_only, h5train_path, h5t
 
 def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitude, beta, where, parallel=4,
                            random_subset=0, train_test_split=0, seed=123, chunks=None, test_only=False, mag_mode="psf_mag",
-                           psf_template="image", stack_detection_threshold=5.0):
+                           psf_template="image", stack_detection_threshold=5.0, measueTrails=False):
     butler = Butler(repo, collections=coll)
     h5train_path = os.path.join(save_path, "train.h5")
     h5test_path = os.path.join(save_path, "test.h5")
@@ -971,6 +974,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             mag_mode,
             psf_template,
             stack_detection_threshold,
+            measueTrails,
         ]
 
     def log_timing():
@@ -1135,6 +1139,7 @@ def main():
     ap.add_argument("--beta-max", type=float, default=180)
     ap.add_argument("--number", type=int, default=20)
     ap.add_argument("--stack-detection-threshold", type=float, default=5.0, help="SNR threshold for the stack (default 5.0)")
+    ap.add_argument("--measueTrails", action="store_true", default=False)
     ap.add_argument("--seed", type=int, default=13379)
     ap.add_argument("--chunks", type=int, default=None, help="HDF5 chunk size (square). Example: 128 -> chunks=(1,128,128). None = contiguous")
     ap.add_argument("--test-only", action="store_true", default=False, help="Only generate test set")
@@ -1162,6 +1167,7 @@ def main():
         seed=args.seed,
         psf_template=args.psf_template,
         stack_detection_threshold=args.stack_detection_threshold,
+        measueTrails=args.measueTrails,
     )
 
 if __name__ == "__main__":
