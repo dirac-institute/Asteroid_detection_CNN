@@ -55,7 +55,33 @@ def isr(butler, dataId):
     res = task.run(raw, **kwargs)
     return res.exposure
 
-def source_detect(exposure, input_background, threshold = 5.0, release_id=0):
+def _get_schema_names(catalog):
+    try:
+        return list(catalog.schema.getNames())
+    except Exception:
+        return [item.field.getName() for item in catalog.schema]
+
+def catalog_to_pandas(catalog, measueTrails=False):
+    df = catalog.to_pandas()
+    if measueTrails:
+        trail_fields = [
+            name for name in _get_schema_names(catalog)
+            if name.startswith("ext_trailedSources_Naive_") or name.startswith("ext_trailedSources_Veres_")
+        ]
+        for name in trail_fields:
+            if name not in df.columns:
+                df[name] = [record[name] for record in catalog]
+    return df
+
+def source_detect(exposure, input_background, threshold = 5.0, release_id=0, measueTrails=False):
+    if measueTrails:
+        try:
+            import lsst.meas.extensions.trailedSources  # noqa: F401
+        except ImportError as e:
+            raise RuntimeError(
+                "measueTrails=True requires lsst.meas.extensions.trailedSources to be set up."
+            ) from e
+
     cfg = SingleFrameDetectAndMeasureConfig()
 
     cfg.connections.exposure = "preliminary_visit_image"
@@ -66,27 +92,28 @@ def source_detect(exposure, input_background, threshold = 5.0, release_id=0):
 
     cfg.id_generator.release_id = release_id
 
-    #cfg.detection.thresholdType = "stdev"
     cfg.detection.thresholdValue = threshold
     cfg.detection.includeThresholdMultiplier = 1.0
-    #cfg.detection.reEstimateBackground = True
-    #cfg.detection.doTempLocalBackground = True
+    cfg.detection.reEstimateBackground = True
+    cfg.detection.doTempLocalBackground = True
 
-    #cfg.deblend.maxFootprintArea = -1
+    cfg.deblend.maxFootprintArea = -1
+    if measueTrails:
+        for plugin_name in (
+            "base_SdssCentroid",
+            "base_SdssShape",
+            "ext_trailedSources_Naive",
+            "ext_trailedSources_Veres",
+        ):
+            cfg.measurement.plugins.names.add(plugin_name)
+        cfg.measurement.slots.centroid = "base_SdssCentroid"
+        cfg.measurement.slots.shape = "base_SdssShape"
 
     task = SingleFrameDetectAndMeasureTask(config=cfg)
     result = task.run(exposure=exposure, input_background=input_background)
-    src = result.sources_footprints
-    """
-    bad_fields = ["base_PixelFlags_flag_bad", "base_PixelFlags_flag_edge", "base_PixelFlags_flag_interpolated",
-                  "base_PixelFlags_flag_interpolatedCenter", "base_PixelFlags_flag_nodata", "base_PixelFlags_flag_cr",
-                  "base_PixelFlags_flag_saturated", "base_PixelFlags_flag_saturatedCenter", "base_PixelFlags_flag_suspect"]
-    #src = src[src["parent"] == 0]
-    for field in bad_fields:
-        src = src[src[field] == False]"""
-    return src
+    return result.sources_footprints
 
-def calibrate(butler, postISRCCD, dataId, threshold=5.0):
+def calibrate(butler, postISRCCD, dataId, threshold=5.0, measueTrails=False):
     expanded = butler.registry.expandDataId(dataId)
     exposure_record = expanded.records["exposure"]
 
@@ -172,12 +199,12 @@ def calibrate(butler, postISRCCD, dataId, threshold=5.0):
     )
 
     calexp = result.exposure
-    catalog = source_detect(calexp, result.background, threshold = threshold)
+    catalog = source_detect(calexp, result.background, threshold = threshold, measueTrails=measueTrails)
 
     return calexp, catalog, result.background
 
-def fetch_from_butler(butler, dataId, threshold = 5.0):
+def fetch_from_butler(butler, dataId, threshold = 5.0, measueTrails=False):
     calexp = butler.get("preliminary_visit_image", dataId=dataId)
     background = butler.get("preliminary_visit_image_background", dataId=dataId)
-    catalog =  source_detect(calexp, background, threshold =threshold)
+    catalog =  source_detect(calexp, background, threshold =threshold, measueTrails=measueTrails)
     return calexp, catalog, background
