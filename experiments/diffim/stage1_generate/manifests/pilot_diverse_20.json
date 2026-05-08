@@ -1,0 +1,111 @@
+{
+  "repo": "dp2_prep",
+  "collections": [
+    "LSSTCam/runs/DRP/DP2/v30_0_6_rc1/DM-53881/stage3",
+    "LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage2"
+  ],
+  "skymap": "lsst_cells_v2",
+  "band_requested": "g",
+  "max_per_detector": 6,
+  "seed": 7,
+  "pairs": [
+    {
+      "visit": 2025071000137,
+      "detector": 1,
+      "band": "z",
+      "n_template_patches": 7
+    },
+    {
+      "visit": 2025062000217,
+      "detector": 1,
+      "band": "r",
+      "n_template_patches": 8
+    },
+    {
+      "visit": 2025062000251,
+      "detector": 1,
+      "band": "i",
+      "n_template_patches": 6
+    },
+    {
+      "visit": 2025071000146,
+      "detector": 1,
+      "band": "z",
+      "n_template_patches": 5
+    },
+    {
+      "visit": 2025071000148,
+      "detector": 1,
+      "band": "z",
+      "n_template_patches": 11
+    },
+    {
+      "visit": 2025071000220,
+      "detector": 1,
+      "band": "z",
+      "n_template_patches": 7
+    },
+    {
+      "visit": 2025070100155,
+      "detector": 50,
+      "band": "g",
+      "n_template_patches": 12
+    },
+    {
+      "visit": 2025070100135,
+      "detector": 50,
+      "band": "i",
+      "n_template_patches": 7
+    },
+    {
+      "visit": 2025071000151,
+      "detector": 50,
+      "band": "z",
+      "n_template_patches": 8
+    },
+    {
+      "visit": 2025071000135,
+      "detector": 50,
+      "band": "z",
+      "n_template_patches": 7
+    },
+    {
+      "visit": 2025071000140,
+      "detector": 50,
+      "band": "z",
+      "n_template_patches": 7
+    },
+    {
+      "visit": 2025071000133,
+      "detector": 50,
+      "band": "z",
+      "n_template_patches": 7
+    },
+    {
+      "visit": 2025070100214,
+      "detector": 100,
+      "band": "i",
+      "n_template_patches": 8
+    },
+    {
+      "visit": 2025071000142,
+      "detector": 100,
+      "band": "z",
+      "n_template_patches": 6
+    },
+    {
+      "visit": 2025071000214,
+      "detector": 100,
+      "band": "z",
+      "n_template_patches": 7
+    },
+    {
+      "visit": 2025070100136,
+      "detector": 100,
+      "band": "i",
+      "n_template_patches": 11
+    }
+  ],
+  "scanned": 600,
+  "n_unique_detectors": 3
+}

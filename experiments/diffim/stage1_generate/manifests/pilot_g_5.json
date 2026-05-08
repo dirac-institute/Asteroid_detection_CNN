@@ -1,0 +1,42 @@
+{
+  "repo": "dp2_prep",
+  "collections": [
+    "LSSTCam/runs/DRP/DP2/v30_0_6_rc1/DM-53881/stage3",
+    "LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage2"
+  ],
+  "skymap": "lsst_cells_v2",
+  "band_requested": "g",
+  "pairs": [
+    {
+      "visit": 2025042400172,
+      "detector": 1,
+      "band": "g",
+      "n_template_patches": 7
+    },
+    {
+      "visit": 2025042400173,
+      "detector": 1,
+      "band": "g",
+      "n_template_patches": 8
+    },
+    {
+      "visit": 2025042400174,
+      "detector": 1,
+      "band": "g",
+      "n_template_patches": 7
+    },
+    {
+      "visit": 2025042400175,
+      "detector": 1,
+      "band": "g",
+      "n_template_patches": 7
+    },
+    {
+      "visit": 2025042400176,
+      "detector": 1,
+      "band": "g",
+      "n_template_patches": 10
+    }
+  ],
+  "scanned": 5
+}
