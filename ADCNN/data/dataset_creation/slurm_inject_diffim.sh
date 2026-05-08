@@ -48,8 +48,8 @@ srun python3 -u simulate_inject_diffim.py \
   --train-test-split 0.94117 \
   --random-subset 850 \
   --trail-length-min 6 --trail-length-max 60 \
-  --mag-min 22.5 --mag-max 26.0 \
-  --mag-mode psf_mag \
+  --mag-min 2 --mag-max 8 \
+  --mag-mode snr \
   --beta-min 0 --beta-max 180 \
   --number 20 \
   --stack-detection-threshold 5.0 \

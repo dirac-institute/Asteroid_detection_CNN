@@ -20,8 +20,8 @@ conda activate asteroid_cnn
 
 echo "CUDA_VISIBLE_DEVICES (pre): ${CUDA_VISIBLE_DEVICES-<unset>}"
 
-REPO_DIR="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN"
-DATA_DIR="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/DATA"
+REPO_DIR="${REPO_DIR:-/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN}"
+DATA_DIR="${DATA_DIR:-/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/DATA}"
 
 cd "$REPO_DIR"
 export PYTHONPATH="$REPO_DIR:${PYTHONPATH:-}"
