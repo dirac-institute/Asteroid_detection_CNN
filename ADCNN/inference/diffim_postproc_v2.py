@@ -743,6 +743,65 @@ def load_rf(rf_path: str | Path):
     return joblib.load(str(rf_path))
 
 
+def save_rf(rf, rf_path: str | Path) -> None:
+    """Pickle a trained RF to disk."""
+    import joblib
+    Path(rf_path).parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(rf, str(rf_path))
+
+
+def build_rf_postproc_v2(
+    panel_probs,
+    diffim_panels,
+    orient_sin,
+    orient_cos,
+    orient_agg,
+    catalog,
+    *,
+    real_labels=None,
+    n_estimators: int = 500, max_depth: int = 14, min_samples_leaf: int = 5,
+    n_jobs: int = 32, random_state: int = 0,
+    save_to: str | Path | None = None,
+    verbose: bool = True,
+):
+    """End-to-end V2 RF trainer.
+
+    Given the four NN output maps + diffims + truth catalog, computes the
+    72-feature candidate table, relabels via injection-overlap matching
+    (same definition as `objectwise_confusion`), trains a class-balanced
+    RandomForest, and optionally pickles it. Returns the fitted classifier.
+
+    Use this when you want to retrain on a new dataset / threshold variation.
+    The shipped `rf_postproc_v2.pkl` was built with this function on
+    test_5sigma — see `experiments/diffim_runs/pilot_v7/postproc_iter/train_rf_v2.py`.
+    """
+    if verbose:
+        print("[build] computing V2 features ...", flush=True)
+    cand_df, _ = compute_v2_features(
+        panel_probs, diffim_panels, orient_sin, orient_cos, orient_agg,
+        real_labels=real_labels, verbose=verbose,
+    )
+    if verbose:
+        print(f"[build] {len(cand_df)} candidates", flush=True)
+        print("[build] relabel via injection-overlap ...", flush=True)
+    labels = label_candidates_by_injection_overlap(cand_df, catalog, panel_probs)
+    if verbose:
+        print(f"[build] pos={int(labels.sum())} neg={int((labels==0).sum())}",
+              flush=True)
+        print("[build] fitting RandomForest ...", flush=True)
+    rf = train_rf_v2(
+        cand_df, labels=labels,
+        n_estimators=n_estimators, max_depth=max_depth,
+        min_samples_leaf=min_samples_leaf,
+        n_jobs=n_jobs, random_state=random_state,
+    )
+    if save_to is not None:
+        save_rf(rf, save_to)
+        if verbose:
+            print(f"[build] saved {save_to}", flush=True)
+    return rf
+
+
 def rf_score_sweep(cand_df, *, score_col: str = "score_rf",
                     thresholds=None) -> pd.DataFrame:
     """For each threshold, report candidates kept and (when truth columns are
