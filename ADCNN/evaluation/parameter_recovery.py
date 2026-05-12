@@ -31,13 +31,17 @@ import numpy as np
 import pandas as pd
 from scipy import ndimage as ndi
 
+import cv2
+
 from ADCNN.utils.angle_utils import deg2rad
 from ADCNN.utils.helpers import draw_one_line
+from ADCNN.inference.diffim_matched_filter import panel_mad_sigma
 
 
 __all__ = [
     "estimate_component_params",
     "estimate_params_for_candidate",
+    "mf_length_scan",
     "evaluate_parameter_recovery",
     "summarize_residuals",
     "plot_residuals",
@@ -135,6 +139,48 @@ def estimate_component_params(
     return out
 
 
+def mf_length_scan(
+    diffim: np.ndarray, sigma: float, cy: float, cx: float, beta_deg: float,
+    *,
+    L_min: int = 5, L_max: int = 100, L_step: int = 2, line_width: int = 2,
+) -> tuple[float, float, float]:
+    """Scan candidate trail lengths and return the L maximising the line-
+    integral SNR through (cy, cx) at angle beta.
+
+    Returns (L_best, snr_best, flux_best). When the streak truly has length
+    L*, per-pixel SNR (flux / sigma / sqrt(n_line)) peaks at L = L* — beyond
+    that we add noise without signal, below it we miss signal.
+    """
+    H, W = diffim.shape
+    beta_rad = math.radians(beta_deg)
+    dy = math.sin(beta_rad); dx = math.cos(beta_rad)
+    best_L = float(L_min); best_snr = 0.0; best_flux = 0.0
+    for L in range(L_min, L_max + 1, L_step):
+        half = int(math.ceil(0.5 * L)) + line_width + 2
+        y0 = max(0, int(cy - half)); y1 = min(H, int(cy + half) + 1)
+        x0 = max(0, int(cx - half)); x1 = min(W, int(cx + half) + 1)
+        Hl = y1 - y0; Wl = x1 - x0
+        if Hl <= 0 or Wl <= 0:
+            continue
+        cy_l = cy - y0; cx_l = cx - x0
+        x1l = cx_l - 0.5 * L * dx
+        y1l = cy_l - 0.5 * L * dy
+        x2l = cx_l + 0.5 * L * dx
+        y2l = cy_l + 0.5 * L * dy
+        mask = np.zeros((Hl, Wl), np.uint8)
+        cv2.line(mask, (int(round(x1l)), int(round(y1l))),
+                 (int(round(x2l)), int(round(y2l))),
+                 color=1, thickness=line_width)
+        n_line = int(mask.sum())
+        if n_line < 3:
+            continue
+        flux = float(diffim[y0:y1, x0:x1][mask > 0].sum())
+        snr = flux / max(sigma * math.sqrt(n_line), 1e-6)
+        if snr > best_snr:
+            best_snr = snr; best_L = float(L); best_flux = flux
+    return best_L, best_snr, best_flux
+
+
 def estimate_params_for_candidate(
     panel_prob: np.ndarray,
     effective_t_low: float,
@@ -200,6 +246,9 @@ def evaluate_parameter_recovery(
     panel_probs,
     *,
     orient_sin=None, orient_cos=None,
+    diffim_panels=None,
+    mf_length: bool = False,
+    mf_L_min: int = 5, mf_L_max: int = 100, mf_L_step: int = 2,
     psf_width: int = 40,
 ) -> pd.DataFrame:
     """Match catalog injections to V2 candidates and estimate parameters.
@@ -224,6 +273,10 @@ def evaluate_parameter_recovery(
     probs_dict   = _to_panel_dict(panel_probs)
     sin_dict     = None if orient_sin is None else _to_panel_dict(orient_sin)
     cos_dict     = None if orient_cos is None else _to_panel_dict(orient_cos)
+
+    use_mf = bool(mf_length) and diffim_panels is not None
+    diff_dict = _to_panel_dict(diffim_panels) if diffim_panels is not None else None
+    sigma_cache: dict[int, float] = {}
 
     cat = catalog.copy().reset_index(drop=True)
     cat["injection_idx"] = cat.groupby("image_id").cumcount() + 1
@@ -314,6 +367,20 @@ def evaluate_parameter_recovery(
         if "beta_orient_deg" in est:
             out["dbeta_orient_deg"] = _wrap_beta_diff_deg(est["beta_orient_deg"], beta_t)
         out["dlength_pca"] = est["length_pca"] - Lt
+
+        # Matched-filter length estimate (optional).
+        if use_mf:
+            if pid not in sigma_cache:
+                sigma_cache[pid] = float(panel_mad_sigma(
+                    diff_dict[pid].astype(np.float32, copy=False)))
+            beta_for_mf = est.get("beta_orient_deg", est["beta_pca_deg"])
+            L_best, snr_best, _ = mf_length_scan(
+                diff_dict[pid], sigma_cache[pid], est["y"], est["x"], beta_for_mf,
+                L_min=mf_L_min, L_max=mf_L_max, L_step=mf_L_step,
+            )
+            out["length_mf"] = L_best
+            out["mf_length_snr"] = snr_best
+            out["dlength_mf"] = L_best - Lt
         rows.append(out)
 
     return pd.DataFrame(rows)
@@ -352,6 +419,8 @@ def summarize_residuals(matched: pd.DataFrame) -> pd.DataFrame:
     }
     if "dbeta_orient_deg" in det.columns:
         rows["beta_orient [deg]"] = stats(det["dbeta_orient_deg"])
+    if "dlength_mf" in det.columns:
+        rows["length_mf [px]"] = stats(det["dlength_mf"])
     return pd.DataFrame(rows).T
 
 
@@ -374,15 +443,20 @@ def plot_residuals(matched: pd.DataFrame, *, fig=None, bins: int = 40,
         axes[1, 0].hist(det["dbeta_orient_deg"], bins=bins, histtype="step", color="C4", label="orient head")
         axes[1, 0].legend()
     axes[1, 0].set_xlabel("Δβ [deg, mod 180]"); axes[1, 0].axvline(0, ls="--", c="k", alpha=0.5)
-    axes[1, 1].hist(det["dlength_pca"], bins=bins, histtype="step", color="C5"); axes[1, 1].set_xlabel("Δlength [px]"); axes[1, 1].axvline(0, ls="--", c="k", alpha=0.5)
+    axes[1, 1].hist(det["dlength_pca"], bins=bins, histtype="step", color="C5", label="PCA")
+    if "dlength_mf" in det.columns:
+        axes[1, 1].hist(det["dlength_mf"], bins=bins, histtype="step", color="C6", label="MF scan")
+        axes[1, 1].legend()
+    axes[1, 1].set_xlabel("Δlength [px]"); axes[1, 1].axvline(0, ls="--", c="k", alpha=0.5)
 
-    sc = axes[1, 2].scatter(det["length_true"], det["length_pca"],
+    est_col = "length_mf" if "length_mf" in det.columns else "length_pca"
+    sc = axes[1, 2].scatter(det["length_true"], det[est_col],
                              c=det.get("SNR", np.zeros(len(det))),
                              s=10, cmap="viridis")
-    lo = float(min(det["length_true"].min(), det["length_pca"].min()))
-    hi = float(max(det["length_true"].max(), det["length_pca"].max()))
+    lo = float(min(det["length_true"].min(), det[est_col].min()))
+    hi = float(max(det["length_true"].max(), det[est_col].max()))
     axes[1, 2].plot([lo, hi], [lo, hi], "k--", alpha=0.5)
-    axes[1, 2].set_xlabel("true length"); axes[1, 2].set_ylabel("est length")
+    axes[1, 2].set_xlabel("true length"); axes[1, 2].set_ylabel(f"est length ({est_col.split('_',1)[1]})")
     if "SNR" in det.columns:
         fig.colorbar(sc, ax=axes[1, 2], label="SNR")
 
