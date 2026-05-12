@@ -352,6 +352,89 @@ def predict_panel_overlap_3ch(
     return out.astype(np.float16)
 
 
+@torch.no_grad()
+def predict_panel_overlap_3ch_full(
+    model: torch.nn.Module,
+    panel_image: np.ndarray,
+    panel_real_labels: np.ndarray,
+    *,
+    device,
+    tile: int = 128,
+    stride: int = 64,
+    clip: float = 5.0,
+    stats_crop: int = 1024,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Sliding-window inference returning all auxiliary heads.
+
+    Returns (prob, orient_sin, orient_cos, agg) — each (H, W) float16. `prob`
+    is sigmoid(seg_logits); `orient_sin`/`orient_cos` are tanh-bounded
+    sin(2β)/cos(2β); `agg` is the raw line-aggregator logit. All four maps
+    use Hann-weighted overlap blending (same convention as
+    `predict_panel_overlap_3ch`).
+    """
+    H, W = panel_image.shape
+    s = min(stats_crop, H, W)
+    h0c = (H - s) // 2
+    w0c = (W - s) // 2
+    sigma = diffim_mad_sigma(panel_image[h0c:h0c + s, w0c:w0c + s])
+
+    prob_acc = np.zeros((H, W), dtype=np.float32)
+    sin_acc  = np.zeros((H, W), dtype=np.float32)
+    cos_acc  = np.zeros((H, W), dtype=np.float32)
+    agg_acc  = np.zeros((H, W), dtype=np.float32)
+    weight_acc = np.zeros((H, W), dtype=np.float32)
+    hann = hann2d(tile)
+
+    def starts(N, t, sstep):
+        out = list(range(0, max(N - t, 0) + 1, sstep))
+        if out[-1] != N - t:
+            out.append(N - t)
+        return out
+    ys = starts(H, tile, stride)
+    xs = starts(W, tile, stride)
+
+    batch_xs, batch_locs = [], []
+    BATCH = 24
+
+    def flush():
+        if not batch_xs:
+            return
+        xb = torch.from_numpy(np.stack(batch_xs)).to(device, non_blocking=True)
+        with torch.amp.autocast("cuda", enabled=(device.type == "cuda")):
+            seg_logits, sn, cs, _, ag = model(xb)
+        probs = torch.sigmoid(seg_logits).detach().float().cpu().numpy()
+        sn = sn.detach().float().cpu().numpy()
+        cs = cs.detach().float().cpu().numpy()
+        ag = ag.detach().float().cpu().numpy()
+        for (y0, x0), p, s_, c_, a_ in zip(batch_locs, probs[:, 0],
+                                            sn[:, 0], cs[:, 0], ag[:, 0]):
+            prob_acc[y0:y0+tile, x0:x0+tile] += p * hann
+            sin_acc[y0:y0+tile, x0:x0+tile]  += s_ * hann
+            cos_acc[y0:y0+tile, x0:x0+tile]  += c_ * hann
+            agg_acc[y0:y0+tile, x0:x0+tile]  += a_ * hann
+            weight_acc[y0:y0+tile, x0:x0+tile] += hann
+        batch_xs.clear(); batch_locs.clear()
+
+    for y0 in ys:
+        for x0 in xs:
+            diffim_tile = panel_image[y0:y0 + tile, x0:x0 + tile]
+            rl_tile = panel_real_labels[y0:y0 + tile, x0:x0 + tile]
+            x3 = build_3channel(diffim_tile, rl_tile, panel_sigma=sigma, clip=clip)
+            batch_xs.append(x3)
+            batch_locs.append((y0, x0))
+            if len(batch_xs) >= BATCH:
+                flush()
+    flush()
+
+    wmax = np.maximum(weight_acc, 1e-6)
+    return (
+        (prob_acc / wmax).astype(np.float16),
+        (sin_acc  / wmax).astype(np.float16),
+        (cos_acc  / wmax).astype(np.float16),
+        (agg_acc  / wmax).astype(np.float16),
+    )
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run-name", required=True)
