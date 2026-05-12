@@ -35,4 +35,16 @@ checkpoints/
 
 # Diffim experiment outputs (NPZ shards, logs, plots)
 experiments/diffim/**/runs/
+experiments/diffim_runs/
+experiments/diffim_pilot/
 *.npz
+
+# Diffim data and miscellaneous run-time artefacts
+DATA_DIFFIM/
+plots/
+folders.txt
+mrakovci
+
+# Notebook scratch
+Notebooks/Untitled*.ipynb
+Notebooks/Untitled*.ipynb.*
