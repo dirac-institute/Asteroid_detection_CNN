@@ -97,7 +97,7 @@ RF_FEATURES_V2: tuple[str, ...] = (
     "or_snr_L80", "or_flux_L80",
 )
 
-DEFAULT_THR = 0.04
+DEFAULT_THR = 0.10  # tuned with the v2-relabel RF (see train_rf_v2.py header)
 
 
 # ---------------------------------------------------------------------------
@@ -586,29 +586,125 @@ def apply_rf_v2(cand_df, rf, *, thr: float | None = None, score_col: str = "scor
     return out
 
 
+def label_candidates_by_injection_overlap(
+    cand_df,
+    catalog,
+    panel_probs,
+    *,
+    psf_width: int = 40,
+) -> np.ndarray:
+    """Return (N,) int8 label aligned with cand_df: 1 iff the candidate's
+    connected component overlaps any catalog injection trail.
+
+    This mirrors `objectwise_confusion`'s matching exactly, so labels and
+    eval metric agree — important when training a candidate-level ranker.
+
+    Args:
+        cand_df: candidate DataFrame from `compute_v2_features`.
+        catalog: pandas DataFrame with columns image_id, x, y, beta, trail_length.
+        panel_probs: (N, H, W) probability array OR {pid: (H, W) array}.
+        psf_width: PSF width passed into `draw_one_line` for the trail mask.
+    """
+    from ADCNN.utils.helpers import draw_one_line  # local import (cv2 optional)
+    from ADCNN.utils.angle_utils import deg2rad as _deg2rad
+
+    probs_dict = _to_panel_dict(panel_probs)
+    pid_sample = next(iter(probs_dict.values()))
+    H, W = pid_sample.shape
+    half_psf = psf_width // 2
+    structure = ndi.generate_binary_structure(2, 2)
+
+    # Build per-panel injection coverage mask
+    inj_mask_by_pid = {}
+    for pid, sub in catalog.groupby("image_id"):
+        pid = int(pid)
+        if pid not in probs_dict:
+            continue
+        canvas = np.zeros((H, W), dtype=np.uint8)
+        for _, row in sub.iterrows():
+            x = float(row["x"]); y = float(row["y"])
+            beta = float(row["beta"]); L = float(row["trail_length"])
+            pad = half_psf + 4
+            beta_rad = _deg2rad(beta)
+            dx = abs(math.cos(beta_rad)) * L
+            dy = abs(math.sin(beta_rad)) * L
+            x0 = int(max(0, math.floor(x - dx - pad)))
+            x1 = int(min(W, math.ceil(x + dx + pad)))
+            y0 = int(max(0, math.floor(y - dy - pad)))
+            y1 = int(min(H, math.ceil(y + dy + pad)))
+            if x1 <= x0 or y1 <= y0:
+                continue
+            roi_h = y1 - y0; roi_w = x1 - x0
+            try:
+                m = draw_one_line(
+                    np.zeros((roi_h, roi_w), dtype=np.uint8),
+                    (x - x0, y - y0), beta, L,
+                    true_value=1, line_thickness=half_psf,
+                )
+                canvas[y0:y1, x0:x1] |= m.astype(np.uint8)
+            except Exception:
+                cy = int(y); cx = int(x)
+                if 0 <= cy < H and 0 <= cx < W:
+                    canvas[cy, cx] = 1
+        inj_mask_by_pid[pid] = canvas.astype(bool)
+
+    labels = np.zeros(len(cand_df), dtype=np.int8)
+    for pid, idxs in cand_df.groupby("panel_id").indices.items():
+        pid = int(pid)
+        if pid not in probs_dict:
+            continue
+        inj_mask = inj_mask_by_pid.get(pid)
+        if inj_mask is None or not inj_mask.any():
+            continue
+        sub = cand_df.iloc[idxs]
+        panel = probs_dict[pid].astype(np.float32, copy=False)
+        eff = float(sub["effective_t_low"].iloc[0])
+        cc_labels, _ = ndi.label(panel > eff, structure=structure)
+        intersect = set(int(v) for v in np.unique(cc_labels[inj_mask]) if v > 0)
+        cids = sub["candidate_id"].astype(int).to_numpy()
+        for j, cid in zip(idxs, cids):
+            if int(cid) in intersect:
+                labels[j] = 1
+    return labels
+
+
 def train_rf_v2(
     cand_df,
     *,
+    labels: np.ndarray | None = None,
     n_estimators: int = 500, max_depth: int = 14, min_samples_leaf: int = 5,
     n_jobs: int = 32, random_state: int = 0,
     informational_fp_max_overlap: float = 0.5,
 ):
     """Train a class-balanced RandomForest on candidates with labels.
 
-    The training pool consists of:
-      * candidates with matched_injection_id >= 0   (positive)
-      * candidates with matched_injection_id <  0
-        AND frac_real_label_overlap < `informational_fp_max_overlap`  (negative)
+    `labels`: optional (N,) array of {0, 1} labels for each cand_df row. When
+        provided, used as-is and the training pool excludes negatives that
+        overlap LSST stack footprints (`frac_real_label_overlap >=
+        informational_fp_max_overlap`) — those are ignored at eval time and
+        shouldn't pollute the classifier.
+
+        Recommended source: `label_candidates_by_injection_overlap(...)`,
+        which matches `objectwise_confusion`'s definition. The shipped
+        `rf_postproc_v2.pkl` was trained this way.
+
+    When `labels` is None, falls back to the legacy iter02-style
+    `matched_injection_id >= 0` labels — DO NOT use for new training; it
+    suffers from label noise where co-detecting cands are mislabeled
+    negative.
+
     Returns the fitted classifier.
     """
     from sklearn.ensemble import RandomForestClassifier
-    label = (cand_df["matched_injection_id"] >= 0).astype(int)
-    fp_mask = ((cand_df["matched_injection_id"] < 0) &
-               (cand_df["frac_real_label_overlap"] < informational_fp_max_overlap))
-    pool_mask = (label == 1) | fp_mask
-    pool = cand_df[pool_mask]
-    X = pool[list(RF_FEATURES_V2)].fillna(0.0).to_numpy(dtype=np.float32)
-    y = label[pool_mask].to_numpy()
+    if labels is None:
+        labels = (cand_df["matched_injection_id"] >= 0).astype(int).to_numpy()
+    labels = np.asarray(labels, dtype=np.int8)
+    fp_mask = ((labels == 0) &
+               (cand_df["frac_real_label_overlap"].to_numpy()
+                < informational_fp_max_overlap))
+    pool_mask = (labels == 1) | fp_mask
+    X = cand_df.loc[pool_mask, list(RF_FEATURES_V2)].fillna(0.0).to_numpy(np.float32)
+    y = labels[pool_mask]
     clf = RandomForestClassifier(
         n_estimators=n_estimators, max_depth=max_depth,
         min_samples_leaf=min_samples_leaf, class_weight="balanced",
