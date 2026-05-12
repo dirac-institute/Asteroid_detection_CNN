@@ -649,23 +649,29 @@ def load_rf(rf_path: str | Path):
 
 def rf_score_sweep(cand_df, *, score_col: str = "score_rf",
                     thresholds=None) -> pd.DataFrame:
-    """For each threshold, count unique (panel_id, matched_injection_id)
-    matched TPs and informational-FP-filtered FPs."""
+    """For each threshold, report candidates kept and (when truth columns are
+    present) the unique (panel_id, matched_injection_id) TP / informational-FP
+    counts. During inference the truth columns are absent and the returned
+    table contains only `thr` and `n_candidates`.
+    """
     if thresholds is None:
         thresholds = np.concatenate([np.arange(0.02, 0.10, 0.005),
                                      np.arange(0.10, 0.50, 0.02)])
+    have_truth = ("matched_injection_id" in cand_df.columns
+                  and "frac_real_label_overlap" in cand_df.columns)
     rows = []
     for thr in thresholds:
         sub = cand_df[cand_df[score_col] >= thr]
-        if len(sub) == 0:
-            rows.append({"thr": float(thr), "n_candidates": 0, "TP": 0, "FP": 0})
-            continue
-        matched = sub[sub["matched_injection_id"] >= 0]
-        keys = set(zip(matched["panel_id"].astype(int).tolist(),
-                       matched["matched_injection_id"].astype(int).tolist()))
-        tp = len(keys)
-        unmatched = sub[sub["matched_injection_id"] < 0]
-        fp = int((unmatched["frac_real_label_overlap"] < 0.5).sum())
-        rows.append({"thr": float(thr), "n_candidates": int(len(sub)),
-                     "TP": tp, "FP": fp})
+        row = {"thr": float(thr), "n_candidates": int(len(sub))}
+        if have_truth:
+            if len(sub) == 0:
+                row["TP"] = 0; row["FP"] = 0
+            else:
+                matched = sub[sub["matched_injection_id"] >= 0]
+                keys = set(zip(matched["panel_id"].astype(int).tolist(),
+                               matched["matched_injection_id"].astype(int).tolist()))
+                unmatched = sub[sub["matched_injection_id"] < 0]
+                row["TP"] = len(keys)
+                row["FP"] = int((unmatched["frac_real_label_overlap"] < 0.5).sum())
+        rows.append(row)
     return pd.DataFrame(rows)
