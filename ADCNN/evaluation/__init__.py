@@ -23,6 +23,7 @@ from .geometry import (
 )
 from .detection import (
     objectwise_confusion,
+    combined_objectwise_confusion_separate,
     mark_detections,
     pixelwise_confusion,
 )
@@ -41,6 +42,7 @@ __all__ = [
     "create_line_mask",
     # Detection
     "objectwise_confusion",
+    "combined_objectwise_confusion_separate",
     "mark_detections",
     "pixelwise_confusion",
 ]

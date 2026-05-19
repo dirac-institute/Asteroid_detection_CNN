@@ -19,6 +19,14 @@ ObjID,speed_deg_day,...`).
 0. **Leakage check** (no `(visit,detector)` of the real catalog may appear in
    `DATA/`/`DATA_DIFFIM/` train+test) — see `Evaluation_Real.ipynb` §0.
 
+0b. **Pipeline self-check** (CPU, ~20 s, no DATA/GPU) — asserts the lazy
+   `ADCNN.inference` API resolves, `DEFAULT_THR==0.50`, the 72-feature RF
+   contract is in lock-step with the promoted RF, and the promoted scripted
+   v7 runs Stage-1→Stage-2 end to end. `SKIP` (exit 0) in a fresh checkout
+   with no ckpts; `PASS`/`FAIL` once artifacts exist. Re-run it right after
+   step 8 to confirm the promotion didn't break the contract.
+   `python ADCNN/scripts/test_real/validate_pipeline.py`
+
 1. **Scan Butler availability** → `manifest.csv`
    `sbatch ADCNN/scripts/test_real/slurm_build.sh scan  /path/real.csv`
 

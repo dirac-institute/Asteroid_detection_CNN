@@ -16,6 +16,7 @@ __version__ = "2.0.0"
 from .core import (
     UNetResSE,
     UNetResSEASPP,
+    UNetResSEOrientHough,  # v7 — architecture behind the promoted result
     Config,
 )
 
@@ -50,6 +51,7 @@ __all__ = [
     # Core
     "UNetResSE",
     "UNetResSEASPP",
+    "UNetResSEOrientHough",
     "Config",
     # Data
     "H5TiledDataset",
