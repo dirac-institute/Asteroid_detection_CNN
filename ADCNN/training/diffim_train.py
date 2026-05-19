@@ -189,6 +189,12 @@ def main():
     ap.add_argument("--ema-exclude", nargs="*", default=[],
                     help="Parameter names to exclude from EMA tracking (e.g. agg_alpha).")
     ap.add_argument("--device", default="cuda")
+    ap.add_argument("--init-from", default="",
+                    help="Trainable checkpoint (last.pt/best.pt) to "
+                         "initialize model + EMA weights from before "
+                         "fine-tuning. Fresh optimizer/scheduler — use a low "
+                         "--lr and few --epochs. Architecture flags (--widths "
+                         "--kernel-lens --n-angles) must match the checkpoint.")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -263,6 +269,13 @@ def main():
     log(f"model params: {n_params/1e6:.2f} M  device={device}")
     log(f"kernel_lens={args.kernel_lens} n_angles={args.n_angles}")
 
+    _init_ck = None
+    if args.init_from:
+        _init_ck = torch.load(args.init_from, map_location="cpu")
+        model.load_state_dict(_init_ck["model"])
+        log(f"[init-from] loaded model weights from {args.init_from} "
+            f"(orig epoch {_init_ck.get('epoch', '?')}) — fine-tune mode")
+
     optim = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
     steps_per_epoch = math.ceil(len(train_ds) / args.batch_size)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -270,6 +283,12 @@ def main():
     )
     scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda"))
     ema = EMAModel(model, decay=args.ema_decay, device="cpu")
+    if _init_ck is not None and "ema" in _init_ck:
+        try:
+            ema.load_state_dict(_init_ck["ema"])
+            log("[init-from] loaded EMA shadow from checkpoint")
+        except Exception as e:
+            log(f"[init-from] EMA load skipped ({e}); EMA seeded from weights")
     # Drop excluded names from EMA shadow + intercept update() to keep them out.
     if args.ema_exclude:
         for nm in args.ema_exclude:
