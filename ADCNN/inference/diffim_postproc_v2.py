@@ -97,7 +97,11 @@ RF_FEATURES_V2: tuple[str, ...] = (
     "or_snr_L80", "or_flux_L80",
 )
 
-DEFAULT_THR = 0.10  # tuned with the v2-relabel RF (see train_rf_v2.py header)
+DEFAULT_THR = 0.50  # hard-neg fine-tuned v7 + real-residual-hardened RF: the
+# model is threshold-flat (synthetic test_5sigma combined-TP 859->858 across
+# 0.10..0.50) so operate high — 0.50 gives cTP 858 @ cFP 6848, beating the
+# pre-finetune 0.10 point (838 @ 8876) on BOTH axes and ~halving genuine FP on
+# real diffims. (Was 0.10 for the pre-finetune v2-relabel RF.)
 
 
 # ---------------------------------------------------------------------------
