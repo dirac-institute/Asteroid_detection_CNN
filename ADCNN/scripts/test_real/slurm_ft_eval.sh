@@ -27,14 +27,24 @@ conda activate asteroid_cnn
 export PYTHONPATH="${REPO_DIR}:${PYTHONPATH:-}"
 test -f "${FT}" || { echo "MISSING ${FT}"; exit 2; }
 M=ADCNN.evaluation.fp_analysis
+# FT-model real-empty + synthetic feats (drive the FT side + the promoted RF).
 python -m $M dump-empty --data "${DATA}" --model "${FT}" \
   --rf "${CK}/rf_postproc_v2.pkl" --tag empft --results-dir "${RES}"
 python -m $M dump-syn --syn-dir "${SYN}" --model "${FT}" --tag ft \
   --results-dir "${RES}"
+# ORIGINAL-model synthetic feats — reproducible substitute for the legacy
+# (untracked) postproc_iter cache. At this step (pre-promote) ${CK}/v7_scripted.pt
+# is still the original shipped model. syn5_orig.pkl carries label_v2, so
+# fp-fix needs no --syn-pp-npy. Only the comparison columns use this; the
+# promoted rf_postproc_v2_ft.pkl is trained purely from syn5_ft + empft.
+python -m $M dump-syn --syn-dir "${SYN}" --model "${CK}/v7_scripted.pt" \
+  --tag orig --results-dir "${RES}"
 python -m $M fp-fix --results-dir "${RES}" \
-  --syn-cached-pkl "${PI}/test_5sigma_scored_v2.pkl" \
-  --syn-pp-npy "${PI}/test_5sigma_panel_probs_v2.npy" \
+  --syn-cached-pkl "${RES}/syn5_orig.pkl" \
   --syn-csv "${SYN}/test.csv" --old-rf "${CK}/rf_postproc_v2.pkl" \
   --ft-syn-pkl "${RES}/syn5_ft.pkl" \
   --ckpt-out "${CK}/rf_postproc_v2_ft.pkl"
+# Legacy form (pre-consolidation cache), kept for reference:
+#   --syn-cached-pkl "${PI}/test_5sigma_scored_v2.pkl" \
+#   --syn-pp-npy "${PI}/test_5sigma_panel_probs_v2.npy" \
 echo "FT-EVAL DONE $(date -Is)"

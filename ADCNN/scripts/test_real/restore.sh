@@ -12,4 +12,9 @@ for f in v7_scripted.pt rf_postproc_v2.pkl; do
     echo "WARN no backup ${CK}/${f}.preft.bak"
   fi
 done
-echo "RESTORED. Also set ADCNN.inference.diffim_postproc_v2.DEFAULT_THR back to 0.10 if reverting fully."
+echo "RESTORED the pre-finetune ckpts."
+echo "NOTE: ADCNN.inference.diffim_postproc_v2.DEFAULT_THR stays 0.50 (the"
+echo "  committed source value; validate_pipeline.py asserts 0.50). 0.10 was"
+echo "  only the operating point for the OLD pre-finetune RF — if you fully"
+echo "  revert to that RF and want the old curve, edit DEFAULT_THR to 0.10"
+echo "  yourself, but then the self-check (step 0b) will FAIL by design."

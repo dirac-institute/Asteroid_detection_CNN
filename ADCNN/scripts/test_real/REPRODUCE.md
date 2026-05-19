@@ -33,17 +33,26 @@ ObjID,speed_deg_day,...`).
 2. **Build the real diffims** → `DATA_DIFFIM/test_real/{test.h5,test.csv,panels.csv}`
    `sbatch ADCNN/scripts/test_real/slurm_build.sh build /path/real.csv`
 
-3. **Score v7+V2 vs the stack** (20-shard GPU array, auto-merges)
+3. **Score v7+V2 vs the stack** (20-shard GPU array)
    `sbatch ADCNN/scripts/test_real/slurm_real_eval.sh`
-   → `experiments/diffim_runs/test_real/results/summary.txt`
+   The array writes per-shard parts; it does **not** auto-merge (auto-merge
+   only happens for `nshards==1`). After the array finishes, merge once:
+   `python -m ADCNN.evaluation.real_eval merge --data DATA_DIFFIM/test_real`
+   → `experiments/diffim_runs/test_real/results/{per_sighting.csv,summary.txt}`
 
-4. **FP analysis** (genuine-vs-stack-overlap, SNR-gain, threshold sweep)
+4. **FP analysis** (genuine-vs-stack-overlap, SNR-gain, threshold sweep).
+   Needs step 3's merged `results/per_sighting.csv`. The array is sharded;
+   after it finishes run the curve once (shard 0 prints the exact command):
    `sbatch ADCNN/scripts/test_real/slurm_fp_pipeline.sh`
+   `python -m ADCNN.evaluation.fp_analysis sweep-curve --data DATA_DIFFIM/test_real --results-dir experiments/diffim_runs/test_real/results`
+   This also produces the ORIGINAL-model `emp_*.csv` empties step 6 needs.
 
 5. **Fine-tune v7** (precision-tilt hard-neg, resumes shipped weights)
    `sbatch ADCNN/scripts/test_real/slurm_finetune.sh`
 
-6. **FT eval + RF retrain** (dump-empty/-syn with FT model → `fp-fix`)
+6. **FT eval + RF retrain** (dump-empty/-syn with FT *and* original model →
+   `fp-fix`). Self-contained: it now dumps `syn5_orig.pkl` with the original
+   model (no legacy `postproc_iter` cache), and reuses step 4's `emp_*.csv`.
    `sbatch ADCNN/scripts/test_real/slurm_ft_eval.sh`
 
 7. **Synthetic bar gate** (promote only if it holds ≈840 cTP / ≤~10k cFP)

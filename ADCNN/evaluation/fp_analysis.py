@@ -148,8 +148,13 @@ def dump_syn(syn_dir, model_path, *, tag, results_dir):
                     "frac_real_label_overlap", "label_v2"]
     _dedup(cand[[c for c in keep if c in cand.columns]]).to_pickle(
         res / f"syn5_{tag}.pkl")
+    # Also persist the panel-probs stack so fp-fix's legacy --syn-pp-npy
+    # path is reproducible from a tracked step (the pkl already carries
+    # label_v2, so fp-fix does not actually need this; kept for parity).
+    np.save(res / f"syn5_{tag}_pp.npy",
+            np.stack([pp[i] for i in range(N)]).astype(np.float32))
     print(f"[dump-syn] pos={int(lab.sum())} neg={int((lab==0).sum())} -> "
-          f"{res}/syn5_{tag}.pkl", flush=True)
+          f"{res}/syn5_{tag}.pkl (+ syn5_{tag}_pp.npy)", flush=True)
 
 
 # ======================================================================
@@ -348,10 +353,22 @@ def fp_fix(results_dir, syn_cached_pkl, syn_pp_npy, syn_csv, *,
            ckpt_out=None):
     """Fact-correct FP and retrain the RF with real empty-CCD hard negatives.
 
-    ``old_*`` = original model artifacts (cached synthetic scored cand pkl +
-    panel_probs npy + test_5sigma csv + shipped rf). If ``ft_syn_pkl`` and
-    fine-tuned empty parts (``{ft_tag}_*.csv``) are present, also produces the
-    ORIGINAL-vs-FINE-TUNED table and a retrained ``rf_postproc_v2_ft.pkl``.
+    ``old_*`` = original-model synthetic artifacts. Two ways to supply them:
+
+    * **reproducible (preferred):** ``--syn-cached-pkl`` points at a
+      ``dump-syn``-produced ``syn5_<tag>.pkl`` (ORIGINAL model). It already
+      carries an objectwise ``label_v2`` column (computed by the *same*
+      ``label_candidates_by_injection_overlap`` definition fp-fix would use),
+      so ``--syn-pp-npy`` is not needed.
+    * **legacy:** a cached scored-cand pkl *without* ``label_v2`` — then
+      ``--syn-pp-npy`` (original panel_probs) is required to recompute the
+      labels. Numerically identical to the first path.
+
+    If ``ft_syn_pkl`` and fine-tuned empty parts (``{ft_tag}_*.csv``) are
+    present, also produces the ORIGINAL-vs-FINE-TUNED table and a retrained
+    ``rf_postproc_v2_ft.pkl``. The retrained (promoted) RF is built solely
+    from ``ft_syn_pkl`` + the ``{ft_tag}_*.csv`` empties — it does NOT depend
+    on the original-model artifacts, which only feed the comparison columns.
     """
     import joblib
     res = Path(results_dir)
@@ -365,10 +382,24 @@ def fp_fix(results_dir, syn_cached_pkl, syn_pp_npy, syn_csv, *,
     emp_o_ev = emp_o[emp_o.image_id.isin(ev_o)]
     old_rf = joblib.load(old_rf_path)
     syn_o = _dedup(pd.read_pickle(syn_cached_pkl))
-    pp_o = np.load(syn_pp_npy)
     csv5 = pd.read_csv(syn_csv)
-    lab_o = np.asarray(label_candidates_by_injection_overlap(
-        syn_o, csv5, pp_o), np.int8)
+    if "label_v2" in syn_o.columns:
+        # dump-syn already computed objectwise labels with the ORIGINAL model
+        # (identical label_candidates_by_injection_overlap definition) — fully
+        # reproducible, no legacy panel_probs npy needed.
+        lab_o = syn_o["label_v2"].to_numpy(np.int8)
+        P(f"[fp-fix] using label_v2 from {Path(syn_cached_pkl).name} "
+          f"(reproducible path)")
+    else:
+        if not syn_pp_npy or not Path(syn_pp_npy).exists():
+            raise SystemExit(
+                "fp-fix: --syn-cached-pkl has no 'label_v2' column; the "
+                "legacy path needs an existing --syn-pp-npy. Prefer pointing "
+                "--syn-cached-pkl at a dump-syn syn5_<tag>.pkl instead.")
+        pp_o = np.load(syn_pp_npy)
+        lab_o = np.asarray(label_candidates_by_injection_overlap(
+            syn_o, csv5, pp_o), np.int8)
+        P(f"[fp-fix] recomputed labels from legacy {Path(syn_pp_npy).name}")
     pool_o = (lab_o == 1) | ((lab_o == 0) & (
         syn_o["frac_real_label_overlap"].to_numpy() < 0.5))
     syn_o_p, lab_o_p = syn_o[pool_o], lab_o[pool_o]
@@ -523,8 +554,12 @@ def main():
 
     ff = sub.add_parser("fp-fix")
     ff.add_argument("--results-dir", required=True)
-    ff.add_argument("--syn-cached-pkl", required=True)
-    ff.add_argument("--syn-pp-npy", required=True)
+    ff.add_argument("--syn-cached-pkl", required=True,
+                    help="ORIGINAL-model synthetic cand pkl; a dump-syn "
+                         "syn5_<tag>.pkl (has label_v2) is reproducible")
+    ff.add_argument("--syn-pp-npy", default=None,
+                    help="legacy: original panel_probs npy, only needed when "
+                         "--syn-cached-pkl lacks a label_v2 column")
     ff.add_argument("--syn-csv", required=True)
     ff.add_argument("--old-rf", required=True)
     ff.add_argument("--ft-syn-pkl", default=None)
