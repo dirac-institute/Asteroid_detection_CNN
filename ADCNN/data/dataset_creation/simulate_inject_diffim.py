@@ -574,50 +574,60 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             forbidden_mask=forbidden,
         )
 
-        # 6. Inject into a CLONE so the clean PVI stays around for later
-        # (and so the same `sources` give the same kernel-candidate set on
-        # both subtractions).
-        pvi_injected = inject(pvi.clone(), injection_catalog)
+        # n_inject==0: real-empty-background mode. Skip the inject/re-subtract/
+        # re-detect path (ExposureInjectTask rejects empty catalogs); the
+        # "injected" diffim IS the clean diffim, truth mask is all zeros, and
+        # the panel still carries real_labels from pre-injection residuals.
+        if n_inject == 0:
+            diffim_inj = diffim_clean
+            mask = np.zeros((dimensions.y, dimensions.x), dtype=np.uint16)
+            real_labels = footprints_to_label_mask(pre_injection_Src, dimensions, dtype=np.uint16)
+            matched_fp_mask = None
+        else:
+            # 6. Inject into a CLONE so the clean PVI stays around for later
+            # (and so the same `sources` give the same kernel-candidate set on
+            # both subtractions).
+            pvi_injected = inject(pvi.clone(), injection_catalog)
 
-        # 7. Injected diffim subtraction with the SAME sources.
-        sub_inj = run_subtract(template=template, science=pvi_injected, sources=sources)
-        diffim_inj = sub_inj.difference
+            # 7. Injected diffim subtraction with the SAME sources.
+            sub_inj = run_subtract(template=template, science=pvi_injected, sources=sources)
+            diffim_inj = sub_inj.difference
 
-        # 8. Post-injection sources on the injected diffim.
-        det_inj = run_detect_diffim(
-            science=pvi_injected,
-            matchedTemplate=sub_inj.matchedTemplate,
-            difference=diffim_inj,
-            threshold=detection_threshold,
-            measueTrails=measueTrails,
-        )
-        post_injection_Src = det_inj.diaSources
+            # 8. Post-injection sources on the injected diffim.
+            det_inj = run_detect_diffim(
+                science=pvi_injected,
+                matchedTemplate=sub_inj.matchedTemplate,
+                difference=diffim_inj,
+                threshold=detection_threshold,
+                measueTrails=measueTrails,
+            )
+            post_injection_Src = det_inj.diaSources
 
-        # 9. Drawn-line truth (identical to direct-image flow).
-        mask = np.zeros((dimensions.y, dimensions.x), dtype=np.uint16)
-        for i, row in enumerate(injection_catalog):
-            psf_width = pvi_injected.psf.getLocalKernel(Point2D(row["x"], row["y"])).getWidth()
-            mask = draw_one_line(
-                mask, [row["x"], row["y"]], row["beta"], row["trail_length"],
-                true_value=i + 1, line_thickness=int(psf_width / 2),
+            # 9. Drawn-line truth (identical to direct-image flow).
+            mask = np.zeros((dimensions.y, dimensions.x), dtype=np.uint16)
+            for i, row in enumerate(injection_catalog):
+                psf_width = pvi_injected.psf.getLocalKernel(Point2D(row["x"], row["y"])).getWidth()
+                mask = draw_one_line(
+                    mask, [row["x"], row["y"]], row["beta"], row["trail_length"],
+                    true_value=i + 1, line_thickness=int(psf_width / 2),
+                )
+
+            # 10. Crossmatch pre vs post; mark recovered injections by footprint
+            # overlap with drawn truth.
+            injection_catalog, matched_fp_mask = stack_hits_by_footprints(
+                post_src=crossmatch_catalogs(pre_injection_Src, post_injection_Src),
+                calexp_pre=pvi,
+                calexp_post=pvi_injected,
+                dimensions=dimensions,
+                truth_id_mask=mask,
+                injection_catalog=injection_catalog,
+                overlap_minpix=1,
+                overlap_frac=0.0,
+                return_matched_fp_masks=debug,
             )
 
-        # 10. Crossmatch pre vs post; mark recovered injections by footprint
-        # overlap with drawn truth.
-        injection_catalog, matched_fp_mask = stack_hits_by_footprints(
-            post_src=crossmatch_catalogs(pre_injection_Src, post_injection_Src),
-            calexp_pre=pvi,
-            calexp_post=pvi_injected,
-            dimensions=dimensions,
-            truth_id_mask=mask,
-            injection_catalog=injection_catalog,
-            overlap_minpix=1,
-            overlap_frac=0.0,
-            return_matched_fp_masks=debug,
-        )
-
-        # real_labels = footprints of pre-injection diffim residuals.
-        real_labels = footprints_to_label_mask(pre_injection_Src, dimensions, dtype=np.uint16)
+            # real_labels = footprints of pre-injection diffim residuals.
+            real_labels = footprints_to_label_mask(pre_injection_Src, dimensions, dtype=np.uint16)
 
         # 11. Image written to HDF5 = the injected DIFFIM (1-channel float32).
         if not debug:
