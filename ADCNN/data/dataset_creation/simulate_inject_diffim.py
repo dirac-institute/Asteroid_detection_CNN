@@ -141,7 +141,15 @@ counter_lock = Lock()
 def inject(pvi_clone, injection_catalog):
     """ExposureInjectTask onto a CLONE of the PVI. Returns the injected
     Exposure. The input catalog is mutated by the task — snapshot any cols
-    you need before calling."""
+    you need before calling.
+
+    If the env var ADCNN_REALISTIC_TRAIL=1 is set (via --realistic-trail), the
+    stock uniform-Box trail renderer is replaced once per worker process with the
+    light-curve / tapered / curved renderer in ADCNN.data.dataset_creation.
+    realistic_trail (physical priors only; leakage-free)."""
+    if os.environ.get("ADCNN_REALISTIC_TRAIL") == "1":
+        from ADCNN.data.dataset_creation import realistic_trail
+        realistic_trail.install(verbose=False)
     inject_task = ExposureInjectTask()
     inject_res = inject_task.run(
         [injection_catalog],
@@ -1057,7 +1065,15 @@ def main():
     ap.add_argument("--seed", type=int, default=123)
     ap.add_argument("--chunks", type=int, default=None)
     ap.add_argument("--test-only", action="store_true", default=False)
+    ap.add_argument("--realistic-trail", action="store_true", default=False,
+                    help="Render trails with the realistic (light-curve/tapered/"
+                         "curved) renderer instead of the uniform galsim.Box. "
+                         "Leakage-free: physical priors only.")
     args = ap.parse_args()
+
+    if args.realistic_trail:
+        os.environ["ADCNN_REALISTIC_TRAIL"] = "1"
+        print("[main] realistic trail renderer ENABLED", flush=True)
 
     ensure_dir(args.save_path)
     logger = logging.getLogger("lsst")
