@@ -9,7 +9,8 @@
 #SBATCH --mem=96G
 #SBATCH --time=04:00:00
 #SBATCH --output=/sdf/home/m/mrakovci/logs/ADCNN_v7_realistic_%j.out
-set -euo pipefail
+set -eo pipefail
+export RUBIN_EUPS_PATH="${RUBIN_EUPS_PATH:-}"
 REPO="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"
 cd "$REPO"; export PYTHONPATH="$REPO:${PYTHONPATH:-}"
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
