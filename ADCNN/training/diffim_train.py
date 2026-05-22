@@ -188,6 +188,10 @@ def main():
                     help="Panels cached in the orientation-map cache (per worker).")
     ap.add_argument("--ema-exclude", nargs="*", default=[],
                     help="Parameter names to exclude from EMA tracking (e.g. agg_alpha).")
+    ap.add_argument("--data-sources", nargs="*", default=None,
+                    help="Train on multiple full-panel h5 datasets (no merge) via "
+                         "DiffimConcatDataset. Each arg is 'h5path:csvpath'. Val uses "
+                         "--data-h5/--data-csv (realistic val panels). For 'much more data'.")
     ap.add_argument("--stream-buffer", default="",
                     help="Train from a streaming rolling buffer (stream_producer.py) of "
                          "full panels -- lossless, same statistics, unbounded data. "
@@ -238,7 +242,26 @@ def main():
         json.dump(vars(args), f, indent=2)
     log(f"v5 config: {json.dumps(vars(args), indent=2)}")
 
-    if args.stream_buffer:
+    if args.data_sources:
+        # train on MULTIPLE full-panel h5 datasets (no merge) via DiffimConcatDataset.
+        # --data-sources "h5a:csva" "h5b:csvb" ... ; val from --data-h5/--data-csv val panels.
+        from ADCNN.data.diffim_dataset import DiffimConcatDataset
+        srcs = [tuple(s.split(":")) for s in args.data_sources]
+        log(f"MULTI-SOURCE training on {len(srcs)} h5 datasets: {[s[0].split('/')[-2] for s in srcs]}")
+        train_ds = DiffimConcatDataset(
+            srcs, tile=args.tile,
+            n_pos_anchors_per_epoch=args.n_pos_anchors_per_epoch,
+            n_neg_anchors_per_epoch=args.n_neg_anchors_per_epoch,
+            stk_balance=args.stk_balance, anchor_jitter=args.anchor_jitter,
+            seed=args.seed, augment=args.augment, intensity_aug=bool(args.intensity_aug))
+        import json as _json
+        vp = sorted(_json.loads((REPO_ROOT / "experiments/diffim_runs/pilot_v7_realistic/split.json").read_text())["val_panels"])
+        val_ds = DiffimRandomCropDataset3ch(
+            args.data_h5, pd.read_csv(args.data_csv), panel_ids=vp, tile=args.tile,
+            n_pos_anchors_per_epoch=500, n_neg_anchors_per_epoch=200,
+            stk_balance=args.stk_balance, anchor_jitter=args.anchor_jitter,
+            orient_cache_size=args.orient_cache_size, seed=args.seed + 1)
+    elif args.stream_buffer:
         # LOSSLESS streaming: full panels from a rolling buffer (stream_producer.py),
         # identical anchor statistics. Producer must be running alongside.
         from ADCNN.data.diffim_dataset import DiffimStreamDataset

@@ -514,3 +514,47 @@ class DiffimStreamDataset(Dataset):
         return (torch.from_numpy(x_chans), torch.from_numpy(m[None].astype(np.float32)),
                 torch.from_numpy(ig[None]), torch.from_numpy(y_sin[None]),
                 torch.from_numpy(y_cos[None]), {"panel": nm})
+
+
+class DiffimConcatDataset(Dataset):
+    """Train on MULTIPLE full-panel h5 datasets at once WITHOUT merging files (no
+    storage for a merged copy). Composes one validated DiffimRandomCropDataset3ch per
+    (h5,csv) source -- each keeps its own panels/anchors/sigma/orient logic UNCHANGED
+    (statistics identical) -- and concatenates them. Each source contributes
+    n_pos/n_sources + n_neg/n_sources anchors per epoch so the combined epoch matches
+    the requested totals. This is how we use the existing realistic h5s + new ones
+    together for 'much more data', losslessly.
+    """
+    def __init__(self, sources, *, tile=128, clip=5.0,
+                 n_pos_anchors_per_epoch=3000, n_neg_anchors_per_epoch=900,
+                 stk_balance=0.6, anchor_jitter=48, seed=0, augment=False,
+                 intensity_aug=False):
+        k = len(sources)
+        self.subs = []
+        for i, (h5, csv) in enumerate(sources):
+            df = pd.read_csv(csv) if isinstance(csv, str) else csv
+            npan = int(df["image_id"].nunique())
+            sub = DiffimRandomCropDataset3ch(
+                h5, df, panel_ids=sorted(df["image_id"].unique()), tile=tile, clip=clip,
+                n_pos_anchors_per_epoch=max(1, n_pos_anchors_per_epoch // k),
+                n_neg_anchors_per_epoch=max(1, n_neg_anchors_per_epoch // k),
+                stk_balance=stk_balance, anchor_jitter=anchor_jitter,
+                seed=seed + 13 * i, augment=augment)
+            sub.intensity_aug = bool(intensity_aug)
+            self.subs.append(sub)
+        self._reindex()
+
+    def _reindex(self):
+        self._cum = np.cumsum([0] + [len(s) for s in self.subs])
+
+    def set_epoch(self, e):
+        for s in self.subs:
+            s.set_epoch(e)
+        self._reindex()
+
+    def __len__(self):
+        return int(self._cum[-1])
+
+    def __getitem__(self, i):
+        src = int(np.searchsorted(self._cum, i, side="right") - 1)
+        return self.subs[src][i - self._cum[src]]
