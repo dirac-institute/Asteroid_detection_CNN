@@ -529,15 +529,19 @@ class DiffimConcatDataset(Dataset):
                  n_pos_anchors_per_epoch=3000, n_neg_anchors_per_epoch=900,
                  stk_balance=0.6, anchor_jitter=48, seed=0, augment=False,
                  intensity_aug=False):
-        k = len(sources)
+        # Weight each source PROPORTIONAL to its panel count so every panel is sampled
+        # at the same rate -> identical to one combined h5. (Equal-per-source would
+        # over-sample a smaller shard's panels, e.g. a 685-panel shard vs 1100.)
+        dfs = [(h5, pd.read_csv(csv) if isinstance(csv, str) else csv) for h5, csv in sources]
+        npans = [int(df["image_id"].nunique()) for _, df in dfs]
+        ntot = max(1, sum(npans))
         self.subs = []
-        for i, (h5, csv) in enumerate(sources):
-            df = pd.read_csv(csv) if isinstance(csv, str) else csv
-            npan = int(df["image_id"].nunique())
+        for i, ((h5, df), npan) in enumerate(zip(dfs, npans)):
+            frac = npan / ntot
             sub = DiffimRandomCropDataset3ch(
                 h5, df, panel_ids=sorted(df["image_id"].unique()), tile=tile, clip=clip,
-                n_pos_anchors_per_epoch=max(1, n_pos_anchors_per_epoch // k),
-                n_neg_anchors_per_epoch=max(1, n_neg_anchors_per_epoch // k),
+                n_pos_anchors_per_epoch=max(1, round(n_pos_anchors_per_epoch * frac)),
+                n_neg_anchors_per_epoch=max(1, round(n_neg_anchors_per_epoch * frac)),
                 stk_balance=stk_balance, anchor_jitter=anchor_jitter,
                 seed=seed + 13 * i, augment=augment)
             sub.intensity_aug = bool(intensity_aug)
