@@ -25,10 +25,10 @@ srun python3 -u simulate_inject_diffim.py \
   --stage3-collection "LSSTCam/runs/DRP/DP2/v30_0_6_rc1/DM-53881/stage3" \
   --skymap lsst_cells_v2 --save-path "$OUT" \
   --parallel "${SLURM_CPUS_PER_TASK:-48}" \
-  --train-test-split 0.99 --random-subset 1150 \
+  --train-test-split 0.99 --random-subset 1100 \
   --trail-length-min 6 --trail-length-max 60 --mag-min 2 --mag-max 8 --mag-mode snr \
   --beta-min 0 --beta-max 180 --number 20 --stack-detection-threshold 5.0 \
-  --chunks 128 --seed $SEED --realistic-trail \
+  --chunks 128 --seed $SEED --realistic-trail --skip-prevalidation \
   --exclude-pairs-csv "$REPO/DATA_DIFFIM/test_5sigma/test.csv" "$REPO/DATA_DIFFIM/test_real/test.csv" \
   --where "instrument='LSSTCam' AND day_obs>=20250801 AND day_obs<=20250921 AND band in ('u','g','r','i','z','y')"
 echo "GEN SHARD $SH DONE $(date -Is)"

@@ -910,7 +910,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                            train_test_split=0, seed=123, chunks=None, test_only=False,
                            mag_mode="psf_mag", psf_template="image",
                            stack_detection_threshold=5.0, measueTrails=False,
-                           exclude_keys=None):
+                           exclude_keys=None, check_refs=True):
     butler = Butler(repo, collections=coll)
     h5train_path = os.path.join(save_path, "train.h5")
     h5test_path = os.path.join(save_path, "test.h5")
@@ -927,6 +927,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
         pool_size=5000,
         max_checks=200000,
         exclude_keys=exclude_keys,
+        check_refs=check_refs,
         verbose=True,
     )
     print("Selected datasets:", len(refs))
@@ -1079,6 +1080,12 @@ def main():
     ap.add_argument("--seed", type=int, default=123)
     ap.add_argument("--chunks", type=int, default=None)
     ap.add_argument("--test-only", action="store_true", default=False)
+    ap.add_argument("--skip-prevalidation", action="store_true", default=False,
+                    help="Skip the slow per-pair template/source pre-validation. "
+                         "Generation skips failed pairs anyway (writes no CSV rows), and "
+                         "CSV-driven training excludes the resulting empty h5 slots -- so "
+                         "this is empty-tensor-safe and much faster to start. Oversample "
+                         "--random-subset slightly to offset ~5-15%% skipped pairs.")
     ap.add_argument("--exclude-pairs-csv", nargs="*", default=None,
                     help="CSV file(s) with visit,detector columns whose pairs must "
                          "NOT be selected for injection (leakage guard against test "
@@ -1132,6 +1139,7 @@ def main():
         stack_detection_threshold=args.stack_detection_threshold,
         measueTrails=args.measueTrails,
         exclude_keys=exclude_keys,
+        check_refs=not args.skip_prevalidation,
     )
 
 
