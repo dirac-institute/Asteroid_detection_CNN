@@ -669,7 +669,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
 def worker(args):
     (counters, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length,
      magnitude, beta, source_type, global_seed, mag_mode, psf_template,
-     detection_threshold, measueTrails, skymap, stage3_collection) = args
+     detection_threshold, measueTrails, skymap, stage3_collection, target) = args
     seed = (int(global_seed) * 1_000_003 + int(dataId["visit"]) * 1_003 + int(dataId["detector"])) & 0xFFFFFFFF
     try:
         res = one_detector_injection(
@@ -685,6 +685,8 @@ def worker(args):
         # panels land contiguously (0..n-1) with NO gaps even when some refs fail.
         # The h5 is truncated to the final count after all tasks (run_parallel_injection).
         with lock:
+            if target and int(counters[h5path]) >= target:
+                return ("full", -1)   # target reached; drop this (in-flight) panel
             idx = int(counters[h5path])
             counters[h5path] = idx + 1
             with h5py.File(h5path, "a") as f:
@@ -915,7 +917,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                            train_test_split=0, seed=123, chunks=None, test_only=False,
                            mag_mode="psf_mag", psf_template="image",
                            stack_detection_threshold=5.0, measueTrails=False,
-                           exclude_keys=None, check_refs=True):
+                           exclude_keys=None, check_refs=True, target_train_panels=0):
     butler = Butler(repo, collections=coll)
     h5train_path = os.path.join(save_path, "train.h5")
     h5test_path = os.path.join(save_path, "test.h5")
@@ -976,13 +978,13 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
             csvpath = os.path.join(save_path, "test.csv")
             tasks.append([counters, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
                           "preliminary_visit_image", seed, mag_mode, psf_template, stack_detection_threshold, measueTrails,
-                          skymap, stage3_collection])
+                          skymap, stage3_collection, 0])
         elif not test_only:
             h5path = h5train_path
             csvpath = os.path.join(save_path, "train.csv")
             tasks.append([counters, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
                           "preliminary_visit_image", seed, mag_mode, psf_template, stack_detection_threshold, measueTrails,
-                          skymap, stage3_collection])
+                          skymap, stage3_collection, int(target_train_panels)])
     if parallel > 1:
         completed = 0
         total_tasks = len(tasks)
@@ -1003,11 +1005,21 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                     continue
 
                 if out[0] == "ok":
-                    print(f"[{completed}/{total_tasks}] done", flush=True)
+                    print(f"[{completed}/{total_tasks}] done (train={counters[h5train_path]})", flush=True)
+                elif out[0] == "full":
+                    pass
                 else:
                     _, idx, dataId, tb = out
                     print(f"[{completed}/{total_tasks}] ERROR: idx={idx} dataId={dataId}", flush=True)
                     print(tb, flush=True)
+
+                # stop early once the train target is reached: cancel pending tasks so
+                # we don't waste subtractions past the requested size.
+                if target_train_panels and int(counters[h5train_path]) >= int(target_train_panels):
+                    print(f"[target] reached {counters[h5train_path]} train panels; cancelling rest", flush=True)
+                    for f2 in futs:
+                        f2.cancel()
+                    break
     else:
         for task in tasks:
             worker(task)
@@ -1077,6 +1089,10 @@ def main():
     ap.add_argument("--seed", type=int, default=123)
     ap.add_argument("--chunks", type=int, default=None)
     ap.add_argument("--test-only", action="store_true", default=False)
+    ap.add_argument("--target-train-panels", type=int, default=0,
+                    help="Stop once this many SUCCESSFUL train panels are written (0 = "
+                         "no cap). Combine with an oversampled --random-subset to hit an "
+                         "exact dataset size despite skipped refs, without overshooting disk.")
     ap.add_argument("--skip-prevalidation", action="store_true", default=False,
                     help="Skip the slow per-pair template/source pre-validation. "
                          "Generation skips failed pairs anyway (writes no CSV rows), and "
@@ -1137,6 +1153,7 @@ def main():
         measueTrails=args.measueTrails,
         exclude_keys=exclude_keys,
         check_refs=not args.skip_prevalidation,
+        target_train_panels=args.target_train_panels,
     )
 
 
