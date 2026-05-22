@@ -111,6 +111,7 @@ class DiffimRandomCropDataset3ch(Dataset):
         anchor_jitter: int = 48,
         orient_cache_size: int = 24,
         seed: int = 0,
+        augment: bool = False,
     ):
         self.h5_path = str(h5_path)
         self.tile = int(tile)
@@ -121,6 +122,10 @@ class DiffimRandomCropDataset3ch(Dataset):
         self.stk_balance = float(stk_balance)
         self.anchor_jitter = int(anchor_jitter)
         self.seed = int(seed)
+        # D4 dihedral augmentation (train only): trails have no preferred
+        # orientation, so flips / 90deg rotations are label-preserving once the
+        # sin(2b)/cos(2b) orientation maps are transformed accordingly.
+        self.augment = bool(augment)
         self._epoch = 0
 
         with h5py.File(self.h5_path, "r") as f:
@@ -248,6 +253,26 @@ class DiffimRandomCropDataset3ch(Dataset):
         sin_map, cos_map = self._orient_of(pid)
         y_sin = sin_map[y0:y1, x0:x1].copy()
         y_cos = cos_map[y0:y1, x0:x1].copy()
+
+        if self.augment:
+            # one of the 8 D4 symmetries = rot90^k then optional left-right flip.
+            # Spatial op applied identically to every map; orientation (sin2b,cos2b)
+            # additionally sign-transforms: rot90^k -> *(-1)^k (both); flip_lr -> sin*=-1.
+            k = int(rng.integers(0, 4)); flip = bool(rng.integers(0, 2))
+
+            def _d4(a):
+                a = np.rot90(a, k)
+                if flip:
+                    a = a[:, ::-1]
+                return np.ascontiguousarray(a)
+
+            diffim_tile = _d4(diffim_tile)
+            y_seg = _d4(y_seg)
+            rl_tile = _d4(rl_tile)
+            sgn = (-1.0) ** k
+            y_sin = _d4(y_sin) * sgn * (-1.0 if flip else 1.0)
+            y_cos = _d4(y_cos) * sgn
+            ig = (rl_tile > 0).astype(np.float32)
 
         sig = self._sigma_of(pid)
         x_chans = build_3channel(diffim_tile, rl_tile, panel_sigma=sig, clip=self.clip)

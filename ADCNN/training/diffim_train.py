@@ -188,6 +188,11 @@ def main():
                     help="Panels cached in the orientation-map cache (per worker).")
     ap.add_argument("--ema-exclude", nargs="*", default=[],
                     help="Parameter names to exclude from EMA tracking (e.g. agg_alpha).")
+    ap.add_argument("--augment", action="store_true",
+                    help="Enable D4 dihedral augmentation (flips + 90deg rotations "
+                         "with sin2b/cos2b orientation-label transform) on the TRAIN "
+                         "set. Trails are orientation-agnostic so this is label-"
+                         "preserving; counters the no-augmentation overfitting.")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--init-from", default="",
                     help="Trainable checkpoint (last.pt/best.pt) to "
@@ -235,6 +240,7 @@ def main():
         anchor_jitter=args.anchor_jitter,
         orient_cache_size=args.orient_cache_size,
         seed=args.seed,
+        augment=args.augment,
     )
     val_ds = DiffimRandomCropDataset3ch(
         args.data_h5, csv_df, panel_ids=val_panels,
