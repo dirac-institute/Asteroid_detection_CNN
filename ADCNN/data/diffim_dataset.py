@@ -13,7 +13,7 @@ Orientation supervision and ignore mask: identical to v4.
 """
 from __future__ import annotations
 
-import math
+import math, time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Iterable
@@ -394,3 +394,123 @@ class DiffimTileDataset(Dataset):
         return (torch.from_numpy(x_chans), torch.from_numpy(m[None].astype(np.float32)),
                 torch.from_numpy(ig[None]), torch.from_numpy(y_sin[None]),
                 torch.from_numpy(y_cos[None]), meta)
+
+
+class DiffimStreamDataset(Dataset):
+    """LOSSLESS streaming: train from FULL injected panels supplied by a rolling
+    buffer (stream_producer.py) instead of a fixed train.h5. Per-panel processing is
+    IDENTICAL to DiffimRandomCropDataset3ch (128px anchor crops, jitter, build_3channel,
+    sin2b/cos2b orient) so the statistics are unchanged -- only the SET of panels is an
+    unbounded stream. set_epoch() re-reads the manifest, so fresh panels enter as the
+    producer makes them and the model effectively sees far more data than fits on disk.
+    Each panel file: image/mask/real_labels + inj_{x,y,beta,trail_length}.
+    """
+    def __init__(self, buffer_dir: str, *, tile: int = 128, clip: float = 5.0,
+                 stats_crop: int = 1024, n_pos_per_epoch: int = 3000,
+                 n_neg_per_epoch: int = 900, anchor_jitter: int = 48,
+                 seed: int = 0, augment: bool = False, min_panels: int = 16):
+        import json
+        self.buffer = Path(buffer_dir); self.tile = int(tile); self.clip = float(clip)
+        self.stats_crop = int(stats_crop); self.n_pos = int(n_pos_per_epoch)
+        self.n_neg = int(n_neg_per_epoch); self.jit = int(anchor_jitter)
+        self.seed = int(seed); self.augment = bool(augment); self.intensity_aug = False
+        self.min_panels = int(min_panels); self._epoch = 0
+        self._open: OrderedDict = OrderedDict(); self._sig: dict = {}
+        # wait until the producer has filled enough of the buffer
+        for _ in range(600):
+            if len(self._ready()) >= self.min_panels:
+                break
+            time.sleep(2)
+        self.set_epoch(0)
+
+    def _ready(self):
+        import json
+        mp = self.buffer / "manifest.json"
+        if not mp.exists():
+            return []
+        try:
+            return json.loads(mp.read_text()).get("panels", [])
+        except Exception:
+            return []
+
+    def _h5(self, name):
+        if name not in self._open:
+            if len(self._open) > 24:
+                _, f = self._open.popitem(last=False); f.close()
+            self._open[name] = h5py.File(self.buffer / name, "r")
+        self._open.move_to_end(name)
+        return self._open[name]
+
+    def set_epoch(self, e):
+        self._epoch = int(e)
+        rng = np.random.default_rng(self.seed + 7919 * self._epoch)
+        panels = self._ready()
+        while len(panels) < self.min_panels:
+            time.sleep(2); panels = self._ready()
+        anchors = []  # (panel_name, y, x, is_pos)
+        # positives: random injection on a random ready panel
+        for _ in range(self.n_pos):
+            nm = panels[rng.integers(len(panels))]
+            try:
+                f = self._h5(nm); nx = f["inj_x"].shape[0]
+                if nx == 0:
+                    continue
+                j = int(rng.integers(nx))
+                anchors.append((nm, float(f["inj_y"][j]), float(f["inj_x"][j]),
+                                float(f["inj_beta"][j])))
+            except Exception:
+                continue
+        for _ in range(self.n_neg):
+            nm = panels[rng.integers(len(panels))]
+            anchors.append((nm, -1.0, -1.0, np.nan))
+        rng.shuffle(anchors)
+        self._anchors = anchors
+
+    def __len__(self):
+        return len(self._anchors)
+
+    def _sigma(self, nm, f):
+        if nm not in self._sig:
+            H, W = f["image"].shape; s = min(self.stats_crop, H, W)
+            h0, w0 = (H - s) // 2, (W - s) // 2
+            self._sig[nm] = diffim_mad_sigma(f["image"][h0:h0 + s, w0:w0 + s].astype(np.float32))
+        return self._sig[nm]
+
+    def __getitem__(self, i):
+        nm, ay, ax, beta = self._anchors[i]
+        f = self._h5(nm); H, W = f["image"].shape; t = self.tile
+        rng = np.random.default_rng((self._epoch * 1_000_003 + i) & 0x7fffffff)
+        if ay < 0:  # negative: random location
+            cy = int(rng.integers(t, H - t)); cx = int(rng.integers(t, W - t))
+        else:
+            cy = int(ay + rng.integers(-self.jit, self.jit + 1))
+            cx = int(ax + rng.integers(-self.jit, self.jit + 1))
+        y0 = max(0, min(H - t, cy - t // 2)); x0 = max(0, min(W - t, cx - t // 2))
+        sl = (slice(y0, y0 + t), slice(x0, x0 + t))
+        diffim = f["image"][sl].astype(np.float32)
+        m = f["mask"][sl].astype(np.float32)
+        rl = f["real_labels"][sl].astype(np.int32)
+        if np.isfinite(beta):
+            two = np.radians(2.0 * beta)
+            y_sin = (m * np.sin(two)).astype(np.float32); y_cos = (m * np.cos(two)).astype(np.float32)
+        else:
+            y_sin = np.zeros_like(m); y_cos = np.zeros_like(m)
+        ig = (rl > 0).astype(np.float32)
+        if self.augment:
+            k = int(rng.integers(0, 4)); flip = bool(rng.integers(0, 2))
+            def _d4(a):
+                a = np.rot90(a, k)
+                return np.ascontiguousarray(a[:, ::-1] if flip else a)
+            diffim = _d4(diffim); m = _d4(m); rl = _d4(rl)
+            sgn = (-1.0) ** k
+            y_sin = _d4(y_sin) * sgn * (-1.0 if flip else 1.0); y_cos = _d4(y_cos) * sgn
+            ig = (rl > 0).astype(np.float32)
+        sig = float(self._sigma(nm, f))
+        if self.intensity_aug:
+            diffim = diffim * float(rng.uniform(0.65, 1.5))
+            diffim = diffim + rng.normal(0.0, float(rng.uniform(0.0, 0.6)) * sig,
+                                         size=diffim.shape).astype(np.float32)
+        x_chans = build_3channel(diffim, rl, panel_sigma=sig, clip=self.clip)
+        return (torch.from_numpy(x_chans), torch.from_numpy(m[None].astype(np.float32)),
+                torch.from_numpy(ig[None]), torch.from_numpy(y_sin[None]),
+                torch.from_numpy(y_cos[None]), {"panel": nm})
