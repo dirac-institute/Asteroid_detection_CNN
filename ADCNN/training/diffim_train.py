@@ -254,10 +254,12 @@ def main():
             n_neg_anchors_per_epoch=args.n_neg_anchors_per_epoch,
             stk_balance=args.stk_balance, anchor_jitter=args.anchor_jitter,
             seed=args.seed, augment=args.augment, intensity_aug=bool(args.intensity_aug))
-        import json as _json
-        vp = sorted(_json.loads((REPO_ROOT / "experiments/diffim_runs/pilot_v7_realistic/split.json").read_text())["val_panels"])
+        # val from a held-out source (--data-h5/--data-csv), disjoint from --data-sources.
+        vcsv = pd.read_csv(args.data_csv)
+        vp = sorted(vcsv["image_id"].unique())[: args.n_val_panels]
+        log(f"val: {len(vp)} held-out panels from {args.data_h5.split('/')[-2]}")
         val_ds = DiffimRandomCropDataset3ch(
-            args.data_h5, pd.read_csv(args.data_csv), panel_ids=vp, tile=args.tile,
+            args.data_h5, vcsv, panel_ids=vp, tile=args.tile,
             n_pos_anchors_per_epoch=500, n_neg_anchors_per_epoch=200,
             stk_balance=args.stk_balance, anchor_jitter=args.anchor_jitter,
             orient_cache_size=args.orient_cache_size, seed=args.seed + 1)
