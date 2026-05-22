@@ -202,6 +202,11 @@ def main():
                          "tiles.h5) instead of full panels. Panel-disjoint train/val "
                          "split by panel_key. Bypasses --data-h5/--n-train-panels.")
     ap.add_argument("--tile-data-csv", default="")
+    ap.add_argument("--freeze-agg-alpha", action="store_true",
+                    help="Freeze the LineAggregator agg_alpha at --init-agg-alpha (ablation: "
+                         "test whether the agg_alpha ramp drives the post-peak val decay).")
+    ap.add_argument("--init-agg-alpha", type=float, default=0.073,
+                    help="Value to fix/init agg_alpha at when --freeze-agg-alpha.")
     ap.add_argument("--intensity-aug", action="store_true",
                     help="Train-set intensity+noise augmentation (vary effective SNR/"
                          "background) on top of --augment. Data-like regularizer for the "
@@ -359,6 +364,11 @@ def main():
         kernel_lens=tuple(args.kernel_lens), n_angles=args.n_angles,
         p_drop=args.dropout,
     ).to(device)
+    if args.freeze_agg_alpha:
+        with torch.no_grad():
+            model.agg_alpha.fill_(float(args.init_agg_alpha))
+        model.agg_alpha.requires_grad_(False)
+        log(f"[freeze-agg] agg_alpha fixed at {float(args.init_agg_alpha)} (no grad)")
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     log(f"model params: {n_params/1e6:.2f} M  device={device}")
     log(f"kernel_lens={args.kernel_lens} n_angles={args.n_angles}")
