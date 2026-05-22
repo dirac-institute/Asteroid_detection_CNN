@@ -19,6 +19,7 @@ sys.path.insert(0, str(REPO)); sys.path.insert(0, str(REPO / "ADCNN/data/dataset
 import simulate_inject_diffim as sid
 from simulate_inject_diffim import one_detector_injection, catalog_to_pandas
 from ADCNN.data.dataset_creation import realistic_trail
+from ADCNN.data.diffim_dataset import diffim_mad_sigma
 
 STAGE3 = "LSSTCam/runs/DRP/DP2/v30_0_6_rc1/DM-53881/stage3"
 STAGE2 = "LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage2"
@@ -68,12 +69,17 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--seed", type=int, default=123)
     ap.add_argument("--realistic", action="store_true")
+    ap.add_argument("--shard", type=int, default=0)
+    ap.add_argument("--nshards", type=int, default=1)
     args = ap.parse_args()
     if args.realistic:
         realistic_trail.install()
     out = Path(args.out); out.mkdir(parents=True, exist_ok=True)
     T = args.tile
-    pairs = pd.read_csv(args.pairs_csv)[["visit", "detector"]].drop_duplicates()
+    pairs = pd.read_csv(args.pairs_csv)[["visit", "detector"]].drop_duplicates().sort_values(["visit", "detector"])
+    if args.nshards > 1:
+        pairs = pairs.iloc[args.shard::args.nshards]
+        out = out / f"shard_{args.shard}"; out.mkdir(parents=True, exist_ok=True)
     if args.limit:
         pairs = pairs.head(args.limit)
     dims = geom.Extent2I(NX, NY)
@@ -101,8 +107,13 @@ def main():
                 print(f"[{i+1}/{len(pairs)}] SKIP v={visit} d={detector}: {res[1]}", flush=True); continue
             _, img, mask, real_labels, catalog = res
             cat_df = catalog_to_pandas(catalog)
+            s = min(1024, img.shape[0], img.shape[1])
+            psig = float(diffim_mad_sigma(img[(img.shape[0]-s)//2:(img.shape[0]-s)//2+s,
+                                              (img.shape[1]-s)//2:(img.shape[1]-s)//2+s]))
             imgs, masks, rls, meta = extract_tiles(img, mask, real_labels, cat_df, T, args.n_neg,
                                                    np.random.default_rng(seed))
+            for m in meta:
+                m["panel_sigma"] = psig
             n = len(imgs)
             with h5py.File(h5p, "a") as f:
                 for ds, arr in [("img", imgs), ("mask", masks), ("real_label", rls)]:

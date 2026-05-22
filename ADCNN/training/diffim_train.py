@@ -188,6 +188,11 @@ def main():
                     help="Panels cached in the orientation-map cache (per worker).")
     ap.add_argument("--ema-exclude", nargs="*", default=[],
                     help="Parameter names to exclude from EMA tracking (e.g. agg_alpha).")
+    ap.add_argument("--tile-data-h5", default="",
+                    help="Train from a storage-efficient tile corpus (tile_gen.py "
+                         "tiles.h5) instead of full panels. Panel-disjoint train/val "
+                         "split by panel_key. Bypasses --data-h5/--n-train-panels.")
+    ap.add_argument("--tile-data-csv", default="")
     ap.add_argument("--intensity-aug", action="store_true",
                     help="Train-set intensity+noise augmentation (vary effective SNR/"
                          "background) on top of --augment. Data-like regularizer for the "
@@ -228,38 +233,62 @@ def main():
         json.dump(vars(args), f, indent=2)
     log(f"v5 config: {json.dumps(vars(args), indent=2)}")
 
-    log("opening HDF5…")
-    with h5py.File(args.data_h5, "r") as f:
-        n_total = int(f["images"].shape[0])
-    train_panels, val_panels = pick_train_val_panels(n_total, args.n_train_panels, args.n_val_panels, seed=args.seed)
-    log(f"train_panels={len(train_panels)} val_panels={len(val_panels)} / {n_total}")
-    (run_dir / "split.json").write_text(json.dumps({
-        "train_panels": train_panels, "val_panels": val_panels, "n_total": n_total,
-    }, indent=2))
+    if args.tile_data_h5:
+        # storage-efficient tile corpus (DiffimTileDataset); panel-disjoint train/val
+        # split by panel_key so no leakage between them.
+        from ADCNN.data.diffim_dataset import DiffimTileDataset
+        meta = pd.read_csv(args.tile_data_csv)
+        keys = sorted(meta["panel_key"].unique())
+        rng = np.random.default_rng(args.seed); rng.shuffle(keys)
+        n_val = max(1, int(round(0.05 * len(keys))))
+        val_keys, train_keys = set(keys[:n_val]), set(keys[n_val:])
+        log(f"TILE data: {len(keys)} panels -> train {len(train_keys)} / val {len(val_keys)}; "
+            f"{len(meta)} tiles ({int((meta.is_pos==1).sum())} pos)")
+        (run_dir / "split.json").write_text(json.dumps(
+            {"tile_train_panels": sorted(train_keys), "tile_val_panels": sorted(val_keys)}, indent=2))
+        train_ds = DiffimTileDataset(
+            args.tile_data_h5, args.tile_data_csv, tile=args.tile,
+            n_pos_per_epoch=args.n_pos_anchors_per_epoch,
+            n_neg_per_epoch=args.n_neg_anchors_per_epoch,
+            seed=args.seed, augment=args.augment, panel_keys=train_keys)
+        train_ds.intensity_aug = bool(args.intensity_aug)
+        val_ds = DiffimTileDataset(
+            args.tile_data_h5, args.tile_data_csv, tile=args.tile,
+            n_pos_per_epoch=500, n_neg_per_epoch=200, seed=args.seed + 1,
+            augment=False, panel_keys=val_keys)
+    else:
+        log("opening HDF5…")
+        with h5py.File(args.data_h5, "r") as f:
+            n_total = int(f["images"].shape[0])
+        train_panels, val_panels = pick_train_val_panels(n_total, args.n_train_panels, args.n_val_panels, seed=args.seed)
+        log(f"train_panels={len(train_panels)} val_panels={len(val_panels)} / {n_total}")
+        (run_dir / "split.json").write_text(json.dumps({
+            "train_panels": train_panels, "val_panels": val_panels, "n_total": n_total,
+        }, indent=2))
 
-    csv_df = pd.read_csv(args.data_csv)
-    train_ds = DiffimRandomCropDataset3ch(
-        args.data_h5, csv_df, panel_ids=train_panels,
-        tile=args.tile,
-        n_pos_anchors_per_epoch=args.n_pos_anchors_per_epoch,
-        n_neg_anchors_per_epoch=args.n_neg_anchors_per_epoch,
-        stk_balance=args.stk_balance,
-        anchor_jitter=args.anchor_jitter,
-        orient_cache_size=args.orient_cache_size,
-        seed=args.seed,
-        augment=args.augment,
-    )
-    train_ds.intensity_aug = bool(args.intensity_aug)
-    val_ds = DiffimRandomCropDataset3ch(
-        args.data_h5, csv_df, panel_ids=val_panels,
-        tile=args.tile,
-        n_pos_anchors_per_epoch=500,
-        n_neg_anchors_per_epoch=200,
-        stk_balance=args.stk_balance,
-        anchor_jitter=args.anchor_jitter,
-        orient_cache_size=args.orient_cache_size,
-        seed=args.seed + 1,
-    )
+        csv_df = pd.read_csv(args.data_csv)
+        train_ds = DiffimRandomCropDataset3ch(
+            args.data_h5, csv_df, panel_ids=train_panels,
+            tile=args.tile,
+            n_pos_anchors_per_epoch=args.n_pos_anchors_per_epoch,
+            n_neg_anchors_per_epoch=args.n_neg_anchors_per_epoch,
+            stk_balance=args.stk_balance,
+            anchor_jitter=args.anchor_jitter,
+            orient_cache_size=args.orient_cache_size,
+            seed=args.seed,
+            augment=args.augment,
+        )
+        train_ds.intensity_aug = bool(args.intensity_aug)
+        val_ds = DiffimRandomCropDataset3ch(
+            args.data_h5, csv_df, panel_ids=val_panels,
+            tile=args.tile,
+            n_pos_anchors_per_epoch=500,
+            n_neg_anchors_per_epoch=200,
+            stk_balance=args.stk_balance,
+            anchor_jitter=args.anchor_jitter,
+            orient_cache_size=args.orient_cache_size,
+            seed=args.seed + 1,
+        )
     log(f"train ds size (anchors/epoch): {len(train_ds)}")
     log(f"val ds size (anchors/epoch):   {len(val_ds)}")
 

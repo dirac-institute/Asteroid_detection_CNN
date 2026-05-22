@@ -311,3 +311,86 @@ def collate_v5(batch):
     coss = torch.stack([b[4] for b in batch], 0)
     metas = [b[5] for b in batch]
     return xs, ys, igs, sins, coss, metas
+
+
+class DiffimTileDataset(Dataset):
+    """Storage-efficient training from pre-extracted TILES (tile_gen.py) instead of
+    full 4004x4096 panels (~16x smaller -> ~16x more panels per GB). Each stored tile
+    is a 176px cutout (img/mask/real_label) around an injected trail (positive) or a
+    sampled background/residual region (negative), with panel_sigma + beta in the csv.
+    Output format is identical to DiffimRandomCropDataset3ch so the trainer is unchanged.
+    Orientation maps are reconstructed from the cropped mask + stored beta.
+    """
+    def __init__(self, tile_h5: str, tile_csv: str, *, tile: int = 128, clip: float = 5.0,
+                 n_pos_per_epoch: int = 3000, n_neg_per_epoch: int = 900,
+                 anchor_jitter: int = 24, seed: int = 0, augment: bool = False,
+                 panel_keys=None):
+        self.h5_path = str(tile_h5); self.tile = int(tile); self.clip = float(clip)
+        self.n_pos = int(n_pos_per_epoch); self.n_neg = int(n_neg_per_epoch)
+        self.jit = int(anchor_jitter); self.seed = int(seed)
+        self.augment = bool(augment); self.intensity_aug = False
+        self._epoch = 0; self._f = None
+        meta = pd.read_csv(tile_csv)
+        with h5py.File(self.h5_path, "r") as f:
+            self.T = int(f["img"].shape[1])
+        sel = meta["panel_key"].isin(set(panel_keys)) if panel_keys is not None \
+            else pd.Series(True, index=meta.index)
+        self.pos_idx = meta.index[(meta.is_pos == 1) & sel].to_numpy()
+        self.neg_idx = meta.index[(meta.is_pos == 0) & sel].to_numpy()
+        self.beta = meta["beta"].to_numpy(np.float32)
+        self.psig = meta["panel_sigma"].to_numpy(np.float32)
+        self.set_epoch(0)
+
+    def set_epoch(self, e):
+        self._epoch = int(e)
+        rng = np.random.default_rng(self.seed + 7919 * self._epoch)
+        pos = rng.choice(self.pos_idx, self.n_pos, replace=len(self.pos_idx) < self.n_pos)
+        neg = rng.choice(self.neg_idx, self.n_neg, replace=len(self.neg_idx) < self.n_neg)
+        self._idx = np.concatenate([pos, neg])
+
+    def __len__(self):
+        return len(self._idx)
+
+    def _ensure_open(self):
+        if self._f is None:
+            self._f = h5py.File(self.h5_path, "r")
+
+    def __getitem__(self, i):
+        self._ensure_open()
+        ti = int(self._idx[i])
+        rng = np.random.default_rng((self._epoch * 1_000_003 + i) & 0x7fffffff)
+        T = self.T; t = self.tile
+        c0 = (T - t) // 2
+        jy = int(rng.integers(-self.jit, self.jit + 1)); jx = int(rng.integers(-self.jit, self.jit + 1))
+        y0 = int(np.clip(c0 + jy, 0, T - t)); x0 = int(np.clip(c0 + jx, 0, T - t))
+        sl = (slice(y0, y0 + t), slice(x0, x0 + t))
+        diffim = self._f["img"][ti][sl].astype(np.float32)
+        m = self._f["mask"][ti][sl].astype(np.float32)
+        rl = self._f["real_label"][ti][sl].astype(np.int32)
+        b = self.beta[ti]
+        if np.isfinite(b):
+            two = np.radians(2.0 * b)
+            y_sin = (m * np.sin(two)).astype(np.float32); y_cos = (m * np.cos(two)).astype(np.float32)
+        else:
+            y_sin = np.zeros_like(m); y_cos = np.zeros_like(m)
+        ig = (rl > 0).astype(np.float32)
+        if self.augment:
+            k = int(rng.integers(0, 4)); flip = bool(rng.integers(0, 2))
+            def _d4(a):
+                a = np.rot90(a, k)
+                if flip: a = a[:, ::-1]
+                return np.ascontiguousarray(a)
+            diffim = _d4(diffim); m = _d4(m); rl = _d4(rl)
+            sgn = (-1.0) ** k
+            y_sin = _d4(y_sin) * sgn * (-1.0 if flip else 1.0); y_cos = _d4(y_cos) * sgn
+            ig = (rl > 0).astype(np.float32)
+        sig = float(self.psig[ti])
+        if self.intensity_aug:
+            diffim = diffim * float(rng.uniform(0.65, 1.5))
+            diffim = diffim + rng.normal(0.0, float(rng.uniform(0.0, 0.6)) * sig,
+                                         size=diffim.shape).astype(np.float32)
+        x_chans = build_3channel(diffim, rl, panel_sigma=sig, clip=self.clip)
+        meta = {"tile_idx": ti, "is_pos": int(np.isfinite(b))}
+        return (torch.from_numpy(x_chans), torch.from_numpy(m[None].astype(np.float32)),
+                torch.from_numpy(ig[None]), torch.from_numpy(y_sin[None]),
+                torch.from_numpy(y_cos[None]), meta)
