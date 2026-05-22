@@ -78,13 +78,24 @@ def make_galsim_trail_realistic(source_data, wcs, sky_coords, inst_flux,
     from lsst.geom import arcseconds
 
     L = float(source_data["trail_length"])
-    # per-injection rng so the dataset is reproducible
+    # Per-injection RNG. injection_id alone is NOT unique across panels — it is the
+    # per-detector row index 0..n_inject-1 (simulate_inject_diffim.py adds it as `k`),
+    # so seeding on it would repeat the same morphology draw on every panel. Mix the
+    # sky position (ra/dec) and L into the seed so each injected trail gets a distinct
+    # light curve / taper / curvature, using only integer arithmetic so the result is
+    # reproducible across worker processes (Python's hash() is salted for some types).
+    ra = float(sky_coords.getRa().asDegrees())
+    dec = float(sky_coords.getDec().asDegrees())
     try:
         sid = int(source_data["injection_id"])
     except Exception:
-        sid = int(abs(hash((float(sky_coords.getRa().asDegrees()),
-                            float(sky_coords.getDec().asDegrees()), L))) % (2 ** 31))
-    rng = np.random.default_rng((sid * 2654435761 + _SEED_SALT) & 0xFFFFFFFF)
+        sid = 0
+    seed = (sid * 2654435761
+            + int(round(ra * 1e5)) * 2246822519
+            + int(round((dec + 90.0) * 1e5)) * 3266489917
+            + int(round(L * 100)) * 668265263
+            + _SEED_SALT) & 0xFFFFFFFF
+    rng = np.random.default_rng(seed)
 
     s, perp, w = _trail_profile(L, rng)
     comps = [galsim.DeltaFunction(flux=float(wi)).shift(float(si), float(pi))
