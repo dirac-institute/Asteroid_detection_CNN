@@ -148,7 +148,10 @@ def inject(pvi_clone, injection_catalog):
     light-curve / tapered / curved renderer in ADCNN.data.dataset_creation.
     realistic_trail (physical priors only; leakage-free)."""
     if os.environ.get("ADCNN_REALISTIC_TRAIL") == "1":
-        from ADCNN.data.dataset_creation import realistic_trail
+        try:
+            from ADCNN.data.dataset_creation import realistic_trail
+        except ImportError:
+            import realistic_trail  # script runs from its own dir; ADCNN may not be on path
         realistic_trail.install(verbose=False)
     inject_task = ExposureInjectTask()
     inject_res = inject_task.run(

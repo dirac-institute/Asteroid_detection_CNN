@@ -13,6 +13,7 @@ export RUBIN_EUPS_PATH="${RUBIN_EUPS_PATH:-}"
 REPO="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"
 cd "$REPO/ADCNN/data/dataset_creation"; export PYTHONPATH="$REPO:${PYTHONPATH:-}"
 source /sdf/group/rubin/sw/loadLSST.bash; setup lsst_distrib
+export PYTHONPATH="$REPO:${PYTHONPATH:-}"
 OUT="$REPO/DATA_DIFFIM_realistic_big"; mkdir -p "$OUT"
 echo "=== bigger realistic gen (seed 456, exclude test pairs) === $(date -Is)"
 srun python3 -u simulate_inject_diffim.py \
