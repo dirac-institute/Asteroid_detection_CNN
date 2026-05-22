@@ -188,6 +188,10 @@ def main():
                     help="Panels cached in the orientation-map cache (per worker).")
     ap.add_argument("--ema-exclude", nargs="*", default=[],
                     help="Parameter names to exclude from EMA tracking (e.g. agg_alpha).")
+    ap.add_argument("--intensity-aug", action="store_true",
+                    help="Train-set intensity+noise augmentation (vary effective SNR/"
+                         "background) on top of --augment. Data-like regularizer for the "
+                         "faint-trail regime.")
     ap.add_argument("--dropout", type=float, default=0.0,
                     help="Spatial dropout p (bottleneck + pre-head). 0 = off (default, "
                          "identical to before). ~0.1-0.2 regularizes the post-ep10 overfit.")
@@ -245,6 +249,7 @@ def main():
         seed=args.seed,
         augment=args.augment,
     )
+    train_ds.intensity_aug = bool(args.intensity_aug)
     val_ds = DiffimRandomCropDataset3ch(
         args.data_h5, csv_df, panel_ids=val_panels,
         tile=args.tile,

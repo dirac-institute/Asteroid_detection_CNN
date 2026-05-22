@@ -126,6 +126,9 @@ class DiffimRandomCropDataset3ch(Dataset):
         # orientation, so flips / 90deg rotations are label-preserving once the
         # sin(2b)/cos(2b) orientation maps are transformed accordingly.
         self.augment = bool(augment)
+        # intensity/noise augmentation (train only): rescale + sigma-matched noise to
+        # vary effective SNR. Set via .intensity_aug after construction (trainer flag).
+        self.intensity_aug = False
         self._epoch = 0
 
         with h5py.File(self.h5_path, "r") as f:
@@ -275,6 +278,15 @@ class DiffimRandomCropDataset3ch(Dataset):
             ig = (rl_tile > 0).astype(np.float32)
 
         sig = self._sigma_of(pid)
+        if self.intensity_aug:
+            # vary effective SNR/background (data-like augmentation): rescale the
+            # diffim and add sigma-matched noise BEFORE the panel_sigma normalization,
+            # so a trail's apparent SNR shifts -> teaches the faint regime. Labels
+            # unchanged (a dimmer/noisier trail is still the same trail).
+            diffim_tile = diffim_tile * float(rng.uniform(0.65, 1.5))
+            diffim_tile = diffim_tile + rng.normal(
+                0.0, float(rng.uniform(0.0, 0.6)) * sig, size=diffim_tile.shape
+            ).astype(np.float32)
         x_chans = build_3channel(diffim_tile, rl_tile, panel_sigma=sig, clip=self.clip)
 
         meta = {
