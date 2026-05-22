@@ -188,6 +188,11 @@ def main():
                     help="Panels cached in the orientation-map cache (per worker).")
     ap.add_argument("--ema-exclude", nargs="*", default=[],
                     help="Parameter names to exclude from EMA tracking (e.g. agg_alpha).")
+    ap.add_argument("--stream-buffer", default="",
+                    help="Train from a streaming rolling buffer (stream_producer.py) of "
+                         "full panels -- lossless, same statistics, unbounded data. "
+                         "Run the producer alongside. Val uses the fixed realistic val "
+                         "panels (--data-h5/--data-csv) for a stable metric.")
     ap.add_argument("--tile-data-h5", default="",
                     help="Train from a storage-efficient tile corpus (tile_gen.py "
                          "tiles.h5) instead of full panels. Panel-disjoint train/val "
@@ -233,7 +238,27 @@ def main():
         json.dump(vars(args), f, indent=2)
     log(f"v5 config: {json.dumps(vars(args), indent=2)}")
 
-    if args.tile_data_h5:
+    if args.stream_buffer:
+        # LOSSLESS streaming: full panels from a rolling buffer (stream_producer.py),
+        # identical anchor statistics. Producer must be running alongside.
+        from ADCNN.data.diffim_dataset import DiffimStreamDataset
+        log(f"STREAMING from buffer {args.stream_buffer}")
+        train_ds = DiffimStreamDataset(
+            args.stream_buffer, tile=args.tile,
+            n_pos_per_epoch=args.n_pos_anchors_per_epoch,
+            n_neg_per_epoch=args.n_neg_anchors_per_epoch,
+            anchor_jitter=args.anchor_jitter, seed=args.seed, augment=args.augment)
+        train_ds.intensity_aug = bool(args.intensity_aug)
+        # held-out val from the FIXED realistic val panels (stable metric across epochs)
+        csv_df = pd.read_csv(args.data_csv)
+        import json as _json
+        vp = sorted(_json.loads((REPO_ROOT / "experiments/diffim_runs/pilot_v7_realistic/split.json").read_text())["val_panels"])
+        val_ds = DiffimRandomCropDataset3ch(
+            args.data_h5, csv_df, panel_ids=vp, tile=args.tile,
+            n_pos_anchors_per_epoch=500, n_neg_anchors_per_epoch=200,
+            stk_balance=args.stk_balance, anchor_jitter=args.anchor_jitter,
+            orient_cache_size=args.orient_cache_size, seed=args.seed + 1)
+    elif args.tile_data_h5:
         # storage-efficient tile corpus (DiffimTileDataset); panel-disjoint train/val
         # split by panel_key so no leakage between them.
         from ADCNN.data.diffim_dataset import DiffimTileDataset
