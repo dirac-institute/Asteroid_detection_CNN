@@ -188,6 +188,9 @@ def main():
                     help="Panels cached in the orientation-map cache (per worker).")
     ap.add_argument("--ema-exclude", nargs="*", default=[],
                     help="Parameter names to exclude from EMA tracking (e.g. agg_alpha).")
+    ap.add_argument("--dropout", type=float, default=0.0,
+                    help="Spatial dropout p (bottleneck + pre-head). 0 = off (default, "
+                         "identical to before). ~0.1-0.2 regularizes the post-ep10 overfit.")
     ap.add_argument("--augment", action="store_true",
                     help="Enable D4 dihedral augmentation (flips + 90deg rotations "
                          "with sin2b/cos2b orientation-label transform) on the TRAIN "
@@ -270,6 +273,7 @@ def main():
     model = UNetResSEOrientHough(
         in_ch=3, widths=tuple(args.widths),
         kernel_lens=tuple(args.kernel_lens), n_angles=args.n_angles,
+        p_drop=args.dropout,
     ).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     log(f"model params: {n_params/1e6:.2f} M  device={device}")

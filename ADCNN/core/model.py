@@ -40,15 +40,18 @@ class ASPP(nn.Module):
     def forward(self,x): return self.project(torch.cat([b(x) for b in self.blocks],1))
 
 class UNetResSE(nn.Module):
-    def __init__(self,in_ch=1, out_ch=1, widths=(48, 96, 192, 384, 768)):
+    def __init__(self,in_ch=1, out_ch=1, widths=(48, 96, 192, 384, 768), p_drop=0.0):
         super().__init__(); w=widths
         self.stem=nn.Sequential(nn.Conv2d(in_ch,w[0],3,padding=1,bias=False), nn.BatchNorm2d(w[0]), nn.SiLU(True), ResBlock(w[0],w[0]))
         self.d1=Down(w[0],w[1]); self.d2=Down(w[1],w[2]); self.d3=Down(w[2],w[3]); self.d4=Down(w[3],w[4])
         self.u1=Up(w[4],w[3],w[3]); self.u2=Up(w[3],w[2],w[2]); self.u3=Up(w[2],w[1],w[1]); self.u4=Up(w[1],w[0],w[0])
+        # spatial dropout: at the bottleneck (most overfit-prone) + before the head.
+        # p_drop=0 -> nn.Identity, so default behaviour is byte-identical to before.
+        self.drop = nn.Dropout2d(p_drop) if p_drop > 0 else nn.Identity()
         self.head=nn.Conv2d(w[0],out_ch,1)
     def forward(self,x):
-        s0=self.stem(x); s1=self.d1(s0); s2=self.d2(s1); s3=self.d3(s2); b=self.d4(s3)
-        x=self.u1(b,s3); x=self.u2(x,s2); x=self.u3(x,s1); x=self.u4(x,s0); return self.head(x)
+        s0=self.stem(x); s1=self.d1(s0); s2=self.d2(s1); s3=self.d3(s2); b=self.drop(self.d4(s3))
+        x=self.u1(b,s3); x=self.u2(x,s2); x=self.u3(x,s1); x=self.u4(x,s0); return self.head(self.drop(x))
 
 class UNetResSEASPP(UNetResSE):
     def __init__(self,in_ch=1,out_ch=1,widths=(32,64,128,256,512)):

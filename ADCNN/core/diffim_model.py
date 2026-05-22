@@ -97,10 +97,10 @@ class LineAggregator(nn.Module):
 
 class UNetResSEOrientHough(nn.Module):
     def __init__(self, in_ch: int = 3, widths=(48, 96, 192, 384, 768),
-                 kernel_lens=(11, 21, 41), n_angles: int = 12):
+                 kernel_lens=(11, 21, 41), n_angles: int = 12, p_drop: float = 0.0):
         super().__init__()
         # UNet outputs 3 channels: seg_logit, orient_sin (pre-tanh), orient_cos (pre-tanh).
-        self.backbone = UNetResSE(in_ch=in_ch, out_ch=3, widths=widths)
+        self.backbone = UNetResSE(in_ch=in_ch, out_ch=3, widths=widths, p_drop=p_drop)
         self.line_agg = LineAggregator(kernel_lens=kernel_lens, n_angles=n_angles)
         # Learnable scalar mixing weight; init 0 so the network starts as
         # plain UNet + orient head (≡ v4 with 3-channel input) and grows
