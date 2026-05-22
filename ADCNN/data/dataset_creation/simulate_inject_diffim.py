@@ -667,7 +667,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
 # ======================================================================================
 
 def worker(args):
-    (idx, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length,
+    (counters, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length,
      magnitude, beta, source_type, global_seed, mag_mode, psf_template,
      detection_threshold, measueTrails, skymap, stage3_collection) = args
     seed = (int(global_seed) * 1_000_003 + int(dataId["visit"]) * 1_003 + int(dataId["detector"])) & 0xFFFFFFFF
@@ -681,7 +681,12 @@ def worker(args):
         if res[0] is False:
             return ("err", res[1], res[2], res[3])
         _, img, mask, real_labels, catalog = res
+        # Write index is assigned HERE, under the lock, only on success -> successful
+        # panels land contiguously (0..n-1) with NO gaps even when some refs fail.
+        # The h5 is truncated to the final count after all tasks (run_parallel_injection).
         with lock:
+            idx = int(counters[h5path])
+            counters[h5path] = idx + 1
             with h5py.File(h5path, "a") as f:
                 f["images"][idx] = img
                 f["masks"][idx] = mask
@@ -697,7 +702,7 @@ def worker(args):
 
     except _SKIP_EXCEPTIONS:
         tb = traceback.format_exc()
-        return ("err", idx, dataId, tb)
+        return ("err", -1, dataId, tb)
 
 
 def _key_from_dataId(d):
@@ -942,60 +947,40 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
     dims = butler.get("preliminary_visit_image.dimensions", dataId=refs[0].dataId)
     if chunks is not None:
         chunks = (1, min(int(chunks), dims.y), min(int(chunks), dims.x))
+    # Datasets are pre-sized to the (generous) ref count but created RESIZABLE
+    # (maxshape) so we can truncate to the actual number of SUCCESSFUL panels after
+    # generation -> no empty/all-zero slots even when some refs fail to subtract.
     if not test_only:
         with h5py.File(h5train_path, "w") as f:
-            f.create_dataset("images", shape=(len(refs) - len(test_index), dims.y, dims.x), dtype="float32", chunks=chunks)
-            f.create_dataset("masks", shape=(len(refs) - len(test_index), dims.y, dims.x), dtype="bool", chunks=chunks)
-            f.create_dataset("real_labels", shape=(len(refs) - len(test_index), dims.y, dims.x), dtype="uint16", chunks=chunks)
+            mx = (None, dims.y, dims.x)
+            f.create_dataset("images", shape=(len(refs) - len(test_index), dims.y, dims.x), maxshape=mx, dtype="float32", chunks=chunks)
+            f.create_dataset("masks", shape=(len(refs) - len(test_index), dims.y, dims.x), maxshape=mx, dtype="bool", chunks=chunks)
+            f.create_dataset("real_labels", shape=(len(refs) - len(test_index), dims.y, dims.x), maxshape=mx, dtype="uint16", chunks=chunks)
     if len(test_index) > 0:
         with h5py.File(h5test_path, "w") as f:
-            f.create_dataset(
-                "images",
-                shape=(len(test_index), dims.y, dims.x),
-                dtype="float32",
-                chunks=chunks,
-                compression="gzip",
-                compression_opts=4,
-                shuffle=True,
-            )
-            f.create_dataset(
-                "masks",
-                shape=(len(test_index), dims.y, dims.x),
-                dtype="bool",
-                chunks=chunks,
-                compression="gzip",
-                compression_opts=4,
-                shuffle=True,
-            )
-            f.create_dataset(
-                "real_labels",
-                shape=(len(test_index), dims.y, dims.x),
-                dtype="uint16",
-                chunks=chunks,
-                compression="gzip",
-                compression_opts=4,
-                shuffle=True,
-            )
+            mx = (None, dims.y, dims.x)
+            kw = dict(chunks=chunks, compression="gzip", compression_opts=4, shuffle=True)
+            f.create_dataset("images", shape=(len(test_index), dims.y, dims.x), maxshape=mx, dtype="float32", **kw)
+            f.create_dataset("masks", shape=(len(test_index), dims.y, dims.x), maxshape=mx, dtype="bool", **kw)
+            f.create_dataset("real_labels", shape=(len(test_index), dims.y, dims.x), maxshape=mx, dtype="uint16", **kw)
     manager = Manager()
     lock = manager.Lock()
-    count_train = 0
-    count_test = 0
+    # shared write cursors per h5 file: each success grabs the next index under the lock.
+    counters = manager.dict()
+    counters[h5train_path] = 0
+    counters[h5test_path] = 0
     tasks = []
     for i, ref in enumerate(refs):
         if i in test_index:
             h5path = h5test_path
             csvpath = os.path.join(save_path, "test.csv")
-            count = count_test
-            count_test += 1
-            tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
+            tasks.append([counters, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
                           "preliminary_visit_image", seed, mag_mode, psf_template, stack_detection_threshold, measueTrails,
                           skymap, stage3_collection])
         elif not test_only:
             h5path = h5train_path
             csvpath = os.path.join(save_path, "train.csv")
-            count = count_train
-            count_train += 1
-            tasks.append([count, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
+            tasks.append([counters, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
                           "preliminary_visit_image", seed, mag_mode, psf_template, stack_detection_threshold, measueTrails,
                           skymap, stage3_collection])
     if parallel > 1:
@@ -1026,6 +1011,18 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
     else:
         for task in tasks:
             worker(task)
+
+    # Truncate each h5 to the number of panels actually written (no empty tail slots
+    # from failed refs). image_id values in the CSVs already match these 0..n-1 rows.
+    for hp in ([h5train_path] if not test_only else []) + ([h5test_path] if len(test_index) > 0 else []):
+        if not os.path.exists(hp):
+            continue
+        n = int(counters[hp])
+        with h5py.File(hp, "a") as f:
+            for ds in ("images", "masks", "real_labels"):
+                if ds in f and f[ds].shape[0] != n:
+                    f[ds].resize(n, axis=0)
+        print(f"[truncate] {hp}: kept {n} successful panels (no empty slots)", flush=True)
 
 
 def rng_for_task(seed: int, dataId: dict) -> np.random.Generator:
