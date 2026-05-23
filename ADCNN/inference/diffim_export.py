@@ -1,14 +1,14 @@
 """Export a trained diffim NN checkpoint to a portable TorchScript file.
 
 Once exported, the .pt file can be loaded as:
-    model = torch.jit.load("v6_scripted.pt")
+    model = torch.jit.load("models/v7_diffim_scripted.pt")
     seg_logits, orient_sin, orient_cos, raw_seg, agg = model(x)
 without needing the UNetResSEOrientHough class definition.
 
 Usage:
     python -m ADCNN.inference.diffim_export \
-        --ckpt experiments/diffim_runs/pilot_v6/ckpts/last.pt \
-        --out  experiments/diffim_runs/pilot_v6/ckpts/v6_scripted.pt
+        --ckpt experiments/diffim_runs/pilot_v7/ckpts/best.pt \
+        --out  experiments/diffim_runs/../../models/v7_diffim_scripted.pt
 """
 from __future__ import annotations
 

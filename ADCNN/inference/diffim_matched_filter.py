@@ -15,7 +15,7 @@ Per-candidate matched filter:
   5. Keep candidate iff SNR_mf >= threshold.
 
 The diffim is what the matched filter "sees" — exactly the same data LSST's
-detector looks at. The MAD sigma is per-panel (same convention as the v5
+detector looks at. The MAD sigma is per-panel (same convention as the diffim dataset
 NN's normalization), so noise is calibrated identically for both detectors.
 
 The filter rewards candidates that have positive integrated diffim flux

@@ -9,7 +9,6 @@ Consolidated evaluation utilities including:
 """
 
 from .metrics import (
-    masked_pixel_auc,
     resize_masks_to,
     precision,
     recall,
@@ -30,7 +29,6 @@ from .detection import (
 
 __all__ = [
     # Metrics
-    "masked_pixel_auc",
     "resize_masks_to",
     "precision",
     "recall",

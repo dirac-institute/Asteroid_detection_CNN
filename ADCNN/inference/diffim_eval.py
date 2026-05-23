@@ -1,5 +1,5 @@
 """Full evaluation pipeline for the diffim NN (consolidated from
-experiments/diffim_pilot/v5_eval.py + evaluate.py).
+the diffim eval prototype).
 
 Loads a trained checkpoint (or TorchScript file), runs sliding-window
 inference on the test_{5,4,3}sigma splits, extracts candidates, matches
@@ -44,7 +44,7 @@ SPLIT_PATHS = {
 
 
 # ---------------------------------------------------------------------------
-# Inlined helpers (formerly in experiments/diffim_pilot/{evaluate,v4_eval}.py).
+# Inlined inference + candidate-matching helpers.
 # ---------------------------------------------------------------------------
 def hann2d(tile: int) -> np.ndarray:
     """2D Hann window for blending overlapping tile predictions."""
@@ -322,7 +322,7 @@ def predict_panel_overlap_3ch(
     xs = starts(W, tile, stride)
 
     batch_xs, batch_locs = [], []
-    BATCH = 24  # smaller than v4 (32) because 3-channel input + aggregator → more memory
+    BATCH = 24  # the line aggregator + 3-channel input make this the GPU-memory limit
 
     def flush():
         if not batch_xs:

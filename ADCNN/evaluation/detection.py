@@ -59,41 +59,6 @@ def _label_components_fds(mask_bool, pixel_gap=3):
     labels, n = ndi.label(grown, structure=np.ones((3,3), bool))  # 8-connectivity
     return labels, int(n)
 
-def mark_nn_and_stack_fds(csv_path, p_full, thr=0.5, pixel_gap=3, line_width=1):
-    cat = pd.read_csv(csv_path).copy()
-    need = {"image_id","x","y"}
-    miss = need - set(cat.columns)
-    if miss: raise ValueError(f"CSV missing columns: {miss}")
-    if "stack_detection" in cat.columns: cat["stack_detected"] = cat["stack_detection"].astype(bool)
-    elif "stack_mag" in cat.columns:    cat["stack_detected"] = ~cat["stack_mag"].isna()
-    else:                               cat["stack_detected"] = False
-    H,W = p_full.shape[1:]
-    pred_bin = (p_full >= thr)
-    labels_list = []
-    for i in range(p_full.shape[0]):
-        labels_list.append(_label_components_fds(pred_bin[i], pixel_gap=pixel_gap)[0])
-    nn = np.zeros(len(cat), bool)
-    has_beta = "beta" in cat.columns; has_len = "trail_length" in cat.columns
-    for pid, grp in cat.groupby("image_id"):
-        pid = int(pid)
-        if pid<0 or pid>=len(labels_list): continue
-        lab = labels_list[pid]
-        for idx in grp.index:
-            xc = int(np.clip(int(cat.at[idx,"x"]), 0, W-1))
-            yc = int(np.clip(int(cat.at[idx,"y"]), 0, H-1))
-            if has_beta and has_len and np.isfinite(cat.at[idx,"beta"]) and np.isfinite(cat.at[idx,"trail_length"]):
-                m = _line_mask((H,W), yc, xc, beta_deg=float(cat.at[idx,"beta"]),
-                               length=float(cat.at[idx,"trail_length"]), width=line_width)
-            else:
-                m = _disk_mask((H,W), yc, xc, r=max(1,pixel_gap))
-            nn[idx] = (lab[m] > 0).any()
-    cat["nn_detected"] = nn
-    return cat
-
-# =============================================================================
-# Object-wise Evaluation
-# =============================================================================
-
 def _prepare_catalog_groups(catalog: pd.DataFrame) -> dict[int, tuple[np.ndarray, np.ndarray]]:
     """
     Group catalog by image_id for efficient processing.
