@@ -23,7 +23,7 @@ with h5py.File(H5,"r") as f:
         prob,sin,cos,agg=predict_panel_overlap_3ch_full(model,img,rl,device=dev)
         cand,_=compute_v2_features(prob[None],img[None],sin[None],cos[None],agg[None],real_labels=rl[None],verbose=False)
         if not len(cand): continue
-        cand[RF_FEATURES_V2]=cand[RF_FEATURES_V2].replace([np.inf,-np.inf],np.nan)
+        cand[list(RF_FEATURES_V2)]=cand[list(RF_FEATURES_V2)].replace([np.inf,-np.inf],np.nan)
         cand=apply_rf_v2(cand,rf); keep=cand[cand.score_rf>=a.rf_thr]
         for _,c in keep.iterrows():
             rows.append(dict(image_id=idx,visit=int(p.visit),detector=int(p.detector),band=str(p.band),
