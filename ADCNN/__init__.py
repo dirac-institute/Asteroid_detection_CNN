@@ -15,12 +15,12 @@ intensity-augmentation, plus the neg5 RandomForest) lives in the top-level ``mod
 """
 __version__ = "3.0.0"
 
-from .core import UNetResSE, UNetResSEASPP, UNetResSEOrientHough, LineAggregator
+from .core import UNetResSE, UNetResSEOrientHough, LineAggregator
 from .data import DiffimRandomCropDataset3ch, DiffimConcatDataset, build_3channel
 from .training import EMAModel
 
 __all__ = [
-    "UNetResSE", "UNetResSEASPP", "UNetResSEOrientHough", "LineAggregator",
+    "UNetResSE", "UNetResSEOrientHough", "LineAggregator",
     "DiffimRandomCropDataset3ch", "DiffimConcatDataset", "build_3channel",
     "EMAModel",
 ]

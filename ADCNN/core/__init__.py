@@ -6,7 +6,7 @@
   + per-pixel orientation head + LineAggregator (Hough) head. This is the architecture
   behind the deployed reg2 result.
 """
-from .model import UNetResSE, UNetResSEASPP
+from .model import UNetResSE
 from .diffim_model import UNetResSEOrientHough, LineAggregator
 
-__all__ = ["UNetResSE", "UNetResSEASPP", "UNetResSEOrientHough", "LineAggregator"]
+__all__ = ["UNetResSE", "UNetResSEOrientHough", "LineAggregator"]
