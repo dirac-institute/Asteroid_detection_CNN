@@ -116,25 +116,6 @@ def matched_filter_from_coords(
     return S / max(Nnoise, 1e-6), n_line, S, L_eff
 
 
-def matched_filter_one(
-    diffim_panel: np.ndarray,
-    panel_sigma: float,
-    footprint_mask: np.ndarray,
-    *,
-    line_width: int = 2,
-    pad_length: int = 4,
-) -> tuple[float, int, float, float]:
-    """Compatibility wrapper. Returns (mf_snr, n_line_pixels, flux, length)."""
-    ys, xs = np.where(footprint_mask)
-    return matched_filter_from_coords(
-        diffim_panel, panel_sigma, ys, xs,
-        line_width=line_width, pad_length=pad_length,
-    )
-
-
-# -----------------------------------------------------------------------------
-# Per-panel batch processors.
-# -----------------------------------------------------------------------------
 def matched_filter_for_nn_candidates(
     cand_df: pd.DataFrame,
     panel_probs: dict[int, np.ndarray],
@@ -231,67 +212,3 @@ def matched_filter_for_nn_candidates(
     return out
 
 
-def matched_filter_for_lsst_footprints(
-    real_labels_panel: np.ndarray,
-    diffim_panel: np.ndarray,
-    truth_id_mask_panel: np.ndarray | None,
-    panel_sigma: float,
-    *,
-    line_width: int = 2,
-    pad_length: int = 4,
-) -> pd.DataFrame:
-    """For each unique footprint id in real_labels_panel, compute the
-    matched-filter SNR + whether it overlaps any injection truth pixel.
-
-    Returns a DataFrame with columns:
-      footprint_id, area, mf_snr, mf_n_line, mf_flux, mf_length,
-      matched_injection (bool), matched_overlap_px
-    """
-    rows = []
-    max_id = int(real_labels_panel.max())
-    if max_id == 0:
-        return pd.DataFrame(columns=["footprint_id", "area", "mf_snr", "mf_n_line",
-                                     "mf_flux", "mf_length",
-                                     "matched_injection", "matched_overlap_px"])
-    # Compute per-label (ys, xs) once via a single scan.
-    ys_all, xs_all = np.nonzero(real_labels_panel)
-    if ys_all.size == 0:
-        return pd.DataFrame(columns=["footprint_id", "area", "mf_snr", "mf_n_line",
-                                     "mf_flux", "mf_length",
-                                     "matched_injection", "matched_overlap_px"])
-    lab_at = real_labels_panel[ys_all, xs_all].astype(np.int64)
-    order = np.argsort(lab_at, kind="stable")
-    lab_sorted = lab_at[order]
-    ys_sorted = ys_all[order]
-    xs_sorted = xs_all[order]
-    starts = np.searchsorted(lab_sorted, np.arange(1, max_id + 2))
-
-    for fid in range(1, max_id + 1):
-        s, e = int(starts[fid - 1]), int(starts[fid])
-        if e - s < 3:
-            continue
-        ys = ys_sorted[s:e]
-        xs = xs_sorted[s:e]
-        snr, nline, flux, Leff = matched_filter_from_coords(
-            diffim_panel, panel_sigma, ys, xs,
-            line_width=line_width, pad_length=pad_length,
-        )
-        if truth_id_mask_panel is not None:
-            # Direct lookup at (ys, xs) — no panel-sized allocation.
-            tvals = truth_id_mask_panel[ys, xs]
-            overlap = int((tvals > 0).sum())
-            matched = overlap >= 1
-        else:
-            overlap = 0
-            matched = False
-        rows.append({
-            "footprint_id": int(fid),
-            "area": int(ys.size),
-            "mf_snr": float(snr),
-            "mf_n_line": int(nline),
-            "mf_flux": float(flux),
-            "mf_length": float(Leff),
-            "matched_injection": bool(matched),
-            "matched_overlap_px": int(overlap),
-        })
-    return pd.DataFrame(rows)
