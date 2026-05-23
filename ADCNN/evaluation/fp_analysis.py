@@ -34,7 +34,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from ADCNN.inference.diffim_eval import predict_panel_overlap_3ch_full
+from ADCNN.inference.predict import predict_panel_overlap_3ch_full
 from ADCNN.inference.diffim_postproc_v2 import (
     DEFAULT_THR, RF_FEATURES_V2, apply_rf_v2, compute_v2_features, load_rf,
     materialize_label_mask_v2, train_rf_v2,

@@ -21,7 +21,7 @@ import pandas as pd
 import torch
 from sklearn.ensemble import RandomForestClassifier
 
-from ADCNN.inference.diffim_eval import predict_panel_overlap_3ch_full
+from ADCNN.inference.predict import predict_panel_overlap_3ch_full
 from ADCNN.inference.diffim_postproc_v2 import (
     RF_FEATURES_V2, compute_v2_features, label_candidates_by_injection_overlap, save_rf,
 )

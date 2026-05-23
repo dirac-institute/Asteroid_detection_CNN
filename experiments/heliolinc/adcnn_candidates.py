@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np, pandas as pd, h5py, torch
 REPO=Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
 sys.path.insert(0,str(REPO)); sys.path.insert(0,str(REPO/"experiments/explore_simreal_gap"))
-from ADCNN.inference.diffim_eval import predict_panel_overlap_3ch_full
+from ADCNN.inference.predict import predict_panel_overlap_3ch_full
 from ADCNN.inference.diffim_postproc_v2 import compute_v2_features, apply_rf_v2, load_rf, RF_FEATURES_V2
 REG2=REPO/"experiments/diffim_runs/pilot_v7_reg2/ckpts/v7_reg2_best_scripted.pt"
 RF=REPO/"experiments/explore_simreal_gap/rf_postproc_v2_reg2_neg5.pkl"
