@@ -112,6 +112,24 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-x))
 
 
+# ------------------------------------------------------------------------------
+# PERFORMANCE NOTE (inference throughput bottleneck for the discovery pipeline):
+# the matched-filter feature family below (_add_long_mf, _add_multiangle_mf,
+# _add_low_thr_pca, _add_orient) rasterises a fresh `cv2.line` into a freshly
+# allocated `np.zeros((Hl,Wl))` PER CANDIDATE (and, for multiangle, per angle).
+# Allocations + Python loops dominate stage-2 time. Safe, output-preserving wins:
+#   1. precompute the oriented line stencils once per (length, angle) and slice
+#      with a per-candidate offset instead of re-rasterising;
+#   2. replace line rasterisation with scipy.ndimage.map_coordinates sampling
+#      along the analytic segment (no raster, no per-call allocation);
+#   3. reuse a per-panel scratch buffer (buf[:Hl,:Wl].fill(0)) instead of np.zeros.
+# REQUIREMENT: any change here MUST be guarded by a bit-equivalence test — compute
+# the full 72-feature matrix on a sample of test_5sigma candidates before and after
+# and assert identical — because the RF (models/rf_postproc.pkl) and the verified
+# 96.0% recall depend on these feature values being unchanged.
+# ------------------------------------------------------------------------------
+
+
 def _add_long_mf(cand_df, panel_probs, diffims, panel_sigmas, *,
                  line_length: int, line_width: int = 2):
     """Fixed-length MF: PCA from each candidate's component, draw an
