@@ -35,7 +35,7 @@ import cv2
 
 from ADCNN.utils.angle_utils import deg2rad
 from ADCNN.utils.helpers import draw_one_line
-from ADCNN.inference.diffim_matched_filter import panel_mad_sigma
+from ADCNN.inference.matched_filter import panel_mad_sigma
 
 
 __all__ = [

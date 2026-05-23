@@ -29,11 +29,11 @@ Run each with `--help`. Butler entries use the `lsst_distrib` env; train/inferen
 the `asteroid_cnn` (torch) env.
 
 ## Package layout
-- `ADCNN/core/`       — `model.py` (UNetResSE backbone), `diffim_model.py` (v7)
-- `ADCNN/data/`       — `diffim_dataset.py`; `dataset_creation/` (Butler sim + real data builders)
-- `ADCNN/training/`   — `diffim_train.py` (v7 trainer), `ema.py`
+- `ADCNN/core/`       — `model.py` (UNetResSE backbone), `detector.py` (v7)
+- `ADCNN/data/`       — `dataset.py`; `dataset_creation/` (Butler sim + real data builders)
+- `ADCNN/training/`   — `train.py` (v7 trainer), `ema.py`
 - `ADCNN/inference/`  — v7 prediction, candidate extraction, matched-filter features, RF
-                        post-processor (`diffim_postproc_v2`), RF training (`rf_train`), export
+                        post-processor (`rf_postproc`), RF training (`rf_train`), export
 - `ADCNN/evaluation/` — object/pixel metrics, geometry, real-data eval, threshold scan
 - `models/`           — deployed weights (above)
 - `Evaluation/`       — `Evaluation.ipynb` (synthetic) + `Evaluation_Real.ipynb` (real), evaluating `models/`

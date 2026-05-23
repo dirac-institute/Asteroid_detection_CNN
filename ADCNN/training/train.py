@@ -13,7 +13,7 @@ The reg2 recipe that produced models/v7_diffim_scripted.pt: lambda_orient=0 +
 (--widths 24 48 96 192 384), trained on the realistic-trail diffim set via
 --data-sources. The canonical launch is ADCNN/pipelines/train_end_to_end.py.
 
-CLI:  python -m ADCNN.training.diffim_train --run-name <name> [flags]
+CLI:  python -m ADCNN.training.train --run-name <name> [flags]
 """
 from __future__ import annotations
 
@@ -33,11 +33,11 @@ from torch.utils.data import DataLoader
 from sklearn.metrics import roc_auc_score
 
 from ADCNN.training.ema import EMAModel
-from ADCNN.data.diffim_dataset import (
+from ADCNN.data.dataset import (
     DiffimRandomCropDataset3ch,
     collate_v5,
 )
-from ADCNN.core.diffim_model import UNetResSEOrientHough
+from ADCNN.core.detector import UNetResSEOrientHough
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 from ADCNN.core.losses import masked_aftl_loss, masked_orient_mse
@@ -191,7 +191,7 @@ def main():
     if args.data_sources:
         # train on MULTIPLE full-panel h5 datasets (no merge) via DiffimConcatDataset.
         # --data-sources "h5a:csva" "h5b:csvb" ... ; val from --data-h5/--data-csv val panels.
-        from ADCNN.data.diffim_dataset import DiffimConcatDataset
+        from ADCNN.data.dataset import DiffimConcatDataset
         srcs = [tuple(s.split(":")) for s in args.data_sources]
         log(f"MULTI-SOURCE training on {len(srcs)} h5 datasets: {[s[0].split('/')[-2] for s in srcs]}")
         train_ds = DiffimConcatDataset(

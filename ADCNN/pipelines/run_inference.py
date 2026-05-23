@@ -20,7 +20,7 @@ import pandas as pd
 import torch
 
 from ADCNN.inference.predict import predict_panel_overlap_3ch_full
-from ADCNN.inference.diffim_postproc_v2 import (
+from ADCNN.inference.rf_postproc import (
     RF_FEATURES_V2, compute_v2_features, apply_rf_v2, load_rf,
 )
 

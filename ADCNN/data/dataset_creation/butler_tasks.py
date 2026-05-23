@@ -214,7 +214,7 @@ def fetch_from_butler(butler, dataId, threshold = 5.0, measueTrails=False):
 # Diffim primitives (template fetch + AlardLupton subtract + DIA detect)
 # ======================================================================================
 #
-# Used by simulate_inject_diffim.py. The pattern mirrors the proven flow in
+# Used by simulate.py. The pattern mirrors the proven flow in
 # experiments/diffim/stage1_generate/driver.py, with two stack-specific quirks
 # baked in:
 #   1) `band=:band` bind on template_coadd queries silently no-ops on this

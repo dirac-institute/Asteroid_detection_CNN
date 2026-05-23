@@ -35,11 +35,11 @@ import pandas as pd
 import torch
 
 from ADCNN.inference.predict import predict_panel_overlap_3ch_full
-from ADCNN.inference.diffim_postproc_v2 import (
+from ADCNN.inference.rf_postproc import (
     DEFAULT_THR, RF_FEATURES_V2, apply_rf_v2, compute_v2_features, load_rf,
     materialize_label_mask_v2, train_rf_v2,
     label_candidates_by_injection_overlap)
-from ADCNN.inference.diffim_matched_filter import panel_mad_sigma
+from ADCNN.inference.matched_filter import panel_mad_sigma
 from ADCNN.utils.helpers import draw_one_line
 
 FEATS = list(RF_FEATURES_V2)

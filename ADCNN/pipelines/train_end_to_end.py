@@ -51,7 +51,7 @@ def main():
 
     # --- Stage 1: NN (reg2 recipe) ---
     if not a.skip_nn:
-        cmd = [sys.executable, "-m", "ADCNN.training.diffim_train", "--run-name", a.run_name,
+        cmd = [sys.executable, "-m", "ADCNN.training.train", "--run-name", a.run_name,
                "--out-root", a.out_root, "--epochs", str(a.epochs),
                "--lambda-orient", "0.0", "--dropout", "0.15", "--wd", "1e-4",
                "--intensity-aug", "--augment", "--ema-exclude", "agg_alpha",
@@ -63,7 +63,7 @@ def main():
         print("[stage1-nn]", " ".join(cmd), flush=True)
         subprocess.run(cmd, check=True)
         # export best checkpoint -> TorchScript
-        subprocess.run([sys.executable, "-m", "ADCNN.inference.diffim_export",
+        subprocess.run([sys.executable, "-m", "ADCNN.inference.export",
                         "--ckpt", str(best), "--out", str(scripted), "--no-optimize"], check=True)
         print(f"[stage1-nn] scripted v7 -> {scripted}", flush=True)
 

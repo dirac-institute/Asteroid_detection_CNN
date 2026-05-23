@@ -15,7 +15,7 @@ additive, backward-compatible discoverability layer:
 
     from ADCNN.inference import (
         predict_panel_overlap_3ch_full,        # diffim_eval
-        compute_v2_features, apply_rf_v2,      # diffim_postproc_v2
+        compute_v2_features, apply_rf_v2,      # rf_postproc
         materialize_label_mask_v2, load_rf, save_rf,
         build_rf_postproc_v2, train_rf_v2, rf_score_sweep,
         RF_FEATURES_V2, DEFAULT_THR,
@@ -27,16 +27,16 @@ import importlib
 # public name -> defining submodule (relative to this package)
 _LAZY = {
     "predict_panel_overlap_3ch_full": ".diffim_eval",
-    "compute_v2_features":            ".diffim_postproc_v2",
-    "apply_rf_v2":                    ".diffim_postproc_v2",
-    "materialize_label_mask_v2":      ".diffim_postproc_v2",
-    "build_rf_postproc_v2":           ".diffim_postproc_v2",
-    "train_rf_v2":                    ".diffim_postproc_v2",
-    "rf_score_sweep":                 ".diffim_postproc_v2",
-    "load_rf":                        ".diffim_postproc_v2",
-    "save_rf":                        ".diffim_postproc_v2",
-    "RF_FEATURES_V2":                 ".diffim_postproc_v2",
-    "DEFAULT_THR":                    ".diffim_postproc_v2",
+    "compute_v2_features":            ".rf_postproc",
+    "apply_rf_v2":                    ".rf_postproc",
+    "materialize_label_mask_v2":      ".rf_postproc",
+    "build_rf_postproc_v2":           ".rf_postproc",
+    "train_rf_v2":                    ".rf_postproc",
+    "rf_score_sweep":                 ".rf_postproc",
+    "load_rf":                        ".rf_postproc",
+    "save_rf":                        ".rf_postproc",
+    "RF_FEATURES_V2":                 ".rf_postproc",
+    "DEFAULT_THR":                    ".rf_postproc",
 }
 
 __all__ = sorted(_LAZY)

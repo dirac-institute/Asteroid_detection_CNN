@@ -6,7 +6,7 @@ Once exported, the .pt file can be loaded as:
 without needing the UNetResSEOrientHough class definition.
 
 Usage:
-    python -m ADCNN.inference.diffim_export \
+    python -m ADCNN.inference.export \
         --ckpt experiments/diffim_runs/pilot_v7/ckpts/best.pt \
         --out  experiments/diffim_runs/../../models/v7_diffim_scripted.pt
 """
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import torch
 
-from ADCNN.core.diffim_model import UNetResSEOrientHough
+from ADCNN.core.detector import UNetResSEOrientHough
 
 
 def export_torchscript(ckpt_path: str, out_path: str, *,

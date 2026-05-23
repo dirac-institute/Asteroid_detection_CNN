@@ -12,7 +12,7 @@ Production recipe (the data the deployed reg2 model was trained on):
   - EXCLUDE the test_5sigma + test_real (visit,detector) pairs (leakage-safe)
 
 This is a thin, documented wrapper around
-``ADCNN.data.dataset_creation.simulate_inject_diffim`` which carries the full CLI;
+``ADCNN.data.dataset_creation.simulate`` which carries the full CLI;
 run that module's ``--help`` for every knob. Example production launch:
 
     python -m ADCNN.pipelines.make_sim_data \\
@@ -20,7 +20,7 @@ run that module's ``--help`` for every knob. Example production launch:
         --realistic-trail --skip-prevalidation \\
         --exclude-pairs-csv DATA_DIFFIM/test_5sigma/test.csv DATA_DIFFIM/test_real/test.csv
 """
-from ADCNN.data.dataset_creation.simulate_inject_diffim import main
+from ADCNN.data.dataset_creation.simulate import main
 
 if __name__ == "__main__":
     main()

@@ -1,6 +1,6 @@
 """UNet-ResSE backbone — the feature extractor under the v7 diffim detector.
 
-A residual squeeze-and-excite U-Net. ``UNetResSEOrientHough`` (in ``diffim_model.py``)
+A residual squeeze-and-excite U-Net. ``UNetResSEOrientHough`` (in ``detector.py``)
 wraps this backbone with ``out_ch=3`` (segmentation logit + orientation sin2β/cos2β)
 plus a Hough-style line aggregator. The block implementations below are kept exactly
 as the deployed reg2 weights were trained against — do not alter their arithmetic.

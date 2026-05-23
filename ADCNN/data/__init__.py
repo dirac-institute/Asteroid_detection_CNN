@@ -5,7 +5,7 @@
 orientation supervision. ``build_3channel`` / ``diffim_mad_sigma`` are the shared
 preprocessing primitives.
 """
-from .diffim_dataset import (
+from .dataset import (
     DiffimRandomCropDataset3ch,
     DiffimConcatDataset,
     build_3channel,

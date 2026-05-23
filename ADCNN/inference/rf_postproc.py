@@ -15,7 +15,7 @@ The trained RF is shipped at:
 
 Use this module from notebook / scripts as:
 
-    from ADCNN.inference.diffim_postproc_v2 import (
+    from ADCNN.inference.rf_postproc import (
         compute_v2_features, apply_rf_v2, materialize_label_mask_v2, RF_FEATURES_V2,
     )
 
@@ -37,11 +37,11 @@ import numpy as np
 import pandas as pd
 from scipy import ndimage as ndi
 
-from ADCNN.inference.diffim_candidates import (
+from ADCNN.inference.candidates import (
     extract_candidates,
     CandidateExtractorConfig,
 )
-from ADCNN.inference.diffim_matched_filter import (
+from ADCNN.inference.matched_filter import (
     panel_mad_sigma,
     matched_filter_for_nn_candidates,
 )

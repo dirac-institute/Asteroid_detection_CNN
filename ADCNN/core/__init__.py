@@ -7,6 +7,6 @@
   behind the deployed reg2 result.
 """
 from .model import UNetResSE
-from .diffim_model import UNetResSEOrientHough, LineAggregator
+from .detector import UNetResSEOrientHough, LineAggregator
 
 __all__ = ["UNetResSE", "UNetResSEOrientHough", "LineAggregator"]

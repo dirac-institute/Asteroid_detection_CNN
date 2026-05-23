@@ -79,7 +79,7 @@ def make_galsim_trail_realistic(source_data, wcs, sky_coords, inst_flux,
 
     L = float(source_data["trail_length"])
     # Per-injection RNG. injection_id alone is NOT unique across panels — it is the
-    # per-detector row index 0..n_inject-1 (simulate_inject_diffim.py adds it as `k`),
+    # per-detector row index 0..n_inject-1 (simulate.py adds it as `k`),
     # so seeding on it would repeat the same morphology draw on every panel. Mix the
     # sky position (ra/dec) and L into the seed so each injected trail gets a distinct
     # light curve / taper / curvature, using only integer arithmetic so the result is

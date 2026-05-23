@@ -1,7 +1,7 @@
 """Build a REAL-asteroid test set (``DATA_DIFFIM/test_real``) from genuine
 LSST difference images — no synthetic injection.
 
-This is the non-injection sibling of :mod:`simulate_inject_diffim`. For each
+This is the non-injection sibling of :mod:`simulate`. For each
 ``(visit, detector)`` of a catalogued fast-moving asteroid it fetches the
 science PVI + template, runs AlardLupton subtraction + DetectAndMeasure on the
 *uninjected* PVI, and writes the real difference image (with the real trail
@@ -9,8 +9,8 @@ already in it) plus the catalogued empties for a false-positive baseline.
 
 Two CLI subcommands (run inside the LSST stack env, ``setup lsst_distrib``)::
 
-    python -m ADCNN.data.dataset_creation.build_test_real scan  --real-csv ... --out-dir ...
-    python -m ADCNN.data.dataset_creation.build_test_real build --manifest ... --out ...
+    python -m ADCNN.data.dataset_creation.build_real scan  --real-csv ... --out-dir ...
+    python -m ADCNN.data.dataset_creation.build_real build --manifest ... --out ...
 
 ``scan`` probes the Butler for which ``(visit,detector)`` pairs are buildable
 (PVI + single_visit_star_footprints + an overlapping same-band
@@ -49,7 +49,7 @@ from multiprocessing import Manager
 import numpy as np
 import pandas as pd
 
-# --- silence known-harmless stack noise (matches simulate_inject_diffim) ----
+# --- silence known-harmless stack noise (matches simulate) ----
 for _n in ("lsst", "lsst.ip.diffim", "lsst.detectAndMeasure",
            "lsst.meas.algorithms", "ip_diffim_DipoleFit"):
     logging.getLogger(_n).setLevel(logging.ERROR)
@@ -66,10 +66,10 @@ from lsst.geom import Point2D  # noqa: E402
 from lsst.pipe.base import (NoWorkFound, UnprocessableDataError,  # noqa: E402
                             UpstreamFailureNoWorkFound)
 
-from ADCNN.data.dataset_creation.common import draw_one_line, ensure_dir
-from ADCNN.data.dataset_creation.pipetasks import (
+from ADCNN.data.dataset_creation.photometry import draw_one_line, ensure_dir
+from ADCNN.data.dataset_creation.butler_tasks import (
     fetch_diffim_inputs, run_detect_diffim, run_subtract)
-from ADCNN.data.dataset_creation.simulate_inject_diffim import (
+from ADCNN.data.dataset_creation.simulate import (
     footprints_to_label_mask, format_dataId)
 
 _SKIP = (Exception, NoWorkFound, UnprocessableDataError,
@@ -497,7 +497,7 @@ def build(manifest, out, real_csv, *, repo=DEF_REPO, stage3=DEF_STAGE3,
 # ======================================================================
 def main():
     ap = argparse.ArgumentParser(
-        "build_test_real", description=__doc__,
+        "build_real", description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("scan", "build"):
