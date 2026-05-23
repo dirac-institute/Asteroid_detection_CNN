@@ -11,9 +11,12 @@ REG2=REPO/"experiments/diffim_runs/pilot_v7_reg2/ckpts/v7_reg2_best_scripted.pt"
 RF=REPO/"experiments/explore_simreal_gap/rf_postproc_v2_reg2_neg5.pkl"
 H5=REPO/"DATA_DIFFIM/test_real/test.h5"; PANELS=REPO/"DATA_DIFFIM/test_real/panels.csv"
 ap=argparse.ArgumentParser(); ap.add_argument("--limit",type=int,default=0); ap.add_argument("--rf-thr",type=float,default=0.5)
-ap.add_argument("--role",default="asteroid"); ap.add_argument("--out",default=str(REPO/"experiments/heliolinc/run_adcnn/candidates.parquet")); a=ap.parse_args()
+ap.add_argument("--role",default="asteroid"); ap.add_argument("--panels-csv",default=""); ap.add_argument("--shard",type=int,default=0); ap.add_argument("--nshards",type=int,default=1)
+ap.add_argument("--out",default=str(REPO/"experiments/heliolinc/run_adcnn/candidates.parquet")); a=ap.parse_args()
 dev=torch.device("cuda"); model=torch.jit.load(str(REG2),map_location=dev).eval(); rf=load_rf(str(RF))
-pan=pd.read_csv(PANELS); pan=pan[pan.role==a.role] if a.role!="all" else pan
+pan=pd.read_csv(a.panels_csv) if a.panels_csv else (pd.read_csv(PANELS) if a.role=="all" else pd.read_csv(PANELS)[lambda d:d.role==a.role])
+pan=pan.sort_values(["visit","detector"]).reset_index(drop=True)
+if a.nshards>1: pan=pan.iloc[a.shard::a.nshards]
 if a.limit: pan=pan.head(a.limit)
 rows=[]
 with h5py.File(H5,"r") as f:
