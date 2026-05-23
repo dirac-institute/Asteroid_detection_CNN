@@ -12,11 +12,13 @@ from eval_best_vs_last import real_fire, synth_recall
 CK = REPO / "experiments/diffim_runs/pilot_v7_huge/ckpts/v7_huge_best_scripted.pt"
 
 def main():
+    ck = sys.argv[1] if len(sys.argv) > 1 else str(CK)
+    label = sys.argv[2] if len(sys.argv) > 2 else "pilot_v7_huge"
     dev = torch.device("cuda")
-    m = torch.jit.load(str(CK), map_location=dev).eval()
+    m = torch.jit.load(ck, map_location=dev).eval()
     n, f5, f3, med = real_fire(m, dev)
     stp, sfn, srec = synth_recall(m, dev)
-    print("\n===== pilot_v7_huge BEST (ep9, ~3980 panels) =====", flush=True)
+    print(f"\n===== {label} BEST =====", flush=True)
     print(f"  SYNTH test_5sigma v7-only objectwise recall: {stp}/{stp+sfn} = {100*srec:.1f}%  (v7-big: 96.4%)", flush=True)
     print(f"  REAL in-region stack-missed v7-fire@truth: n={n}  >=0.5={f5} ({100*f5/n:.0f}%)  "
           f">=0.3={f3} ({100*f3/n:.0f}%)  med_pmax={med:.3f}   (v7-big: 77% @>=0.5)", flush=True)
