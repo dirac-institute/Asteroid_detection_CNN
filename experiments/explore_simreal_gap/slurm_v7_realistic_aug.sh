@@ -1,5 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=adc-v7-real-aug
+#SBATCH --requeue
 #SBATCH --account=kipac:kipac
 #SBATCH --partition=ampere
 #SBATCH --nodes=1

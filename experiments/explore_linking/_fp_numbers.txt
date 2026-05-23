@@ -1,0 +1,55 @@
+======================================================================
+RIGOROUS FP-TRACKLET SURVIVAL MODEL
+======================================================================
+CCD: 0.2276 x 0.2224 deg, area 0.05062 deg^2
+FP/CCD: median 67, mean 82, sd 47
+
+------------------------------------------------------------------
+astrometric residual tolerance sigma_pos = 0.3"
+  intra-night dt=15 min            : r0=0.250 w=0.480 deg, corridor frac f=1.000e+00, E[FP tracklets/field-pair]=4489.00
+  intra-night dt=1 hr              : r0=1.000 w=1.917 deg, corridor frac f=1.000e+00, E[FP tracklets/field-pair]=4489.00
+  intra-night dt=4 hr (same night) : r0=4.000 w=7.667 deg, corridor frac f=1.000e+00, E[FP tracklets/field-pair]=4489.00
+  cross-night attribution: p_pos=3.879e-06 p_rate=2.500e-03 -> per-tracklet attribution prob ~ 9.698e-09
+  with ~4489 candidate later-night tracklets: P(spurious tracklet attributes) ~ 4.353e-05
+  => residual FALSE 3-epoch tracks / field ~ 1.954e-01
+  => FP suppression factor vs single-visit (67/CCD): ~3.43e+02x
+
+------------------------------------------------------------------
+astrometric residual tolerance sigma_pos = 0.5"
+  intra-night dt=15 min            : r0=0.250 w=0.480 deg, corridor frac f=1.000e+00, E[FP tracklets/field-pair]=4489.00
+  intra-night dt=1 hr              : r0=1.000 w=1.917 deg, corridor frac f=1.000e+00, E[FP tracklets/field-pair]=4489.00
+  intra-night dt=4 hr (same night) : r0=4.000 w=7.667 deg, corridor frac f=1.000e+00, E[FP tracklets/field-pair]=4489.00
+  cross-night attribution: p_pos=1.078e-05 p_rate=2.500e-03 -> per-tracklet attribution prob ~ 2.694e-08
+  with ~4489 candidate later-night tracklets: P(spurious tracklet attributes) ~ 1.209e-04
+  => residual FALSE 3-epoch tracks / field ~ 5.428e-01
+  => FP suppression factor vs single-visit (67/CCD): ~1.23e+02x
+
+------------------------------------------------------------------
+astrometric residual tolerance sigma_pos = 1.0"
+  intra-night dt=15 min            : r0=0.250 w=0.481 deg, corridor frac f=1.000e+00, E[FP tracklets/field-pair]=4489.00
+  intra-night dt=1 hr              : r0=1.000 w=1.918 deg, corridor frac f=1.000e+00, E[FP tracklets/field-pair]=4489.00
+  intra-night dt=4 hr (same night) : r0=4.000 w=7.668 deg, corridor frac f=1.000e+00, E[FP tracklets/field-pair]=4489.00
+  cross-night attribution: p_pos=4.310e-05 p_rate=2.500e-03 -> per-tracklet attribution prob ~ 1.078e-07
+  with ~4489 candidate later-night tracklets: P(spurious tracklet attributes) ~ 4.836e-04
+  => residual FALSE 3-epoch tracks / field ~ 2.171e+00
+  => FP suppression factor vs single-visit (67/CCD): ~3.09e+01x
+
+======================================================================
+INTERPRETATION
+======================================================================
+
+- A 2-point positional gate alone does NOT help: at 67 FP/CCD the search
+  corridor for any plausible asteroid rate covers an order-1 fraction of
+  the chip, so spurious intra-night 'tracklets' form readily
+  (E[FP tracklets/field] is tens-to-hundreds). 2-of-2 is a weak filter.
+- The decisive lever is CROSS-NIGHT ATTRIBUTION to a kinematically
+  consistent orbit (>=3 epochs): a spurious tracklet has a random implied
+  rate+direction and must, by pure chance, find a later-night spurious
+  tracklet that continues the SAME great-circle, constant-rate motion to
+  arcsec/percent tolerance. That joint position+rate coincidence is
+  ~1e-4..1e-6 per pair, giving residual FALSE 3-epoch tracks/field ~<<1
+  and an FP-suppression factor of ~1e2..1e5 x relative to the single-visit
+  ~67-82 FP/CCD operating point.
+- In THIS dump the empties are 115 distinct visits / 87 distinct detectors
+  with no revisited pointing, so the realized linkable-FP count is 0; the
+  numbers above are the modelled survey-realistic upper bound.

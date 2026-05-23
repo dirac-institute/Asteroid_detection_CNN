@@ -1,0 +1,61 @@
+==============================================================================
+(a) 2-D  score x mf_snr  cut  (FP counted on empft, SNR-matched)
+==============================================================================
+rule: keep if score>=s_hi  OR  (3<=mf_snr<12 AND score>=s_lo)
+ s_lo  s_hi new_obj new_sight   FP/CCD
+ 0.04  0.20       3        31     81.1
+ 0.04  0.30       2        26     80.3
+ 0.04  0.50       0        17     80.2
+ 0.06  0.20       3        27     60.4
+ 0.06  0.30       2        22     59.6
+ 0.06  0.50       0        13     59.6
+ 0.08  0.20       3        26     43.8
+ 0.08  0.30       2        21     42.9
+ 0.08  0.50       0        12     42.9
+ 0.10  0.20       3        26     32.2
+ 0.10  0.30       2        21     31.4
+ 0.10  0.50       0        12     31.3
+ 0.15  0.20       3        22     16.8
+ 0.15  0.30       2        17     16.0
+ 0.15  0.50       0         8     15.9
+
+  flat-threshold baseline, FP via empft (same CCDs as 2-D rule):
+    thr new_obj new_sight   FP/CCD
+   0.04      16       100    236.3
+   0.06      14        71    132.9
+   0.08       9        53     77.7
+   0.10       8        47     47.6
+   0.15       4        28     19.1
+   0.20       3        20      9.7
+   0.30       2        14      2.4
+   0.50       0         3      0.0
+
+==============================================================================
+(b) per-band restriction (r,i,z = high value; u,y = low value)
+==============================================================================
+
+  thr=0.05
+  bandset    new_obj new_sight asteroid_cand_frac
+  all             13        78              0.970
+  drop_u          13        55              0.720
+  drop_uy         12        45              0.654
+  riz_only         9        38              0.523
+
+  thr=0.1
+  bandset    new_obj new_sight asteroid_cand_frac
+  all              7        46              0.968
+  drop_u           7        35              0.775
+  drop_uy          6        26              0.705
+  riz_only         4        23              0.571
+
+  thr=0.2
+  bandset    new_obj new_sight asteroid_cand_frac
+  all              2        19              0.968
+  drop_u           2        16              0.815
+  drop_uy          2        11              0.745
+  riz_only         2        10              0.610
+
+Note: empties in cand_*.csv carry no band, so a per-band gate's FP
+benefit is not measurable here. In production the pipeline runs per
+CCD/band, so restricting to r,i,z would drop ~the u/y empty CCDs'
+FP entirely while losing only ~2 new objects (u,y give 1 each).

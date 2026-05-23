@@ -1,0 +1,66 @@
+==============================================================================
+PHYSICAL FP GATES  (keep syn5 positives posR>=0.99, cut empft FP)
+N_pos(label_v2==1)=877  N_FP(empft)=121844  empty CCDs=150
+baseline FP/CCD (all empft) = 812.3
+==============================================================================
+
+-- single-feature LOWER-bound gates (x >= cut), tuned to posR>=0.99 --
+feature                       cut   posR  fpKeep   FP/CCD
+or_agg_mean_loose          0.1692  0.990   0.858    696.7
+or_agg_mean_tight          0.1866  0.990   0.882    716.5
+or_agg_max                 0.4774  0.990   0.911    740.1
+or_r                       0.4409  0.990   0.965    783.8
+mf_length                  7.0000  0.997   0.958    778.1
+area                       6.0000  0.993   0.947    769.1
+mf_snr                    -0.8015  0.990   0.940    763.7
+mf_n_line                 24.0000  0.992   0.953    774.0
+or_n_pix                 358.6000  0.990   0.930    755.4
+lpca_L_w48_t10            25.4290  0.990   0.974    791.5
+elongation                 1.5163  0.990   0.953    773.9
+
+-- COMBINED AND gate @ pos p1.0 : {'or_agg_mean_loose': 0.16916441917419434, 'mf_length': 7.0, 'area': 6.0, 'mf_snr': -0.8015059232711792}
+   posR=0.9704  fpKeep=0.7501  FP/CCD=609.3  (baseline 812.3)
+
+-- COMBINED AND gate @ pos p0.5 : {'or_agg_mean_loose': 0.1270904392004013, 'mf_length': 7.0, 'area': 5.0, 'mf_snr': -1.374179482460022}
+   posR=0.9818  fpKeep=0.8450  FP/CCD=686.4  (baseline 812.3)
+
+-- COMBINED AND gate @ pos p0.25 : {'or_agg_mean_loose': 0.10579166561365128, 'mf_length': 1.330000400543213, 'area': 4.0, 'mf_snr': -1.6487065553665161}
+   posR=0.9897  fpKeep=0.8997  FP/CCD=730.8  (baseline 812.3)
+
+-- COMBINED AND gate @ pos p0.1 : {'or_agg_mean_loose': 0.07146947085857391, 'mf_length': 0.0, 'area': 4.0, 'mf_snr': -1.953882098197937}
+   posR=0.9977  fpKeep=0.9739  FP/CCD=791.1  (baseline 812.3)
+
+-- best practical gates (posR>=0.99) --
+  area                   cut>=6.0000  posR=0.9932  FP/CCD 769.1 (=5% FP cut)
+  mf_n_line              cut>=24.0000  posR=0.9920  FP/CCD 774.0 (=5% FP cut)
+  mf_length              cut>=7.0000  posR=0.9966  FP/CCD 778.1 (=4% FP cut)
+
+-- 2-feature AND combos tuned to joint posR>=0.99 --
+  or_agg_mean_loose   +or_agg_mean_tight    posR=0.9977 FP/CCD= 782.4 (4% cut)  cuts={'or_agg_mean_loose': 0.095, 'or_agg_mean_tight': 0.108}
+  or_agg_mean_loose   +mf_length            posR=0.9977 FP/CCD= 783.2 (4% cut)  cuts={'or_agg_mean_loose': 0.095, 'mf_length': 0.0}
+  or_agg_mean_loose   +mf_snr               posR=0.9954 FP/CCD= 774.0 (5% cut)  cuts={'or_agg_mean_loose': 0.095, 'mf_snr': -1.752}
+  or_agg_mean_loose   +area                 posR=0.9977 FP/CCD= 783.2 (4% cut)  cuts={'or_agg_mean_loose': 0.095, 'area': 4.0}
+  or_agg_mean_loose   +or_r                 posR=0.9954 FP/CCD= 781.4 (4% cut)  cuts={'or_agg_mean_loose': 0.095, 'or_r': 0.124}
+  or_agg_mean_tight   +mf_length            posR=0.9977 FP/CCD= 786.6 (3% cut)  cuts={'or_agg_mean_tight': 0.108, 'mf_length': 0.0}
+  or_agg_mean_tight   +mf_snr               posR=0.9954 FP/CCD= 777.3 (4% cut)  cuts={'or_agg_mean_tight': 0.108, 'mf_snr': -1.752}
+  or_agg_mean_tight   +area                 posR=0.9977 FP/CCD= 786.6 (3% cut)  cuts={'or_agg_mean_tight': 0.108, 'area': 4.0}
+  or_agg_mean_tight   +or_r                 posR=0.9954 FP/CCD= 784.8 (3% cut)  cuts={'or_agg_mean_tight': 0.108, 'or_r': 0.124}
+  mf_length           +mf_snr               posR=0.9977 FP/CCD= 802.2 (1% cut)  cuts={'mf_length': 0.0, 'mf_snr': -1.752}
+  mf_length           +area                 posR=1.0000 FP/CCD= 812.3 (0% cut)  cuts={'mf_length': 0.0, 'area': 4.0}
+  mf_length           +or_r                 posR=0.9977 FP/CCD= 810.4 (0% cut)  cuts={'mf_length': 0.0, 'or_r': 0.124}
+  mf_snr              +area                 posR=0.9977 FP/CCD= 802.2 (1% cut)  cuts={'mf_snr': -1.752, 'area': 4.0}
+  mf_snr              +or_r                 posR=0.9954 FP/CCD= 800.4 (1% cut)  cuts={'mf_snr': -1.752, 'or_r': 0.124}
+  area                +or_r                 posR=0.9977 FP/CCD= 810.4 (0% cut)  cuts={'area': 4.0, 'or_r': 0.124}
+
+==============================================================================
+PROJECTION onto flat science frontier (best single gate)
+==============================================================================
+chosen gate: area >= 6.0000  (posR=0.9932)
+
+  thr FP/CCD_flat FP/CCD_gated gateKeep@thr new_obj new_sight
+ 0.05       200.9        196.2        0.976      14        79
+ 0.10        79.2         78.8        0.995       8        47
+ 0.15        44.7         44.7        1.000       4        28
+ 0.20        31.4         31.4        1.000       3        20
+ 0.30        18.6         18.6        1.000       2        14
+ 0.50         8.3          8.3        1.000       0         3
