@@ -551,7 +551,7 @@ def combined_objectwise_confusion_separate(
     # ---------------------------
     # 4) Stack FP counted separately from stack mask
     # ---------------------------
-    stack_fp = stack_mask.max(axis=(1, 2)).sum()
+    stack_fp = 0 if stack_mask is None else int(stack_mask.max(axis=(1, 2)).sum())
 
     # ---------------------------
     # 5) Total FP = NN FP + stack FP
