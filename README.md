@@ -1,75 +1,44 @@
-# Asteroid_detection_CNN
+# ADCNN — Asteroid Trail Detection in LSST Difference Images
 
-Convolutional neural networks for detecting faint asteroid trails in wide-field astronomical images, developed in the context of Rubin Observatory / LSST data analysis.
+Two-stage detector for asteroid trails in LSST difference images, plus linking to
+discover/confirm asteroids:
 
-This repository contains a **PyTorch-based production implementation** for pixel-level detection of trailed moving objects, together with tools for dataset generation, training, evaluation, and post-processing.
+```
+Butler diffim → v7 CNN (segmentation + orientation) → candidates → RandomForest 2nd stage
+              → scored detections → (RA,Dec,MJD) → HelioLinC linking → new/confirmed asteroids
+```
 
----
+## Deployed model
+The production model is **reg2**: v7 (`UNetResSEOrientHough`, half-width) trained with
+`lambda_orient=0` + dropout 0.15 + weight-decay 1e-4 + intensity-augmentation + D4
+augmentation, plus the **neg5 RandomForest** second stage. Verified: **96.0% objectwise
+recall on test_5sigma**, real fire@truth 77%; on the real operating curve it beats the
+prior model (more TP at equal FP). Weights live in `models/`:
+- `models/v7_diffim_scripted.pt` — the TorchScript v7
+- `models/rf_postproc.pkl` — the neg5 RandomForest
 
-## Scientific context
+## Entry points (`ADCNN/pipelines/`)
+| Command | Purpose |
+|---|---|
+| `python -m ADCNN.pipelines.make_sim_data`    | build SIMULATED (injected-trail) train/test diffim datasets from the Butler |
+| `python -m ADCNN.pipelines.make_real_data`   | build the REAL-asteroid test diffim dataset from the Butler |
+| `python -m ADCNN.pipelines.train_end_to_end` | train the full detector: v7 (reg2 recipe) + RandomForest |
+| `python -m ADCNN.pipelines.run_inference`    | run v7 + RF on diffim panels → scored candidate detections |
 
-Detecting faint asteroid trails in modern sky surveys is challenging due to:
-- low surface brightness of trails,
-- variable observing conditions,
-- strong background contamination,
-- limitations of classical detection pipelines.
+Run each with `--help`. Butler entries use the `lsst_distrib` env; train/inference use
+the `asteroid_cnn` (torch) env.
 
-This project explores **deep-learning-based pixelwise segmentation** to recover trailed sources that are often missed by traditional algorithms, with a focus on:
-- LSST / Rubin Observatory–like data,
-- realistic injected datasets,
-- reproducible training and evaluation.
+## Package layout
+- `ADCNN/core/`       — `model.py` (UNetResSE backbone), `diffim_model.py` (v7)
+- `ADCNN/data/`       — `diffim_dataset.py`; `dataset_creation/` (Butler sim + real data builders)
+- `ADCNN/training/`   — `diffim_train.py` (v7 trainer), `ema.py`
+- `ADCNN/inference/`  — v7 prediction, candidate extraction, matched-filter features, RF
+                        post-processor (`diffim_postproc_v2`), RF training (`rf_train`), export
+- `ADCNN/evaluation/` — object/pixel metrics, geometry, real-data eval, threshold scan
+- `models/`           — deployed weights (above)
+- `Evaluation/`       — `Evaluation.ipynb` (synthetic) + `Evaluation_Real.ipynb` (real), evaluating `models/`
+- `experiments/heliolinc/` — HelioLinC linking suite + the ADCNN→HelioLinC bridge + `PIPELINE_DESIGN.md`
 
----
-
-## Features
-
-- PyTorch U-Net–based architectures with residual and attention blocks
-- Robust preprocessing (MAD normalization, sigma clipping)
-- HDF5-based tiled datasets for large focal-plane images
-- Multi-stage and curriculum training strategies
-- Pixel-level and object-level evaluation metrics
-- Two-stage detection concepts (connectivity + scoring)
-- Compatibility with Rubin Butler–based data products
-
----
-
-## Typical workflow
-
-1. **Dataset creation**
-   - Inject synthetic asteroid trails into single-visit images
-   - Store images, masks, and metadata in HDF5 / CSV format
-
-2. **Training**
-   - Train segmentation networks on tiled image data
-   - Use class-imbalanced losses and staged training
-
-3. **Evaluation**
-   - Pixelwise ROC / F1 / AUC
-   - Object-level detection via connected components
-   - Comparison with LSST stack detections
-
----
-
-## Requirements (indicative)
-
-- Python ≥ 3.9
-- PyTorch
-- NumPy, SciPy, pandas
-- h5py
-- matplotlib
-- Rubin Science Pipelines (for data generation and injections)
-
-Exact environments depend on whether you are running on:
-- Rubin USDF / SDF
-- local workstation
-- HPC cluster (SLURM)
-
----
-
-## Status
-
-Active research and development.  
-The codebase evolves alongside:
-- Rubin commissioning data (ComCam / LSSTCam)
-- improved injection realism
-- new detection post-processing strategies
+## Branches
+- `diffim` — this production diffim pipeline (current).
+- `direct_image` — the earlier direct-image detection phase (archived).
