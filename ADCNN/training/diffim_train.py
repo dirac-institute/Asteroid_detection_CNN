@@ -1,16 +1,19 @@
-"""Diffim NN training entry point (formerly experiments/diffim_pilot/v5_train.py).
+"""Diffim NN training entry point — trains the v7 (UNetResSEOrientHough) detector.
 
-The training shape that produced the canonical v7 weights:
-  - 3-channel input (signed diffim, log1p local std, real_labels binary)
-  - UNetResSEOrientHough model (UNet + orientation aux head + line aggregator)
-  - Random-crop sampler over per-injection anchors (positive-anchored
-    with `stk_balance` bias toward LSST-missed positives)
-  - AFTL primary loss + small BCE anchor + masked orientation MSE
-  - EMA with `agg_alpha` excluded (set --ema-exclude agg_alpha)
+Training shape (defaults match the deployed "reg2" model):
+  - 3-channel input: signed MAD-normalised diffim, log1p local-std, real_labels binary
+  - UNetResSEOrientHough: UNet-ResSE backbone + orientation aux head + LineAggregator
+  - random-crop sampler over per-injection anchors (`stk_balance` biases toward
+    LSST-stack-missed positives, the regime the second stage must recover)
+  - loss: masked Asymmetric Focal Tversky + small BCE anchor + masked orientation MSE
+  - EMA over weights (exclude agg_alpha via --ema-exclude agg_alpha)
 
-Run via the CLI:
-    python -m ADCNN.training.diffim_train --run-name pilot_v7 \\
-        --widths 24 48 96 192 384 ...
+The reg2 recipe that produced models/v7_diffim_scripted.pt: lambda_orient=0 +
+--dropout 0.15 + --wd 1e-4 + --intensity-aug + --augment, half-width backbone
+(--widths 24 48 96 192 384), trained on the realistic-trail diffim set via
+--data-sources. The canonical launch is ADCNN/pipelines/train_end_to_end.py.
+
+CLI:  python -m ADCNN.training.diffim_train --run-name <name> [flags]
 """
 from __future__ import annotations
 
@@ -27,6 +30,7 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from sklearn.metrics import roc_auc_score
 
 from ADCNN.training.ema import EMAModel
 from ADCNN.data.diffim_dataset import (
@@ -39,7 +43,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 # ---------------------------------------------------------------------------
-# Losses (inlined from the v4_train.py prototype during consolidation).
+# Losses (training-specific; masked AFTL + small BCE anchor, masked orientation MSE).
 # ---------------------------------------------------------------------------
 def masked_aftl_loss(
     seg_logits: torch.Tensor,
@@ -118,15 +122,15 @@ def validate(model, loader, device, *, lambda_orient: float):
         n += xb.size(0)
         p = torch.sigmoid(seg_logits)
         m = (mask > 0)
-        yy = (yb > 0.5) & m
-        nn = (yb <= 0.5) & m
+        pos_mask = (yb > 0.5) & m
+        neg_mask = (yb <= 0.5) & m
         pp = p.cpu().numpy().ravel()
-        yy = yy.cpu().numpy().ravel()
-        nn = nn.cpu().numpy().ravel()
-        if yy.any():
-            pos_p.append(pp[yy])
-        if nn.any():
-            ng = pp[nn]
+        pos_mask = pos_mask.cpu().numpy().ravel()
+        neg_mask = neg_mask.cpu().numpy().ravel()
+        if pos_mask.any():
+            pos_p.append(pp[pos_mask])
+        if neg_mask.any():
+            ng = pp[neg_mask]
             if ng.size > 100_000:
                 idx = np.random.choice(ng.size, size=100_000, replace=False)
                 ng = ng[idx]
@@ -139,7 +143,6 @@ def validate(model, loader, device, *, lambda_orient: float):
         ns = np.concatenate(neg_p)
         ns_sub = ns if ns.size <= 1_000_000 else np.random.choice(ns, size=1_000_000, replace=False)
         try:
-            from sklearn.metrics import roc_auc_score
             y_true = np.concatenate([np.ones_like(ps), np.zeros_like(ns_sub)])
             y_score = np.concatenate([ps, ns_sub])
             out["val_pixel_auc"] = float(roc_auc_score(y_true, y_score))
@@ -163,9 +166,10 @@ def main():
     ap.add_argument("--n-val-panels", type=int, default=30)
     ap.add_argument("--tile", type=int, default=128)
     ap.add_argument("--epochs", type=int, default=40)
-    ap.add_argument("--batch-size", type=int, default=12,
-                    help="Smaller than v4 (16) because the line aggregator adds memory.")
-    ap.add_argument("--lr", type=float, default=2e-4)
+    ap.add_argument("--batch-size", type=int, default=24,
+                    help="reg2 used 24. Kept modest because the line aggregator is the "
+                         "GPU-memory hotspot (3 multi-scale convs at full resolution).")
+    ap.add_argument("--lr", type=float, default=3e-4)  # reg2
     ap.add_argument("--wd", type=float, default=1e-5)
     ap.add_argument("--n-pos-anchors-per-epoch", type=int, default=1800)
     ap.add_argument("--n-neg-anchors-per-epoch", type=int, default=600)
@@ -175,15 +179,16 @@ def main():
     ap.add_argument("--aftl-beta", type=float, default=0.7)
     ap.add_argument("--aftl-gamma", type=float, default=1.3)
     ap.add_argument("--aftl-bce-anchor", type=float, default=0.1)
-    ap.add_argument("--lambda-orient", type=float, default=0.5)
+    ap.add_argument("--lambda-orient", type=float, default=0.0,
+                    help="Weight of the orientation aux-loss. reg2 uses 0.0 (the aux head pulls the shared backbone off segmentation; dropping it lifted real fire@truth 71->77%%).")
     ap.add_argument("--kernel-lens", type=int, nargs="+", default=[11, 21, 41])
     ap.add_argument("--n-angles", type=int, default=12)
-    ap.add_argument("--widths", type=int, nargs="+", default=[48, 96, 192, 384, 768],
-                    help="UNet channel widths per level. Default is v5/v6. "
-                         "Use [24, 48, 96, 192, 384] for v7-half (4x cheaper).")
+    ap.add_argument("--widths", type=int, nargs="+", default=[24, 48, 96, 192, 384],
+                    help="UNet channel widths per level. Default = the production reg2 "
+                         "model (half-width, 4x cheaper than the original full-width net).")
     ap.add_argument("--num-workers", type=int, default=6)
     ap.add_argument("--seed", type=int, default=2026)
-    ap.add_argument("--ema-decay", type=float, default=0.9999)
+    ap.add_argument("--ema-decay", type=float, default=0.999)  # reg2
     ap.add_argument("--orient-cache-size", type=int, default=24,
                     help="Panels cached in the orientation-map cache (per worker).")
     ap.add_argument("--ema-exclude", nargs="*", default=[],
@@ -192,21 +197,6 @@ def main():
                     help="Train on multiple full-panel h5 datasets (no merge) via "
                          "DiffimConcatDataset. Each arg is 'h5path:csvpath'. Val uses "
                          "--data-h5/--data-csv (realistic val panels). For 'much more data'.")
-    ap.add_argument("--stream-buffer", default="",
-                    help="Train from a streaming rolling buffer (stream_producer.py) of "
-                         "full panels -- lossless, same statistics, unbounded data. "
-                         "Run the producer alongside. Val uses the fixed realistic val "
-                         "panels (--data-h5/--data-csv) for a stable metric.")
-    ap.add_argument("--tile-data-h5", default="",
-                    help="Train from a storage-efficient tile corpus (tile_gen.py "
-                         "tiles.h5) instead of full panels. Panel-disjoint train/val "
-                         "split by panel_key. Bypasses --data-h5/--n-train-panels.")
-    ap.add_argument("--tile-data-csv", default="")
-    ap.add_argument("--freeze-agg-alpha", action="store_true",
-                    help="Freeze the LineAggregator agg_alpha at --init-agg-alpha (ablation: "
-                         "test whether the agg_alpha ramp drives the post-peak val decay).")
-    ap.add_argument("--init-agg-alpha", type=float, default=0.073,
-                    help="Value to fix/init agg_alpha at when --freeze-agg-alpha.")
     ap.add_argument("--intensity-aug", action="store_true",
                     help="Train-set intensity+noise augmentation (vary effective SNR/"
                          "background) on top of --augment. Data-like regularizer for the "
@@ -245,7 +235,7 @@ def main():
 
     with open(run_dir / "config.json", "w") as f:
         json.dump(vars(args), f, indent=2)
-    log(f"v5 config: {json.dumps(vars(args), indent=2)}")
+    log(f"config: {json.dumps(vars(args), indent=2)}")
 
     if args.data_sources:
         # train on MULTIPLE full-panel h5 datasets (no merge) via DiffimConcatDataset.
@@ -268,49 +258,6 @@ def main():
             n_pos_anchors_per_epoch=500, n_neg_anchors_per_epoch=200,
             stk_balance=args.stk_balance, anchor_jitter=args.anchor_jitter,
             orient_cache_size=args.orient_cache_size, seed=args.seed + 1)
-    elif args.stream_buffer:
-        # LOSSLESS streaming: full panels from a rolling buffer (stream_producer.py),
-        # identical anchor statistics. Producer must be running alongside.
-        from ADCNN.data.diffim_dataset import DiffimStreamDataset
-        log(f"STREAMING from buffer {args.stream_buffer}")
-        train_ds = DiffimStreamDataset(
-            args.stream_buffer, tile=args.tile,
-            n_pos_per_epoch=args.n_pos_anchors_per_epoch,
-            n_neg_per_epoch=args.n_neg_anchors_per_epoch,
-            anchor_jitter=args.anchor_jitter, seed=args.seed, augment=args.augment)
-        train_ds.intensity_aug = bool(args.intensity_aug)
-        # held-out val from the FIXED realistic val panels (stable metric across epochs)
-        csv_df = pd.read_csv(args.data_csv)
-        import json as _json
-        vp = sorted(_json.loads((REPO_ROOT / "experiments/diffim_runs/pilot_v7_realistic/split.json").read_text())["val_panels"])
-        val_ds = DiffimRandomCropDataset3ch(
-            args.data_h5, csv_df, panel_ids=vp, tile=args.tile,
-            n_pos_anchors_per_epoch=500, n_neg_anchors_per_epoch=200,
-            stk_balance=args.stk_balance, anchor_jitter=args.anchor_jitter,
-            orient_cache_size=args.orient_cache_size, seed=args.seed + 1)
-    elif args.tile_data_h5:
-        # storage-efficient tile corpus (DiffimTileDataset); panel-disjoint train/val
-        # split by panel_key so no leakage between them.
-        from ADCNN.data.diffim_dataset import DiffimTileDataset
-        meta = pd.read_csv(args.tile_data_csv)
-        keys = sorted(meta["panel_key"].unique())
-        rng = np.random.default_rng(args.seed); rng.shuffle(keys)
-        n_val = max(1, int(round(0.05 * len(keys))))
-        val_keys, train_keys = set(keys[:n_val]), set(keys[n_val:])
-        log(f"TILE data: {len(keys)} panels -> train {len(train_keys)} / val {len(val_keys)}; "
-            f"{len(meta)} tiles ({int((meta.is_pos==1).sum())} pos)")
-        (run_dir / "split.json").write_text(json.dumps(
-            {"tile_train_panels": sorted(train_keys), "tile_val_panels": sorted(val_keys)}, indent=2))
-        train_ds = DiffimTileDataset(
-            args.tile_data_h5, args.tile_data_csv, tile=args.tile,
-            n_pos_per_epoch=args.n_pos_anchors_per_epoch,
-            n_neg_per_epoch=args.n_neg_anchors_per_epoch,
-            seed=args.seed, augment=args.augment, panel_keys=train_keys)
-        train_ds.intensity_aug = bool(args.intensity_aug)
-        val_ds = DiffimTileDataset(
-            args.tile_data_h5, args.tile_data_csv, tile=args.tile,
-            n_pos_per_epoch=500, n_neg_per_epoch=200, seed=args.seed + 1,
-            augment=False, panel_keys=val_keys)
     else:
         log("opening HDF5…")
         with h5py.File(args.data_h5, "r") as f:
@@ -364,13 +311,8 @@ def main():
         kernel_lens=tuple(args.kernel_lens), n_angles=args.n_angles,
         p_drop=args.dropout,
     ).to(device)
-    if args.freeze_agg_alpha:
-        with torch.no_grad():
-            model.agg_alpha.fill_(float(args.init_agg_alpha))
-        model.agg_alpha.requires_grad_(False)
-        log(f"[freeze-agg] agg_alpha fixed at {float(args.init_agg_alpha)} (no grad)")
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    log(f"model params: {n_params/1e6:.2f} M  device={device}")
+    log(f"model params: {n_params/1e6:.2f} M  device={device}")  # reg2 = widths 24 48 96 192 384
     log(f"kernel_lens={args.kernel_lens} n_angles={args.n_angles}")
 
     _init_ck = None
