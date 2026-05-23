@@ -8,6 +8,5 @@
 """
 from .model import UNetResSE, UNetResSEASPP
 from .diffim_model import UNetResSEOrientHough, LineAggregator
-from .losses import *  # noqa: F401,F403  (loss functions used by training)
 
 __all__ = ["UNetResSE", "UNetResSEASPP", "UNetResSEOrientHough", "LineAggregator"]
