@@ -1,72 +1,26 @@
+"""Asteroid Detection CNN (ADCNN) — diffim asteroid-trail detection pipeline.
+
+Production package for detecting asteroid trails in LSST difference images:
+- ``core``       : model architectures (UNetResSEOrientHough = v7, the production model)
+- ``data``       : diffim dataset loading + preprocessing; ``data.dataset_creation`` builds
+                   simulated (injected) and real test datasets from the Butler
+- ``training``   : v7 training loop + EMA
+- ``inference``  : v7 prediction, candidate extraction, matched-filter features, the
+                   RandomForest second-stage post-processor, TorchScript export
+- ``evaluation`` : object/pixel detection metrics, geometry, real-data evaluation
+- ``pipelines``  : end-to-end entry points (data production, training, inference)
+
+The deployed model (reg2: v7 with lambda_orient=0 + dropout + weight-decay +
+intensity-augmentation, plus the neg5 RandomForest) lives in the top-level ``models/``.
 """
-Asteroid Detection CNN - Refactored and Clean
+__version__ = "3.0.0"
 
-Organized module structure:
-- core: Model architecture, configuration, losses
-- data: Dataset loading and preprocessing
-- evaluation: Metrics, detection evaluation, threshold scanning
-- training: Training utilities (EMA, phases)
-- utils: Helper functions (angles, distributed, misc)
-- inference: Model inference utilities
-"""
-
-__version__ = "2.0.0"
-
-# Core exports
-from .core import (
-    UNetResSE,
-    UNetResSEASPP,
-    UNetResSEOrientHough,  # v7 — architecture behind the promoted result
-    Config,
-)
-
-# Data exports
-from .data import (
-    H5TiledDataset,
-)
-
-# Evaluation exports
-from .evaluation import (
-    masked_pixel_auc,
-    resize_masks_to,
-    objectwise_confusion,
-    pixelwise_confusion,
-)
-
-# Training exports
-from .training import (
-    EMAModel,
-)
-
-# Utils exports
-from .utils import (
-    deg2rad,
-    rad2deg,
-    set_seed,
-    init_distributed,
-    is_main_process,
-)
+from .core import UNetResSE, UNetResSEASPP, UNetResSEOrientHough, LineAggregator
+from .data import DiffimRandomCropDataset3ch, DiffimConcatDataset, build_3channel
+from .training import EMAModel
 
 __all__ = [
-    # Core
-    "UNetResSE",
-    "UNetResSEASPP",
-    "UNetResSEOrientHough",
-    "Config",
-    # Data
-    "H5TiledDataset",
-    # Evaluation
-    "masked_pixel_auc",
-    "resize_masks_to",
-    "objectwise_confusion",
-    "pixelwise_confusion",
-    # Training
+    "UNetResSE", "UNetResSEASPP", "UNetResSEOrientHough", "LineAggregator",
+    "DiffimRandomCropDataset3ch", "DiffimConcatDataset", "build_3channel",
     "EMAModel",
-    # Utils
-    "deg2rad",
-    "rad2deg",
-    "set_seed",
-    "init_distributed",
-    "is_main_process",
 ]
-

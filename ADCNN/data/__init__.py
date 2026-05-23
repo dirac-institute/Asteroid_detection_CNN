@@ -1,22 +1,20 @@
-"""
-Data loading and dataset utilities.
-"""
+"""Diffim dataset loading + normalisation.
 
-from .datasets import (
-    H5TiledDataset,
-    SubsetDS,
-    WithTransform,
-    panels_with_positives,
-    norm_medmad_clip,
-    robust_stats_mad,
+``DiffimRandomCropDataset3ch`` (single h5) and ``DiffimConcatDataset`` (multi-h5) feed
+128px 3-channel tiles (MAD-normalised diffim + local-std + DIA-mask) with sin/cos
+orientation supervision. ``build_3channel`` / ``diffim_mad_sigma`` are the shared
+preprocessing primitives.
+"""
+from .diffim_dataset import (
+    DiffimRandomCropDataset3ch,
+    DiffimConcatDataset,
+    build_3channel,
+    diffim_mad_sigma,
 )
 
 __all__ = [
-    "H5TiledDataset",
-    "SubsetDS",
-    "WithTransform",
-    "panels_with_positives",
-    "norm_medmad_clip",
-    "robust_stats_mad",
+    "DiffimRandomCropDataset3ch",
+    "DiffimConcatDataset",
+    "build_3channel",
+    "diffim_mad_sigma",
 ]
-

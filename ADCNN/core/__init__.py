@@ -1,21 +1,13 @@
-"""
-Core module containing model architecture, configuration, and losses.
-"""
+"""Core model architectures for the diffim asteroid-trail detector.
 
+- ``UNetResSE`` / ``UNetResSEASPP``: the U-Net backbone with residual squeeze-excite
+  blocks (the feature extractor reused by the v7 head).
+- ``UNetResSEOrientHough`` (v7): the production segmentation model — UNetResSE backbone
+  + per-pixel orientation head + LineAggregator (Hough) head. This is the architecture
+  behind the deployed reg2 result.
+"""
 from .model import UNetResSE, UNetResSEASPP
-# v7 diffim model — the architecture behind the promoted real/synthetic result.
 from .diffim_model import UNetResSEOrientHough, LineAggregator
-from .config import Config, DataConfig, LoaderConfig, ModelConfig, TrainConfig
+from .losses import *  # noqa: F401,F403  (loss functions used by training)
 
-__all__ = [
-    "UNetResSE",
-    "UNetResSEASPP",
-    "UNetResSEOrientHough",
-    "LineAggregator",
-    "Config",
-    "DataConfig",
-    "LoaderConfig",
-    "ModelConfig",
-    "TrainConfig",
-]
-
+__all__ = ["UNetResSE", "UNetResSEASPP", "UNetResSEOrientHough", "LineAggregator"]
