@@ -13,6 +13,8 @@ evaluation set. Matching is per `image_id` (a measured trail can only match trut
 own panel).
 """
 from __future__ import annotations
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
@@ -86,3 +88,26 @@ def match_trail_catalogs(measured: pd.DataFrame, truth: pd.DataFrame, *,
         "FP": int((~measured["matched"]).sum()),
     }
     return truth, measured, counts
+
+
+def evaluate_catalog(measured, truth, *, tol_px: float = 20.0,
+                     flag_col: str = "nn_detected"):
+    """Catalog-based evaluation entry point: match a measured detection catalog against a
+    truth catalog and return object-level metrics + the flagged truth catalog.
+
+    `measured` and `truth` may be DataFrames or paths to CSVs. Returns:
+      counts : {"TP","FP","FN","recall","n_panels","fp_per_panel"} (recall over ALL truth
+               trails — the all-trails denominator)
+      truth_out : truth catalog with a bool `flag_col` (matched by a detection), ready for
+                  the completeness/histogram plots in ADCNN.evaluation.plots.
+    """
+    if isinstance(measured, (str, Path)):
+        measured = pd.read_csv(measured)
+    if isinstance(truth, (str, Path)):
+        truth = pd.read_csv(truth)
+    truth_out, _, counts = match_trail_catalogs(measured, truth, tol_px=tol_px, flag_col=flag_col)
+    n_panels = int(truth["image_id"].nunique()) if "image_id" in truth.columns else 0
+    counts["recall"] = counts["TP"] / max(counts["TP"] + counts["FN"], 1)
+    counts["n_panels"] = n_panels
+    counts["fp_per_panel"] = counts["FP"] / max(n_panels, 1)
+    return counts, truth_out

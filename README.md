@@ -23,10 +23,24 @@ prior model (more TP at equal FP). Weights live in `models/`:
 | `python -m ADCNN.pipelines.make_sim_data`    | build SIMULATED (injected-trail) train/test diffim datasets from the Butler |
 | `python -m ADCNN.pipelines.make_real_data`   | build the REAL-asteroid test diffim dataset from the Butler |
 | `python -m ADCNN.pipelines.train_end_to_end` | train the full detector: v7 (reg2 recipe) + RandomForest |
-| `python -m ADCNN.pipelines.run_inference`    | run v7 + RF on diffim panels → scored candidate detections |
+| `python -m ADCNN.pipelines.run_inference`    | run v7 + RF on one diffim h5 → detection catalog CSV |
+| `python -m ADCNN.pipelines.make_eval_catalogs` | run the optimized multi-GPU engine on the eval test sets → catalogs + metrics |
 
 Run each with `--help`. Butler entries use the `lsst_distrib` env; train/inference use
 the `asteroid_cnn` (torch) env.
+
+## Inference engine + catalog evaluation
+`ADCNN.inference.catalog.build_detection_catalog[_multigpu]` is the end-to-end engine:
+images → v7 → candidates → 72 features → RF → one CSV row per detection (measured trail
+geometry `x,y,beta,length` + flux + score, plus visit/detector/band routing keys for
+HelioLinC). It is optimized to use the whole GPU node — GPU inference with parallel CPU
+prep (`ADCNN_PREP_WORKERS`), pipelined across all GPUs, candidate features + RF in a process
+pool — reaching **~1.0–1.4 s/panel images→catalog on 4×A100** (a full ~189-detector visit in
+~3–4 min; profiled 7.3→1.4 s/panel, all safe/accuracy-preserving). Evaluation is then pure
+catalog analysis: `ADCNN.evaluation.catalog_match.evaluate_catalog(measured, truth)` does
+trail-overlap matching (any-pixel-overlap criterion, all-trails denominator, fixed pre-chosen
+`tol_px`) → TP/FP/FN + the flagged truth catalog for the `evaluation.plots` completeness/
+histograms. No training and no threshold tuning happen at evaluation time.
 
 ## Package layout
 - `ADCNN/core/`       — `model.py` (UNetResSE backbone), `detector.py` (v7), `losses.py` (AFTL + orientation)
