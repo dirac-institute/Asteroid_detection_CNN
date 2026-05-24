@@ -5,8 +5,8 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=96G
+#SBATCH --cpus-per-task=32
+#SBATCH --mem=160G
 #SBATCH --time=04:00:00
 #SBATCH --requeue
 #SBATCH --exclude=sdfampere017

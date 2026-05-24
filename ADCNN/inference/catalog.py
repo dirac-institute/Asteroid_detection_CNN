@@ -11,11 +11,16 @@ evaluator needs to overlap-match this catalog against a truth catalog, and every
 HelioLinC needs once sky coordinates are attached.
 
 Sky coordinates (RA/Dec/MJD) are deliberately NOT added here: they require the per-panel
-Butler WCS, which lives in the ``lsst_distrib`` env (no torch). This engine runs in the
-torch env and emits the pixel-space catalog plus the routing keys (``image_id``, and
-``visit``/``detector``/``band`` when a ``panels.csv`` is supplied).
-``experiments/heliolinc/adcnn_wcs.py`` is the Butler step that turns those into the
-HelioLinC-format catalog (``detid,mjd,ra,dec,mag,band,obscode``).
+Butler WCS (``lsst_distrib`` env, no torch). This engine runs in the torch env and emits
+the pixel-space catalog plus routing keys (``image_id`` + ``visit``/``detector``/``band``
+when a ``panels.csv`` is supplied). ``experiments/heliolinc/adcnn_wcs.py`` is the Butler
+step that turns those into the HelioLinC catalog (``detid,mjd,ra,dec,mag,band,obscode``).
+
+PERFORMANCE: the GPU runs v7 inference in the main process while a pool of worker
+processes computes the 72 candidate features + RF score in parallel across panels (the
+feature stage is CPU-bound and single-threaded per panel, so this is the dominant cost).
+Panels are independent, so the output is identical to a serial run (rows sorted by
+``image_id``). Set ``n_workers`` (default = allocated cores).
 
     python -m ADCNN.inference.catalog \
         --h5 DATA_DIFFIM/test_5sigma/test.h5 \
@@ -24,17 +29,17 @@ HelioLinC-format catalog (``detid,mjd,ra,dec,mag,band,obscode``).
 """
 from __future__ import annotations
 import argparse
+import multiprocessing as mp
+import os
+from collections import deque
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pandas as pd
-import torch
 
-from ADCNN.inference.predict import predict_panel_overlap_3ch_full
-from ADCNN.inference.rf_postproc import (
-    RF_FEATURES_V2, compute_v2_features, apply_rf_v2, load_rf, DEFAULT_THR,
-)
+from ADCNN.inference.rf_postproc import DEFAULT_THR
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -57,42 +62,115 @@ _COLMAP = {
 CATALOG_COLUMNS = list(_COLMAP.values())
 
 
+def _panel_to_catalog(pid, prob, img, sin, cos, agg, rl, rf, rf_thr):
+    """Stage-2 for one panel: 72 features -> RF score -> keep score>=rf_thr -> schema.
+    Pure-CPU (no torch/GPU); safe to run in a worker process. Returns a DataFrame slice
+    in the public schema, or None if no detection survives."""
+    from ADCNN.inference.rf_postproc import RF_FEATURES_V2, compute_v2_features, apply_rf_v2
+    cand, _ = compute_v2_features(prob[None], img[None], sin[None], cos[None], agg[None],
+                                  real_labels=rl[None], verbose=False)
+    if not len(cand):
+        return None
+    cand[list(RF_FEATURES_V2)] = cand[list(RF_FEATURES_V2)].replace([np.inf, -np.inf], np.nan)
+    cand = apply_rf_v2(cand, rf)
+    cand = cand[cand["score_rf"] >= rf_thr].copy()
+    if not len(cand):
+        return None
+    cand["image_id"] = int(pid)
+    return cand[[c for c in _COLMAP if c in cand.columns]].rename(columns=_COLMAP)
+
+
+# --- worker process state (one RF per worker, loaded once) ---
+_RF = None
+_THR = DEFAULT_THR
+
+
+def _worker_init(rf_pkl, rf_thr):
+    """Isolate each feature worker: no GPU, single-threaded BLAS (we parallelise across
+    panels, so per-worker thread pools would only oversubscribe), one shared RF."""
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    for v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        os.environ[v] = "1"
+    global _RF, _THR
+    from ADCNN.inference.rf_postproc import load_rf
+    _RF = load_rf(str(rf_pkl))
+    try:
+        _RF.n_jobs = 1
+    except Exception:
+        pass
+    _THR = float(rf_thr)
+
+
+def _worker(args):
+    pid, prob, img, sin, cos, agg, rl = args
+    return _panel_to_catalog(pid, prob, img, sin, cos, agg, rl, _RF, _THR)
+
+
 def build_detection_catalog(h5_path, v7_ckpt, rf_pkl, *, panels_csv=None,
                             rf_thr: float = DEFAULT_THR, device: str = "cuda",
-                            panel_ids=None) -> pd.DataFrame:
+                            panel_ids=None, n_workers=None) -> pd.DataFrame:
     """Run the two-stage detector over `h5_path`; return one row per kept detection.
 
-    `rf_thr` is the pre-chosen RF operating point (defaults to the model's shipped
-    DEFAULT_THR). `panels_csv`, if given, attaches visit/detector/band by `image_id`
-    so the downstream Butler WCS step can add sky coordinates for HelioLinC.
+    GPU v7 inference (main process) is pipelined with a pool of `n_workers` CPU processes
+    that compute features + RF in parallel across panels. `rf_thr` is the pre-chosen RF
+    operating point. `panels_csv` (optional) attaches visit/detector/band by `image_id`
+    for the downstream HelioLinC WCS step.
     """
-    dev = torch.device(device if torch.cuda.is_available() else "cpu")
-    model = torch.jit.load(str(v7_ckpt), map_location=dev).eval()
-    rf = load_rf(str(rf_pkl))
-    parts = []
-    with h5py.File(h5_path, "r") as f:
-        ids = range(int(f["images"].shape[0])) if panel_ids is None else panel_ids
-        for pid in ids:
-            img = f["images"][pid][:].astype(np.float32)
-            rl = f["real_labels"][pid][:].astype(np.uint16)
-            prob, sin, cos, agg = predict_panel_overlap_3ch_full(model, img, rl, device=dev)
-            cand, _ = compute_v2_features(prob[None], img[None], sin[None], cos[None], agg[None],
-                                          real_labels=rl[None], verbose=False)
-            if not len(cand):
-                continue
-            cand[list(RF_FEATURES_V2)] = cand[list(RF_FEATURES_V2)].replace([np.inf, -np.inf], np.nan)
-            cand = apply_rf_v2(cand, rf)
-            cand = cand[cand["score_rf"] >= rf_thr].copy()
-            if not len(cand):
-                continue
-            cand["image_id"] = int(pid)
-            parts.append(cand)
+    import torch
+    from ADCNN.inference.predict import predict_panel_overlap_3ch_full
 
-    if not parts:
-        cat = pd.DataFrame(columns=CATALOG_COLUMNS)
+    if n_workers is None:
+        try:
+            n_workers = max(1, len(os.sched_getaffinity(0)) - 1)
+        except AttributeError:
+            n_workers = max(1, (os.cpu_count() or 2) - 1)
+
+    dev = torch.device(device if torch.cuda.is_available() else "cpu")
+    if dev.type == "cuda":
+        torch.backends.cudnn.benchmark = True  # fixed 128px tiles -> autotune once
+    model = torch.jit.load(str(v7_ckpt), map_location=dev).eval()
+    parts: list[pd.DataFrame] = []
+
+    def _read(f, pid):
+        return (f["images"][pid][:].astype(np.float32), f["real_labels"][pid][:].astype(np.uint16))
+
+    if n_workers <= 1:
+        from ADCNN.inference.rf_postproc import load_rf
+        rf = load_rf(str(rf_pkl))
+        with h5py.File(h5_path, "r") as f:
+            ids = range(int(f["images"].shape[0])) if panel_ids is None else panel_ids
+            for pid in ids:
+                img, rl = _read(f, pid)
+                prob, sin, cos, agg = predict_panel_overlap_3ch_full(model, img, rl, device=dev)
+                r = _panel_to_catalog(int(pid), prob, img, sin, cos, agg, rl, rf, rf_thr)
+                if r is not None:
+                    parts.append(r)
     else:
-        full = pd.concat(parts, ignore_index=True)
-        cat = full[[c for c in _COLMAP if c in full.columns]].rename(columns=_COLMAP)
+        ctx = mp.get_context("spawn")
+        pending: deque = deque()
+
+        def drain():
+            r = pending.popleft().result()
+            if r is not None and len(r):
+                parts.append(r)
+
+        with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx,
+                                 initializer=_worker_init, initargs=(str(rf_pkl), rf_thr)) as pool, \
+             h5py.File(h5_path, "r") as f:
+            ids = range(int(f["images"].shape[0])) if panel_ids is None else panel_ids
+            for pid in ids:
+                img, rl = _read(f, pid)
+                prob, sin, cos, agg = predict_panel_overlap_3ch_full(model, img, rl, device=dev)
+                pending.append(pool.submit(_worker, (int(pid), prob, img, sin, cos, agg, rl)))
+                if len(pending) >= 2 * n_workers:   # backpressure: bound RAM + queue depth
+                    drain()
+            while pending:
+                drain()
+
+    if parts:
+        cat = pd.concat(parts, ignore_index=True).sort_values("image_id").reset_index(drop=True)
+    else:
+        cat = pd.DataFrame(columns=CATALOG_COLUMNS)
 
     if panels_csv:
         pan = pd.read_csv(panels_csv)
@@ -112,12 +190,14 @@ def main():
     ap.add_argument("--rf-thr", type=float, default=DEFAULT_THR,
                     help="pre-chosen RF operating point (default = shipped DEFAULT_THR)")
     ap.add_argument("--limit", type=int, default=0, help="0 = all panels")
+    ap.add_argument("--n-workers", type=int, default=0, help="0 = all allocated cores")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     pids = range(a.limit) if a.limit else None
-    cat = build_detection_catalog(a.h5, a.v7, a.rf, panels_csv=a.panels,
-                                  rf_thr=a.rf_thr, device=a.device, panel_ids=pids)
+    cat = build_detection_catalog(a.h5, a.v7, a.rf, panels_csv=a.panels, rf_thr=a.rf_thr,
+                                  device=a.device, panel_ids=pids,
+                                  n_workers=(a.n_workers or None))
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     cat.to_csv(a.out, index=False)
     npan = cat["image_id"].nunique() if len(cat) else 0

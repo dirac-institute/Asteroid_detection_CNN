@@ -26,7 +26,7 @@ import importlib
 
 # public name -> defining submodule (relative to this package)
 _LAZY = {
-    "predict_panel_overlap_3ch_full": ".diffim_eval",
+    "predict_panel_overlap_3ch_full": ".predict",
     "compute_v2_features":            ".rf_postproc",
     "apply_rf_v2":                    ".rf_postproc",
     "materialize_label_mask_v2":      ".rf_postproc",
