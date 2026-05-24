@@ -105,6 +105,8 @@ def predict_panel_overlap_3ch_full(
     stride: int = 64,
     clip: float = 5.0,
     stats_crop: int = 1024,
+    tile_batch: int | None = None,
+    prep_workers: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Sliding-window inference returning all auxiliary heads.
 
@@ -113,6 +115,11 @@ def predict_panel_overlap_3ch_full(
     sin(2β)/cos(2β); `agg` is the raw line-aggregator logit. All four maps
     use Hann-weighted overlap blending (same convention as
     `predict_panel_overlap_3ch`).
+
+    `tile_batch` (tiles per GPU forward) and `prep_workers` (CPU threads building the
+    per-tile 3-channel input, overlapping the GPU) are speed knobs only — they do not
+    change the output. Both default to the module values (env ADCNN_TILE_BATCH /
+    ADCNN_PREP_WORKERS).
     """
     H, W = panel_image.shape
     s = min(stats_crop, H, W)
@@ -130,7 +137,8 @@ def predict_panel_overlap_3ch_full(
     ys = _tile_starts(H, tile, stride)
     xs = _tile_starts(W, tile, stride)
 
-    BATCH = _TILE_BATCH  # tiles/forward (env ADCNN_TILE_BATCH); batching does not change results
+    BATCH = _TILE_BATCH if tile_batch is None else int(tile_batch)  # tiles/forward; batching is exact
+    workers = _PREP_WORKERS if prep_workers is None else int(prep_workers)
 
     def flush(bx, bl):
         if not bx:
@@ -160,8 +168,8 @@ def predict_panel_overlap_3ch_full(
     # Build the per-tile 3-channel inputs in parallel: build_3channel is ~40% of inference
     # wall time, CPU-bound (scipy uniform_filter releases the GIL), independent per tile, and
     # was otherwise serial with the GPU forward. Bit-identical to the serial build.
-    if _PREP_WORKERS > 1 and len(coords) > BATCH:
-        with ThreadPoolExecutor(max_workers=_PREP_WORKERS) as ex:
+    if workers > 1 and len(coords) > BATCH:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
             x3s = list(ex.map(_build, coords))
     else:
         x3s = [_build(c) for c in coords]

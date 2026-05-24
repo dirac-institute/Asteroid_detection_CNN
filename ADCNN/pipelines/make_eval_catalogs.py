@@ -22,7 +22,7 @@ from pathlib import Path
 
 import torch
 
-from ADCNN.inference.catalog import build_detection_catalog_multigpu
+from ADCNN.inference.catalog import build_detection_catalog_multigpu, InferenceConfig
 from ADCNN.inference.rf_postproc import DEFAULT_THR
 from ADCNN.evaluation.catalog_match import evaluate_catalog
 
@@ -57,10 +57,10 @@ def main():
             continue
         panels = d / "panels.csv"
         t0 = time.time()
+        cfg = InferenceConfig(rf_thr=a.rf_thr, gate_pmax=a.gate_pmax, tile_batch=a.tile_batch)
         cat = build_detection_catalog_multigpu(
-            str(h5), a.v7, a.rf,
+            str(h5), a.v7, a.rf, config=cfg, n_gpus=n_gpus,
             panels_csv=str(panels) if panels.exists() else None,
-            rf_thr=a.rf_thr, n_gpus=n_gpus, tile_batch=a.tile_batch, gate_pmax=a.gate_pmax,
         )
         out_csv = out / f"{name}_detections.csv"
         cat.to_csv(out_csv, index=False)

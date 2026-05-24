@@ -11,7 +11,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from ADCNN.inference.catalog import build_detection_catalog, DEFAULT_THR
+from ADCNN.inference.catalog import build_detection_catalog, InferenceConfig
+from ADCNN.inference.rf_postproc import DEFAULT_THR
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -19,8 +20,9 @@ REPO = Path(__file__).resolve().parents[2]
 def run(v7_ckpt, rf_pkl, h5_path, panel_ids, rf_thr, device, panels_csv=None):
     """Return the detection catalog (one row per kept detection). Thin wrapper around
     ``ADCNN.inference.catalog.build_detection_catalog`` — kept for back-compat."""
-    return build_detection_catalog(h5_path, v7_ckpt, rf_pkl, panels_csv=panels_csv,
-                                   rf_thr=rf_thr, device=device, panel_ids=panel_ids)
+    return build_detection_catalog(h5_path, v7_ckpt, rf_pkl,
+                                   config=InferenceConfig(rf_thr=rf_thr),
+                                   panels_csv=panels_csv, device=device, panel_ids=panel_ids)
 
 
 def main():
