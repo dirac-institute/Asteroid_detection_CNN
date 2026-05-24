@@ -62,13 +62,13 @@ _COLMAP = {
 CATALOG_COLUMNS = list(_COLMAP.values())
 
 
-def _panel_to_catalog(pid, prob, img, sin, cos, agg, rl, rf, rf_thr):
+def _panel_to_catalog(pid, prob, img, sin, cos, agg, rl, rf, rf_thr, gate_pmax=0.0):
     """Stage-2 for one panel: 72 features -> RF score -> keep score>=rf_thr -> schema.
     Pure-CPU (no torch/GPU); safe to run in a worker process. Returns a DataFrame slice
     in the public schema, or None if no detection survives."""
     from ADCNN.inference.rf_postproc import RF_FEATURES_V2, compute_v2_features, apply_rf_v2
     cand, _ = compute_v2_features(prob[None], img[None], sin[None], cos[None], agg[None],
-                                  real_labels=rl[None], verbose=False)
+                                  real_labels=rl[None], gate_pmax=gate_pmax, verbose=False)
     if not len(cand):
         return None
     cand[list(RF_FEATURES_V2)] = cand[list(RF_FEATURES_V2)].replace([np.inf, -np.inf], np.nan)
@@ -83,15 +83,16 @@ def _panel_to_catalog(pid, prob, img, sin, cos, agg, rl, rf, rf_thr):
 # --- worker process state (one RF per worker, loaded once) ---
 _RF = None
 _THR = DEFAULT_THR
+_GATE = 0.0
 
 
-def _worker_init(rf_pkl, rf_thr):
+def _worker_init(rf_pkl, rf_thr, gate_pmax):
     """Isolate each feature worker: no GPU, single-threaded BLAS (we parallelise across
     panels, so per-worker thread pools would only oversubscribe), one shared RF."""
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
     for v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
         os.environ[v] = "1"
-    global _RF, _THR
+    global _RF, _THR, _GATE
     from ADCNN.inference.rf_postproc import load_rf
     _RF = load_rf(str(rf_pkl))
     try:
@@ -99,16 +100,18 @@ def _worker_init(rf_pkl, rf_thr):
     except Exception:
         pass
     _THR = float(rf_thr)
+    _GATE = float(gate_pmax)
 
 
 def _worker(args):
     pid, prob, img, sin, cos, agg, rl = args
-    return _panel_to_catalog(pid, prob, img, sin, cos, agg, rl, _RF, _THR)
+    return _panel_to_catalog(pid, prob, img, sin, cos, agg, rl, _RF, _THR, _GATE)
 
 
 def build_detection_catalog(h5_path, v7_ckpt, rf_pkl, *, panels_csv=None,
                             rf_thr: float = DEFAULT_THR, device: str = "cuda",
-                            panel_ids=None, n_workers=None) -> pd.DataFrame:
+                            panel_ids=None, n_workers=None, gate_pmax: float = 0.0,
+                            stride: int = 64) -> pd.DataFrame:
     """Run the two-stage detector over `h5_path`; return one row per kept detection.
 
     GPU v7 inference (main process) is pipelined with a pool of `n_workers` CPU processes
@@ -141,8 +144,8 @@ def build_detection_catalog(h5_path, v7_ckpt, rf_pkl, *, panels_csv=None,
             ids = range(int(f["images"].shape[0])) if panel_ids is None else panel_ids
             for pid in ids:
                 img, rl = _read(f, pid)
-                prob, sin, cos, agg = predict_panel_overlap_3ch_full(model, img, rl, device=dev)
-                r = _panel_to_catalog(int(pid), prob, img, sin, cos, agg, rl, rf, rf_thr)
+                prob, sin, cos, agg = predict_panel_overlap_3ch_full(model, img, rl, device=dev, stride=stride)
+                r = _panel_to_catalog(int(pid), prob, img, sin, cos, agg, rl, rf, rf_thr, gate_pmax)
                 if r is not None:
                     parts.append(r)
     else:
@@ -155,12 +158,12 @@ def build_detection_catalog(h5_path, v7_ckpt, rf_pkl, *, panels_csv=None,
                 parts.append(r)
 
         with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx,
-                                 initializer=_worker_init, initargs=(str(rf_pkl), rf_thr)) as pool, \
+                                 initializer=_worker_init, initargs=(str(rf_pkl), rf_thr, gate_pmax)) as pool, \
              h5py.File(h5_path, "r") as f:
             ids = range(int(f["images"].shape[0])) if panel_ids is None else panel_ids
             for pid in ids:
                 img, rl = _read(f, pid)
-                prob, sin, cos, agg = predict_panel_overlap_3ch_full(model, img, rl, device=dev)
+                prob, sin, cos, agg = predict_panel_overlap_3ch_full(model, img, rl, device=dev, stride=stride)
                 pending.append(pool.submit(_worker, (int(pid), prob, img, sin, cos, agg, rl)))
                 if len(pending) >= 2 * n_workers:   # backpressure: bound RAM + queue depth
                     drain()
@@ -180,18 +183,20 @@ def build_detection_catalog(h5_path, v7_ckpt, rf_pkl, *, panels_csv=None,
     return cat
 
 
-def _gpu_shard_worker(gpu_id, h5_path, v7_ckpt, rf_pkl, shard, rf_thr, n_workers, batch, q):
+def _gpu_shard_worker(gpu_id, h5_path, v7_ckpt, rf_pkl, shard, rf_thr, n_workers, batch, gate_pmax, stride, q):
     """Run the engine on one panel shard pinned to GPU `gpu_id`. Spawned process."""
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     os.environ["ADCNN_TILE_BATCH"] = str(batch)
     cat = build_detection_catalog(h5_path, v7_ckpt, rf_pkl, rf_thr=rf_thr,
-                                  device="cuda", panel_ids=shard, n_workers=n_workers)
+                                  device="cuda", panel_ids=shard, n_workers=n_workers,
+                                  gate_pmax=gate_pmax, stride=stride)
     q.put(cat)
 
 
 def build_detection_catalog_multigpu(h5_path, v7_ckpt, rf_pkl, *, panels_csv=None,
                                      rf_thr: float = DEFAULT_THR, n_gpus=None,
-                                     tile_batch: int = 64) -> pd.DataFrame:
+                                     tile_batch: int = 64, gate_pmax: float = 0.0,
+                                     stride: int = 64) -> pd.DataFrame:
     """Data-parallel catalog build: panels are round-robin sharded across `n_gpus`, each
     GPU runs the engine (with its own CPU feature pool) in a separate process. Identical
     output to the single-GPU path (rows sorted by image_id). Falls back to single-GPU when
@@ -204,7 +209,7 @@ def build_detection_catalog_multigpu(h5_path, v7_ckpt, rf_pkl, *, panels_csv=Non
     if n_gpus <= 1:
         os.environ["ADCNN_TILE_BATCH"] = str(tile_batch)
         return build_detection_catalog(h5_path, v7_ckpt, rf_pkl, panels_csv=panels_csv,
-                                       rf_thr=rf_thr, device="cuda")
+                                       rf_thr=rf_thr, device="cuda", gate_pmax=gate_pmax, stride=stride)
 
     shards = [list(range(g, n_panels, n_gpus)) for g in range(n_gpus)]  # round-robin balance
     try:
@@ -217,7 +222,7 @@ def build_detection_catalog_multigpu(h5_path, v7_ckpt, rf_pkl, *, panels_csv=Non
     q = ctx.Queue()
     procs = [ctx.Process(target=_gpu_shard_worker,
                          args=(g, str(h5_path), str(v7_ckpt), str(rf_pkl), shards[g],
-                               rf_thr, per, tile_batch, q))
+                               rf_thr, per, tile_batch, gate_pmax, stride, q))
              for g in range(n_gpus) if shards[g]]
     for p in procs:
         p.start()
@@ -249,17 +254,21 @@ def main():
     ap.add_argument("--n-workers", type=int, default=0, help="0 = all allocated cores")
     ap.add_argument("--n-gpus", type=int, default=1, help=">1 = data-parallel across GPUs (ignores --limit)")
     ap.add_argument("--tile-batch", type=int, default=24, help="tiles per GPU forward (64 is a good A100 value)")
+    ap.add_argument("--gate-pmax", type=float, default=0.0, help="skip features for candidates with peak NN prob < this (pre-chosen on val)")
+    ap.add_argument("--stride", type=int, default=64, help="sliding-window stride (larger = fewer tiles = faster, slightly different maps)")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     if a.n_gpus and a.n_gpus > 1:
         cat = build_detection_catalog_multigpu(a.h5, a.v7, a.rf, panels_csv=a.panels,
-                                               rf_thr=a.rf_thr, n_gpus=a.n_gpus, tile_batch=a.tile_batch)
+                                               rf_thr=a.rf_thr, n_gpus=a.n_gpus, tile_batch=a.tile_batch,
+                                               gate_pmax=a.gate_pmax, stride=a.stride)
     else:
         os.environ["ADCNN_TILE_BATCH"] = str(a.tile_batch)
         pids = range(a.limit) if a.limit else None
         cat = build_detection_catalog(a.h5, a.v7, a.rf, panels_csv=a.panels, rf_thr=a.rf_thr,
-                                      device=a.device, panel_ids=pids, n_workers=(a.n_workers or None))
+                                      device=a.device, panel_ids=pids, n_workers=(a.n_workers or None),
+                                      gate_pmax=a.gate_pmax, stride=a.stride)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     cat.to_csv(a.out, index=False)
     npan = cat["image_id"].nunique() if len(cat) else 0

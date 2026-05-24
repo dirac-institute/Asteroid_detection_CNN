@@ -466,6 +466,7 @@ def compute_v2_features(
     min_area: int = 4,
     line_width: int = 2,
     pad_length: int = 4,
+    gate_pmax: float = 0.0,
     verbose: bool = False,
 ):
     """Extract candidates and compute the full RF feature set.
@@ -504,6 +505,14 @@ def compute_v2_features(
     if not cand_dfs:
         return pd.DataFrame(), panel_probs
     cand_df = pd.concat(cand_dfs, ignore_index=True)
+
+    # Optional cheap gate: only compute the (expensive) matched-filter/orientation features
+    # for candidates whose peak NN probability clears `gate_pmax`. Candidates below it are
+    # dropped (the RF would score them ~0 anyway); validate no-regression before enabling.
+    if gate_pmax > 0.0:
+        cand_df = cand_df[cand_df["max_p"] >= gate_pmax].reset_index(drop=True)
+        if not len(cand_df):
+            return pd.DataFrame(), panel_probs
 
     # Cast diffims to float32 once.
     diffims = {pid: arr.astype(np.float32, copy=False) for pid, arr in diffims.items()}
