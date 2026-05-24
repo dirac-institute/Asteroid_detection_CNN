@@ -25,7 +25,7 @@ from typing import Union
 import numpy as np
 import pandas as pd
 
-__all__ = ["match_trail_catalogs", "evaluate_catalog"]
+__all__ = ["match_trail_catalogs", "evaluate_catalog", "match_pairs"]
 
 # Columns every trail catalog must provide (besides its length column).
 _REQUIRED_COLUMNS = ("image_id", "x", "y", "beta")
@@ -198,3 +198,36 @@ def evaluate_catalog(
     metrics["n_panels"] = n_panels
     metrics["fp_per_panel"] = counts["FP"] / max(n_panels, 1)
     return metrics, truth_out
+
+
+def match_pairs(measured, truth, *, tol_px: float = 20.0,
+                truth_length_col: str = "trail_length", meas_length_col: str = "length"):
+    """For each truth trail with a match, return the NEAREST measured detection, as a frame
+    with the truth row plus ``meas_x/meas_y/meas_beta/meas_length/meas_score`` of that nearest
+    detection. Used for parameter-recovery residuals (measured geometry vs truth).
+
+    `measured`/`truth` may be DataFrames or CSV paths. Only matched truths (nearest detection
+    within `tol_px`) are returned, one row each.
+    """
+    measured = _as_frame(measured).reset_index(drop=True)
+    truth = _as_frame(truth).reset_index(drop=True)
+    if not len(measured) or not len(truth):
+        return truth.iloc[0:0].copy()
+    meas_by_panel = measured.groupby("image_id").indices
+    rows = []
+    for img_id, t_pos in truth.groupby("image_id").indices.items():
+        m_pos = meas_by_panel.get(img_id)
+        if m_pos is None or len(m_pos) == 0:
+            continue
+        D = _pairwise_segment_distance(_segment_endpoints(truth.iloc[t_pos], truth_length_col),
+                                       _segment_endpoints(measured.iloc[m_pos], meas_length_col))
+        for ti, t_lbl in enumerate(t_pos):
+            j = int(D[ti].argmin())
+            if D[ti, j] > tol_px:
+                continue
+            md = measured.iloc[m_pos[j]]
+            row = truth.iloc[t_lbl].to_dict()
+            row.update(meas_x=md["x"], meas_y=md["y"], meas_beta=md["beta"],
+                       meas_length=md[meas_length_col], meas_score=md.get("score_rf", float("nan")))
+            rows.append(row)
+    return pd.DataFrame(rows)
