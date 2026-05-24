@@ -8,9 +8,18 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=96G
 #SBATCH --time=04:00:00
+#SBATCH --requeue
+#SBATCH --exclude=sdfampere017
 #SBATCH --output=/sdf/home/m/mrakovci/logs/ADCNN_eval_nb_%j.out
 set -euo pipefail
 REPO="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"
+# Some ampere nodes don't mount /sdf/data/rubin; fail fast + requeue instead of
+# silently running from /tmp (which produced a 1-second "couldn't chdir" failure).
+if [ ! -d "$REPO" ]; then
+  echo "FATAL: $REPO not mounted on $(hostname) — requeueing" >&2
+  scontrol requeue "$SLURM_JOB_ID" || true
+  exit 1
+fi
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
 cd "$REPO"; export PYTHONPATH="$REPO:${PYTHONPATH:-}"
