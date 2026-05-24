@@ -29,12 +29,15 @@ Run each with `--help`. Butler entries use the `lsst_distrib` env; train/inferen
 the `asteroid_cnn` (torch) env.
 
 ## Package layout
-- `ADCNN/core/`       — `model.py` (UNetResSE backbone), `detector.py` (v7)
-- `ADCNN/data/`       — `dataset.py`; `dataset_creation/` (Butler sim + real data builders)
+- `ADCNN/core/`       — `model.py` (UNetResSE backbone), `detector.py` (v7), `losses.py` (AFTL + orientation)
+- `ADCNN/data/`       — `dataset.py`, `preprocessing.py` (3-channel build / MAD-sigma / orientation maps);
+                        `dataset_creation/` (`simulate`, `build_real`, `butler_tasks`, `photometry`, `realistic_trail`, `ephemerides`)
 - `ADCNN/training/`   — `train.py` (v7 trainer), `ema.py`
-- `ADCNN/inference/`  — v7 prediction, candidate extraction, matched-filter features, RF
-                        post-processor (`rf_postproc`), RF training (`rf_train`), export
-- `ADCNN/evaluation/` — object/pixel metrics, geometry, real-data eval, threshold scan
+- `ADCNN/inference/`  — `predict.py` (sliding-window v7), `candidates.py`, `matched_filter.py`,
+                        `features.py` (72-col RF feature extraction), `rf_postproc.py` (RF train/apply/IO),
+                        `rf_train.py` (leakage-safe RF entry point), `export.py`
+- `ADCNN/evaluation/` — `detection.py`/`metrics.py` (object/pixel metrics), `geometry.py` (mask/component
+                        primitives), `plots.py` (notebook viz), `real_eval.py`, `threshold_scan.py`, `fp_analysis.py`
 - `models/`           — deployed weights (above)
 - `Evaluation/`       — `Evaluation.ipynb` (synthetic) + `Evaluation_Real.ipynb` (real), evaluating `models/`
 - `experiments/heliolinc/` — HelioLinC linking suite + the ADCNN→HelioLinC bridge + `PIPELINE_DESIGN.md`
