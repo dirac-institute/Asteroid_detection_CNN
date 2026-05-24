@@ -33,7 +33,7 @@ def main():
         _t0 = _t.time()
         cat = build_detection_catalog_multigpu(str(h5), str(V7), str(RF),
                                                panels_csv=str(panels) if panels.exists() else None,
-                                               rf_thr=DEFAULT_THR, n_gpus=torch.cuda.device_count(), tile_batch=64)
+                                               rf_thr=DEFAULT_THR, n_gpus=torch.cuda.device_count(), tile_batch=64, gate_pmax=0.10)
         _dt = _t.time() - _t0
         out_csv = OUT / f"{name}_detections.csv"
         cat.to_csv(out_csv, index=False)
