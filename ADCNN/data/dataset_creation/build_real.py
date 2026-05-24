@@ -66,7 +66,8 @@ from lsst.geom import Point2D  # noqa: E402
 from lsst.pipe.base import (NoWorkFound, UnprocessableDataError,  # noqa: E402
                             UpstreamFailureNoWorkFound)
 
-from ADCNN.data.dataset_creation.photometry import draw_one_line, ensure_dir
+from ADCNN.utils.helpers import draw_one_line
+from ADCNN.data.dataset_creation.photometry import ensure_dir
 from ADCNN.data.dataset_creation.butler_tasks import (
     fetch_diffim_inputs, run_detect_diffim, run_subtract)
 from ADCNN.data.dataset_creation.simulate import (

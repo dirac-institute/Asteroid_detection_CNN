@@ -29,7 +29,8 @@ from ADCNN.inference.matched_filter import (
     matched_filter_for_nn_candidates,
 )
 
-from ADCNN.inference.features import compute_v2_features, RF_FEATURES_V2, _to_panel_dict
+from ADCNN.inference.features import compute_v2_features, RF_FEATURES_V2
+from ADCNN.utils.helpers import to_panel_dict, trail_bbox
 
 
 
@@ -75,9 +76,8 @@ def label_candidates_by_injection_overlap(
         psf_width: PSF width passed into `draw_one_line` for the trail mask.
     """
     from ADCNN.utils.helpers import draw_one_line  # local import (cv2 optional)
-    from ADCNN.utils.angle_utils import deg2rad as _deg2rad
 
-    probs_dict = _to_panel_dict(panel_probs)
+    probs_dict = to_panel_dict(panel_probs)
     pid_sample = next(iter(probs_dict.values()))
     H, W = pid_sample.shape
     half_psf = psf_width // 2
@@ -94,13 +94,7 @@ def label_candidates_by_injection_overlap(
             x = float(row["x"]); y = float(row["y"])
             beta = float(row["beta"]); L = float(row["trail_length"])
             pad = half_psf + 4
-            beta_rad = _deg2rad(beta)
-            dx = abs(math.cos(beta_rad)) * L
-            dy = abs(math.sin(beta_rad)) * L
-            x0 = int(max(0, math.floor(x - dx - pad)))
-            x1 = int(min(W, math.ceil(x + dx + pad)))
-            y0 = int(max(0, math.floor(y - dy - pad)))
-            y1 = int(min(H, math.ceil(y + dy + pad)))
+            x0, x1, y0, y1 = trail_bbox(x, y, beta, L, H, W, pad)
             if x1 <= x0 or y1 <= y0:
                 continue
             roi_h = y1 - y0; roi_w = x1 - x0

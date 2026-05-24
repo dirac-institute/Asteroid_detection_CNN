@@ -34,7 +34,7 @@ from scipy import ndimage as ndi
 import cv2
 
 from ADCNN.utils.angle_utils import deg2rad
-from ADCNN.utils.helpers import draw_one_line
+from ADCNN.utils.helpers import draw_one_line, to_panel_dict, trail_bbox
 from ADCNN.inference.matched_filter import panel_mad_sigma
 
 
@@ -51,12 +51,6 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _to_panel_dict(arr):
-    if isinstance(arr, dict):
-        return {int(k): np.asarray(v) for k, v in arr.items()}
-    return {int(pid): np.asarray(arr[pid]) for pid in range(len(arr))}
-
 
 def _wrap_beta_diff_deg(estimate_deg: float, truth_deg: float) -> float:
     """Signed minimal-angle difference for line-orientations (mod 180°).
@@ -215,13 +209,7 @@ def _trail_mask(H: int, W: int, x: float, y: float, beta_deg: float,
     Returns a bool (H, W) array."""
     half_psf = psf_width // 2
     pad = half_psf + 4
-    beta_rad = deg2rad(beta_deg)
-    dx = abs(math.cos(beta_rad)) * trail_length
-    dy = abs(math.sin(beta_rad)) * trail_length
-    x0 = int(max(0, math.floor(x - dx - pad)))
-    x1 = int(min(W, math.ceil(x + dx + pad)))
-    y0 = int(max(0, math.floor(y - dy - pad)))
-    y1 = int(min(H, math.ceil(y + dy + pad)))
+    x0, x1, y0, y1 = trail_bbox(x, y, beta_deg, trail_length, H, W, pad)
     canvas = np.zeros((H, W), dtype=np.uint8)
     if x1 <= x0 or y1 <= y0:
         return canvas.astype(bool)
@@ -270,12 +258,12 @@ def evaluate_parameter_recovery(
         dbeta_deg, dlength,                           # residuals
         beta_orient_deg, or_r                         # if orient given
     """
-    probs_dict   = _to_panel_dict(panel_probs)
-    sin_dict     = None if orient_sin is None else _to_panel_dict(orient_sin)
-    cos_dict     = None if orient_cos is None else _to_panel_dict(orient_cos)
+    probs_dict   = to_panel_dict(panel_probs)
+    sin_dict     = None if orient_sin is None else to_panel_dict(orient_sin)
+    cos_dict     = None if orient_cos is None else to_panel_dict(orient_cos)
 
     use_mf = bool(mf_length) and diffim_panels is not None
-    diff_dict = _to_panel_dict(diffim_panels) if diffim_panels is not None else None
+    diff_dict = to_panel_dict(diffim_panels) if diffim_panels is not None else None
     sigma_cache: dict[int, float] = {}
 
     cat = catalog.copy().reset_index(drop=True)

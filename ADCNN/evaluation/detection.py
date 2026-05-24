@@ -16,6 +16,7 @@ from scipy import ndimage as ndi
 import matplotlib.pyplot as plt
 
 from ADCNN.utils.angle_utils import deg2rad
+from ADCNN.utils.helpers import trail_bbox
 from ADCNN.evaluation.geometry import label_components
 
 try:
@@ -95,14 +96,7 @@ def _evaluate_single_image(args):
         pad = half_psf + 4
 
         # Compute bounding box (beta in degrees, convert to radians)
-        beta_rad = deg2rad(beta_deg)
-        dx = abs(np.cos(beta_rad)) * trail_length
-        dy = abs(np.sin(beta_rad)) * trail_length
-
-        x0 = int(max(0, np.floor(x - dx - pad)))
-        x1 = int(min(W, np.ceil(x + dx + pad)))
-        y0 = int(max(0, np.floor(y - dy - pad)))
-        y1 = int(min(H, np.ceil(y + dy + pad)))
+        x0, x1, y0, y1 = trail_bbox(x, y, beta_deg, trail_length, H, W, pad)
 
         if x1 <= x0 or y1 <= y0:
             fn += 1

@@ -27,6 +27,7 @@ from ADCNN.inference.matched_filter import (
     panel_mad_sigma,
     matched_filter_for_nn_candidates,
 )
+from ADCNN.utils.helpers import to_panel_dict
 
 
 
@@ -452,13 +453,6 @@ def _add_orient(cand_df, panel_probs, diffims, panel_sigmas,
 # Public API
 # ---------------------------------------------------------------------------
 
-def _to_panel_dict(arr):
-    """Accept either (N, H, W) array or {pid: (H, W) array} mapping."""
-    if isinstance(arr, dict):
-        return {int(k): np.asarray(v) for k, v in arr.items()}
-    return {int(pid): np.asarray(arr[pid]) for pid in range(len(arr))}
-
-
 def compute_v2_features(
     panel_probs,
     diffim_panels,
@@ -483,13 +477,13 @@ def compute_v2_features(
     Returns (cand_df, panel_probs_dict). panel_probs_dict can be passed to
     `materialize_label_mask_v2` for fast mask reconstruction after filtering.
     """
-    panel_probs = _to_panel_dict(panel_probs)
-    diffims     = _to_panel_dict(diffim_panels)
-    sin_maps    = _to_panel_dict(orient_sin)
-    cos_maps    = _to_panel_dict(orient_cos)
-    agg_maps    = _to_panel_dict(orient_agg)
+    panel_probs = to_panel_dict(panel_probs)
+    diffims     = to_panel_dict(diffim_panels)
+    sin_maps    = to_panel_dict(orient_sin)
+    cos_maps    = to_panel_dict(orient_cos)
+    agg_maps    = to_panel_dict(orient_agg)
     if real_labels is not None:
-        rl_dict = _to_panel_dict(real_labels)
+        rl_dict = to_panel_dict(real_labels)
     else:
         rl_dict = None
 

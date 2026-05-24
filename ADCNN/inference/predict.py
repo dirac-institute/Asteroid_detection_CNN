@@ -12,6 +12,15 @@ import torch.nn.functional as F
 from ADCNN.data.preprocessing import build_3channel, diffim_mad_sigma
 
 
+def _tile_starts(N, t, sstep):
+    """Sliding-window start offsets tiling [0, N) with `t`-wide windows at stride
+    `sstep`, always including the flush-right final tile (N - t)."""
+    out = list(range(0, max(N - t, 0) + 1, sstep))
+    if out[-1] != N - t:
+        out.append(N - t)
+    return out
+
+
 def hann2d(tile: int) -> np.ndarray:
     """2D Hann window for blending overlapping tile predictions."""
     w = np.hanning(tile + 2)[1:-1]
@@ -40,13 +49,8 @@ def predict_panel_overlap_3ch(
     weight_acc = np.zeros((H, W), dtype=np.float32)
     hann = hann2d(tile)
 
-    def starts(N, t, sstep):
-        out = list(range(0, max(N - t, 0) + 1, sstep))
-        if out[-1] != N - t:
-            out.append(N - t)
-        return out
-    ys = starts(H, tile, stride)
-    xs = starts(W, tile, stride)
+    ys = _tile_starts(H, tile, stride)
+    xs = _tile_starts(W, tile, stride)
 
     batch_xs, batch_locs = [], []
     BATCH = 24  # the line aggregator + 3-channel input make this the GPU-memory limit
@@ -114,13 +118,8 @@ def predict_panel_overlap_3ch_full(
     weight_acc = np.zeros((H, W), dtype=np.float32)
     hann = hann2d(tile)
 
-    def starts(N, t, sstep):
-        out = list(range(0, max(N - t, 0) + 1, sstep))
-        if out[-1] != N - t:
-            out.append(N - t)
-        return out
-    ys = starts(H, tile, stride)
-    xs = starts(W, tile, stride)
+    ys = _tile_starts(H, tile, stride)
+    xs = _tile_starts(W, tile, stride)
 
     batch_xs, batch_locs = [], []
     BATCH = 24

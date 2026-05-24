@@ -62,7 +62,7 @@ def sky_to_pixel(calexp, ra_deg: float, dec_deg: float):
     x, y = calexp.wcs.skyToPixel(sp)
     return float(x), float(y)
 
-def draw_one_line(mask: np.ndarray, origin, angle_deg_e_of_n, length_px, true_value=1, line_thickness=5):
+def stamp_trail_disks(mask: np.ndarray, origin, angle_deg_e_of_n, length_px, true_value=1, line_thickness=5):
     """
     Pure-numpy drawer: stamps disks along the line.
     angle: degrees East of North; image coords +x right, +y down.
@@ -139,7 +139,7 @@ def build_one(butler: Butler, row: pd.Series):
         thickness = 5
 
     mask = np.zeros((H, W), dtype=np.uint8)
-    draw_one_line(mask, (x0, y0), pa_deg, trail_len_px, true_value=1, line_thickness=thickness)
+    stamp_trail_disks(mask, (x0, y0), pa_deg, trail_len_px, true_value=1, line_thickness=thickness)
     mask = mask.astype(bool)
 
     img = calexp.image.array.astype("float32")

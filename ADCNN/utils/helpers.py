@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Callable, Tuple
 
 import h5py
+import math
 import numpy as np
 
 try:
@@ -134,3 +135,27 @@ def draw_one_line(
     )
     mask[tmp != 0] = true_value
     return mask
+
+
+def to_panel_dict(arr):
+    """Normalise an ``(N, H, W)`` array (or ``{panel_id: (H, W)}`` mapping) to a
+    ``{int panel_id: ndarray}`` dict. Shared by the RF feature extraction and the
+    parameter-recovery evaluation so both index panels identically."""
+    if isinstance(arr, dict):
+        return {int(k): np.asarray(v) for k, v in arr.items()}
+    return {int(pid): np.asarray(arr[pid]) for pid in range(len(arr))}
+
+
+def trail_bbox(x, y, beta_deg, length, H, W, pad=0):
+    """Axis-aligned bounding box ``(x0, x1, y0, y1)`` of a trail centred at ``(x, y)``
+    with image-convention orientation ``beta_deg`` (0=+x) and full ``length``, padded by
+    ``pad`` and clipped to ``[0, W] x [0, H]``. Shared ROI helper for object-confusion,
+    parameter-recovery, and RF candidate labelling."""
+    beta_rad = math.radians(beta_deg)
+    dx = abs(math.cos(beta_rad)) * length
+    dy = abs(math.sin(beta_rad)) * length
+    x0 = int(max(0, math.floor(x - dx - pad)))
+    x1 = int(min(W, math.ceil(x + dx + pad)))
+    y0 = int(max(0, math.floor(y - dy - pad)))
+    y1 = int(min(H, math.ceil(y + dy + pad)))
+    return x0, x1, y0, y1

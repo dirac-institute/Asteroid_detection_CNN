@@ -17,40 +17,7 @@ def ensure_dir(p: str | Path) -> None:
     Path(p).mkdir(parents=True, exist_ok=True)
 
 
-# ======================================================================================
-# Drawing helper
-# ======================================================================================
-
-def draw_one_line(
-    mask: np.ndarray,
-    origin: Tuple[float, float],
-    angle_deg: float,
-    length: float,
-    true_value: int = 1,
-    line_thickness: int = 500,
-) -> np.ndarray:
-    """
-    Draw a thick line into `mask` (2D array) and set those pixels to `true_value`.
-    OpenCV uses (x, y) integer pixel coordinates.
-    """
-    x0, y0 = origin
-    x_size = float(length) * math.cos(math.radians(angle_deg))
-    y_size = float(length) * math.sin(math.radians(angle_deg))
-
-    x1 = x0 - x_size / 2.0
-    y1 = y0 - y_size / 2.0
-    x2 = x0 + x_size / 2.0
-    y2 = y0 + y_size / 2.0
-
-    line = cv2.line(
-        np.zeros(mask.shape, dtype=np.uint8),
-        (int(round(x2)), int(round(y2))),
-        (int(round(x1)), int(round(y1))),
-        1,
-        thickness=int(line_thickness),
-    )
-    mask[line != 0] = true_value
-    return mask
+# draw_one_line lives in ADCNN.utils.helpers (single canonical cv2 implementation).
 
 
 # ======================================================================================

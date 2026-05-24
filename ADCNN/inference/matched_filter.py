@@ -35,15 +35,10 @@ from pathlib import Path
 import cv2
 import h5py
 import numpy as np
+
+from ADCNN.data.preprocessing import diffim_mad_sigma as panel_mad_sigma  # single impl; matched_filter's public name
 import pandas as pd
 from scipy import ndimage as ndi
-
-
-def panel_mad_sigma(arr: np.ndarray) -> float:
-    good = arr[np.isfinite(arr)]
-    if good.size == 0:
-        return 1.0
-    return float(1.4826 * np.median(np.abs(good)) + 1e-8)
 
 
 def _footprint_principal_axis(ys: np.ndarray, xs: np.ndarray) -> tuple[float, float, float, float]:
