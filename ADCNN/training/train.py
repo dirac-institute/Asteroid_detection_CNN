@@ -203,6 +203,7 @@ def main():
         # val from a held-out source (--data-h5/--data-csv), disjoint from --data-sources.
         vcsv = pd.read_csv(args.data_csv)
         vp = sorted(vcsv["image_id"].unique())[: args.n_val_panels]
+        train_panels, val_panels = None, vp  # multi-shard: no single flat train-panel list
         log(f"val: {len(vp)} held-out panels from {args.data_h5.split('/')[-2]}")
         val_ds = DiffimRandomCropDataset3ch(
             args.data_h5, vcsv, panel_ids=vp, tile=args.tile,
@@ -399,7 +400,8 @@ def main():
         "best_val_pixel_auc": best_metric,
         "epochs_run": args.epochs,
         "final_agg_alpha": float(model.agg_alpha),
-        "train_panels": len(train_panels),
+        "train_panels": (len(train_panels) if train_panels is not None else None),
+        "train_anchors_per_epoch": len(train_ds),
         "val_panels": len(val_panels),
     }
     (run_dir / "metrics" / "training_summary.json").write_text(json.dumps(summary, indent=2))
