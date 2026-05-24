@@ -8,6 +8,8 @@ used by run_inference, the RF feature/training code, and the real-data evaluatio
 from __future__ import annotations
 import numpy as np
 import os
+from concurrent.futures import ThreadPoolExecutor
+
 import torch
 import torch.nn.functional as F
 from ADCNN.data.preprocessing import build_3channel, diffim_mad_sigma
@@ -23,6 +25,9 @@ def _tile_starts(N, t, sstep):
 
 
 _TILE_BATCH = int(os.environ.get("ADCNN_TILE_BATCH", "24"))  # tiles/forward; env-tunable
+# threads for the per-tile build_3channel preprocessing (CPU, GIL-releasing); overlaps with
+# the GPU forward and removes the serial-prep bottleneck. env-tunable.
+_PREP_WORKERS = int(os.environ.get("ADCNN_PREP_WORKERS", str(min(8, os.cpu_count() or 4))))
 
 
 def hann2d(tile: int) -> np.ndarray:
@@ -125,38 +130,43 @@ def predict_panel_overlap_3ch_full(
     ys = _tile_starts(H, tile, stride)
     xs = _tile_starts(W, tile, stride)
 
-    batch_xs, batch_locs = [], []
     BATCH = _TILE_BATCH  # tiles/forward (env ADCNN_TILE_BATCH); batching does not change results
 
-    def flush():
-        if not batch_xs:
+    def flush(bx, bl):
+        if not bx:
             return
-        xb = torch.from_numpy(np.stack(batch_xs)).to(device, non_blocking=True)
+        xb = torch.from_numpy(np.stack(bx)).to(device, non_blocking=True)
         with torch.amp.autocast("cuda", enabled=(device.type == "cuda")):
             seg_logits, sn, cs, _, ag = model(xb)
         probs = torch.sigmoid(seg_logits).detach().float().cpu().numpy()
         sn = sn.detach().float().cpu().numpy()
         cs = cs.detach().float().cpu().numpy()
         ag = ag.detach().float().cpu().numpy()
-        for (y0, x0), p, s_, c_, a_ in zip(batch_locs, probs[:, 0],
-                                            sn[:, 0], cs[:, 0], ag[:, 0]):
+        for (y0, x0), p, s_, c_, a_ in zip(bl, probs[:, 0], sn[:, 0], cs[:, 0], ag[:, 0]):
             prob_acc[y0:y0+tile, x0:x0+tile] += p * hann
             sin_acc[y0:y0+tile, x0:x0+tile]  += s_ * hann
             cos_acc[y0:y0+tile, x0:x0+tile]  += c_ * hann
             agg_acc[y0:y0+tile, x0:x0+tile]  += a_ * hann
             weight_acc[y0:y0+tile, x0:x0+tile] += hann
-        batch_xs.clear(); batch_locs.clear()
 
-    for y0 in ys:
-        for x0 in xs:
-            diffim_tile = panel_image[y0:y0 + tile, x0:x0 + tile]
-            rl_tile = panel_real_labels[y0:y0 + tile, x0:x0 + tile]
-            x3 = build_3channel(diffim_tile, rl_tile, panel_sigma=sigma, clip=clip)
-            batch_xs.append(x3)
-            batch_locs.append((y0, x0))
-            if len(batch_xs) >= BATCH:
-                flush()
-    flush()
+    coords = [(y0, x0) for y0 in ys for x0 in xs]
+
+    def _build(loc):
+        y0, x0 = loc
+        return build_3channel(panel_image[y0:y0+tile, x0:x0+tile],
+                              panel_real_labels[y0:y0+tile, x0:x0+tile],
+                              panel_sigma=sigma, clip=clip)
+
+    # Build the per-tile 3-channel inputs in parallel: build_3channel is ~40% of inference
+    # wall time, CPU-bound (scipy uniform_filter releases the GIL), independent per tile, and
+    # was otherwise serial with the GPU forward. Bit-identical to the serial build.
+    if _PREP_WORKERS > 1 and len(coords) > BATCH:
+        with ThreadPoolExecutor(max_workers=_PREP_WORKERS) as ex:
+            x3s = list(ex.map(_build, coords))
+    else:
+        x3s = [_build(c) for c in coords]
+    for i in range(0, len(coords), BATCH):
+        flush(x3s[i:i + BATCH], coords[i:i + BATCH])
 
     wmax = np.maximum(weight_acc, 1e-6)
     return (

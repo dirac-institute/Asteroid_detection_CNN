@@ -187,6 +187,7 @@ def _gpu_shard_worker(gpu_id, h5_path, v7_ckpt, rf_pkl, shard, rf_thr, n_workers
     """Run the engine on one panel shard pinned to GPU `gpu_id`. Spawned process."""
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     os.environ["ADCNN_TILE_BATCH"] = str(batch)
+    os.environ["ADCNN_PREP_WORKERS"] = str(max(2, n_workers))  # CPU prep threads (overlap GPU)
     cat = build_detection_catalog(h5_path, v7_ckpt, rf_pkl, rf_thr=rf_thr,
                                   device="cuda", panel_ids=shard, n_workers=n_workers,
                                   gate_pmax=gate_pmax, stride=stride)
