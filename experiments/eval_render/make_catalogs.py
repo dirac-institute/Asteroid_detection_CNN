@@ -10,7 +10,7 @@ import pandas as pd
 
 REPO = Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
 sys.path.insert(0, str(REPO))
-from ADCNN.inference.catalog import build_detection_catalog
+from ADCNN.inference.catalog import build_detection_catalog, build_detection_catalog_multigpu
 from ADCNN.evaluation.catalog_match import match_trail_catalogs
 from ADCNN.inference.rf_postproc import DEFAULT_THR
 
@@ -29,9 +29,12 @@ def main():
         if not h5.exists():
             print(f"[skip] {name}: no test.h5", flush=True); continue
         panels = d / "panels.csv"
-        cat = build_detection_catalog(str(h5), str(V7), str(RF),
-                                      panels_csv=str(panels) if panels.exists() else None,
-                                      rf_thr=DEFAULT_THR, device="cuda")
+        import torch, time as _t
+        _t0 = _t.time()
+        cat = build_detection_catalog_multigpu(str(h5), str(V7), str(RF),
+                                               panels_csv=str(panels) if panels.exists() else None,
+                                               rf_thr=DEFAULT_THR, n_gpus=torch.cuda.device_count(), tile_batch=64)
+        _dt = _t.time() - _t0
         out_csv = OUT / f"{name}_detections.csv"
         cat.to_csv(out_csv, index=False)
         truth = pd.read_csv(d / "test.csv")
@@ -40,7 +43,7 @@ def main():
         fp_per_panel = c["FP"] / max(truth["image_id"].nunique(), 1)
         print(f"[{name}] {len(cat)} detections -> {out_csv.name} | "
               f"TP={c['TP']} FP={c['FP']} FN={c['FN']} | recall={recall:.3f} "
-              f"FP/panel={fp_per_panel:.1f}  (tol_px={TOL_PX}, thr={DEFAULT_THR})", flush=True)
+              f"FP/panel={fp_per_panel:.1f} | {_dt:.0f}s ({_dt/max(truth['image_id'].nunique(),1):.2f}s/panel)", flush=True)
 
     print("MAKE-CATALOGS DONE", flush=True)
 

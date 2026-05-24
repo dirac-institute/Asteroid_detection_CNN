@@ -3,7 +3,7 @@
 #SBATCH --account=kipac:kipac
 #SBATCH --partition=ampere
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:4
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=160G

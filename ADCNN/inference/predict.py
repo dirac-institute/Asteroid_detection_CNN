@@ -7,6 +7,7 @@ used by run_inference, the RF feature/training code, and the real-data evaluatio
 """
 from __future__ import annotations
 import numpy as np
+import os
 import torch
 import torch.nn.functional as F
 from ADCNN.data.preprocessing import build_3channel, diffim_mad_sigma
@@ -19,6 +20,9 @@ def _tile_starts(N, t, sstep):
     if out[-1] != N - t:
         out.append(N - t)
     return out
+
+
+_TILE_BATCH = int(os.environ.get("ADCNN_TILE_BATCH", "24"))  # tiles/forward; env-tunable
 
 
 def hann2d(tile: int) -> np.ndarray:
@@ -53,7 +57,7 @@ def predict_panel_overlap_3ch(
     xs = _tile_starts(W, tile, stride)
 
     batch_xs, batch_locs = [], []
-    BATCH = 24  # the line aggregator + 3-channel input make this the GPU-memory limit
+    BATCH = _TILE_BATCH  # tiles/forward (env ADCNN_TILE_BATCH); batching does not change results
 
     def flush():
         if not batch_xs:
@@ -122,7 +126,7 @@ def predict_panel_overlap_3ch_full(
     xs = _tile_starts(W, tile, stride)
 
     batch_xs, batch_locs = [], []
-    BATCH = 24
+    BATCH = _TILE_BATCH  # tiles/forward (env ADCNN_TILE_BATCH); batching does not change results
 
     def flush():
         if not batch_xs:

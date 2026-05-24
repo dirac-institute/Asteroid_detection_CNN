@@ -180,6 +180,62 @@ def build_detection_catalog(h5_path, v7_ckpt, rf_pkl, *, panels_csv=None,
     return cat
 
 
+def _gpu_shard_worker(gpu_id, h5_path, v7_ckpt, rf_pkl, shard, rf_thr, n_workers, batch, q):
+    """Run the engine on one panel shard pinned to GPU `gpu_id`. Spawned process."""
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    os.environ["ADCNN_TILE_BATCH"] = str(batch)
+    cat = build_detection_catalog(h5_path, v7_ckpt, rf_pkl, rf_thr=rf_thr,
+                                  device="cuda", panel_ids=shard, n_workers=n_workers)
+    q.put(cat)
+
+
+def build_detection_catalog_multigpu(h5_path, v7_ckpt, rf_pkl, *, panels_csv=None,
+                                     rf_thr: float = DEFAULT_THR, n_gpus=None,
+                                     tile_batch: int = 64) -> pd.DataFrame:
+    """Data-parallel catalog build: panels are round-robin sharded across `n_gpus`, each
+    GPU runs the engine (with its own CPU feature pool) in a separate process. Identical
+    output to the single-GPU path (rows sorted by image_id). Falls back to single-GPU when
+    n_gpus<=1. `tile_batch` sets the per-forward tile batch (env ADCNN_TILE_BATCH)."""
+    import torch
+    if n_gpus is None:
+        n_gpus = max(1, torch.cuda.device_count())
+    with h5py.File(h5_path, "r") as f:
+        n_panels = int(f["images"].shape[0])
+    if n_gpus <= 1:
+        os.environ["ADCNN_TILE_BATCH"] = str(tile_batch)
+        return build_detection_catalog(h5_path, v7_ckpt, rf_pkl, panels_csv=panels_csv,
+                                       rf_thr=rf_thr, device="cuda")
+
+    shards = [list(range(g, n_panels, n_gpus)) for g in range(n_gpus)]  # round-robin balance
+    try:
+        cores = len(os.sched_getaffinity(0))
+    except AttributeError:
+        cores = os.cpu_count() or (2 * n_gpus)
+    per = max(1, cores // n_gpus - 1)  # CPU feature workers per GPU process
+
+    ctx = mp.get_context("spawn")
+    q = ctx.Queue()
+    procs = [ctx.Process(target=_gpu_shard_worker,
+                         args=(g, str(h5_path), str(v7_ckpt), str(rf_pkl), shards[g],
+                               rf_thr, per, tile_batch, q))
+             for g in range(n_gpus) if shards[g]]
+    for p in procs:
+        p.start()
+    parts = [q.get() for _ in procs]   # drain queue before join (avoids deadlock on large items)
+    for p in procs:
+        p.join()
+
+    nonempty = [c for c in parts if len(c)]
+    cat = (pd.concat(nonempty, ignore_index=True).sort_values("image_id").reset_index(drop=True)
+           if nonempty else pd.DataFrame(columns=CATALOG_COLUMNS))
+    if panels_csv:
+        pan = pd.read_csv(panels_csv)
+        keep = [c for c in ("image_id", "visit", "detector", "band") if c in pan.columns]
+        if len(keep) > 1:
+            cat = cat.merge(pan[keep], on="image_id", how="left")
+    return cat
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -191,13 +247,19 @@ def main():
                     help="pre-chosen RF operating point (default = shipped DEFAULT_THR)")
     ap.add_argument("--limit", type=int, default=0, help="0 = all panels")
     ap.add_argument("--n-workers", type=int, default=0, help="0 = all allocated cores")
+    ap.add_argument("--n-gpus", type=int, default=1, help=">1 = data-parallel across GPUs (ignores --limit)")
+    ap.add_argument("--tile-batch", type=int, default=24, help="tiles per GPU forward (64 is a good A100 value)")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
-    pids = range(a.limit) if a.limit else None
-    cat = build_detection_catalog(a.h5, a.v7, a.rf, panels_csv=a.panels, rf_thr=a.rf_thr,
-                                  device=a.device, panel_ids=pids,
-                                  n_workers=(a.n_workers or None))
+    if a.n_gpus and a.n_gpus > 1:
+        cat = build_detection_catalog_multigpu(a.h5, a.v7, a.rf, panels_csv=a.panels,
+                                               rf_thr=a.rf_thr, n_gpus=a.n_gpus, tile_batch=a.tile_batch)
+    else:
+        os.environ["ADCNN_TILE_BATCH"] = str(a.tile_batch)
+        pids = range(a.limit) if a.limit else None
+        cat = build_detection_catalog(a.h5, a.v7, a.rf, panels_csv=a.panels, rf_thr=a.rf_thr,
+                                      device=a.device, panel_ids=pids, n_workers=(a.n_workers or None))
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     cat.to_csv(a.out, index=False)
     npan = cat["image_id"].nunique() if len(cat) else 0
