@@ -74,6 +74,13 @@ def train_rf_from_val(v7_ckpt, val_h5, val_csv, val_panel_ids, out_pkl, *,
     dev = torch.device(device if torch.cuda.is_available() else "cpu")
     model = torch.jit.load(str(v7_ckpt), map_location=dev).eval()
     cat = pd.read_csv(val_csv)
+    # Candidates are stacked in `val_panel_ids` order (panel_id 0..N-1), so the catalog's
+    # image_id must be remapped into that index space — otherwise injection-overlap label
+    # matching silently fails when the val panels are a high-index slice of a shared
+    # train.h5 (e.g. shard_3 ids 1036..1099). Mirrors eval_reg2_full.py's remap.
+    remap = {orig: i for i, orig in enumerate(val_panel_ids)}
+    cat = cat[cat["image_id"].isin(remap)].copy()
+    cat["image_id"] = cat["image_id"].map(remap)
     cand, labels = infer_candidate_features(model, val_h5, val_panel_ids, cat, dev)
     X, y, _ = build_pool(cand, labels)
     print(f"[rf-train] pool: {len(y)} candidates ({int(y.sum())} pos); neg_ratio={neg_ratio}", flush=True)
