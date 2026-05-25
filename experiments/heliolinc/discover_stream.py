@@ -18,8 +18,9 @@ import warnings
 # compute_v2_features (NumPy/BLAS-heavy); with default threading each shard grabs ALL cores ->
 # n_gpus×ncores oversubscription (observed loadavg ~121 on a 32-core node, GPUs starved at ~70%).
 # It was never filesystem I/O (jobs run on different nodes, iowait≈0) — it's CPU oversubscription.
-# Default 6 threads/shard (4 shards × 6 = 24 ≤ 32 cores); override with ADCNN_BLAS_THREADS.
-_NTHREAD = os.environ.get("ADCNN_BLAS_THREADS", "6")
+# Pin to 1: parallelism comes from the per-GPU feature-WORKER POOL (n_gpus×n_workers ≈ ncores,
+# each worker 1 BLAS thread). Workers inherit this env, so 1 thread each -> no oversubscription.
+_NTHREAD = os.environ.get("ADCNN_BLAS_THREADS", "1")
 for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
            "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
     os.environ.setdefault(_v, _NTHREAD)
@@ -68,14 +69,22 @@ def _prefetch(paths, workers):
             nxt += 1
 
 
-def run_shard(gpu_id, rows, v7_ckpt, rf_pkl, rf_thr, prefetch, out_csv, feat_out=None):
+def run_shard(gpu_id, rows, v7_ckpt, rf_pkl, rf_thr, prefetch, out_csv, n_workers=8, feat_out=None):
+    """Stream FITS -> v7 (GPU) -> feature+RF PROCESS POOL (CPU) -> sky catalog. The GPU runs v7
+    inference continuously while `n_workers` CPU processes compute the 72 features + RF in parallel
+    across panels (catalog.py's engine) -> GPU and all cores stay busy (the old inline-per-shard
+    version left the GPU idle ~90% while one process computed features). Detections + a .done log
+    are written incrementally (preemption-safe / resumable)."""
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    import multiprocessing as mp
+    from collections import deque
+    from concurrent.futures import ProcessPoolExecutor
     import torch
     from ADCNN.inference.predict import predict_panel_overlap_3ch_full
-    from ADCNN.inference.rf_postproc import compute_v2_features, apply_rf_v2, load_rf, RF_FEATURES_V2
+    from ADCNN.inference.catalog import _worker, _worker_init, InferenceConfig
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = torch.jit.load(v7_ckpt, map_location=dev).eval()
-    rf = load_rf(rf_pkl)
+    config = InferenceConfig(rf_thr=rf_thr, gate_pmax=0.10)
     # RESUME: skip (visit,detector) panels already processed (sidecar .done log) so a preempted +
     # requeued job continues instead of losing everything. Detections are appended per panel.
     done_path = out_csv + ".done"
@@ -89,54 +98,50 @@ def run_shard(gpu_id, rows, v7_ckpt, rf_pkl, rf_thr, prefetch, out_csv, feat_out
     write_header = not (os.path.exists(out_csv) and os.path.getsize(out_csv) > 0)
     donef = open(done_path, "a")
     paths = [r["fits_path"] for r in rows]
-    out, feats, n_done = [], [], len(done)
-    for i, (img, wcs, mjd) in _prefetch(paths, prefetch):
-        r = rows[i]
-        rl = np.zeros(img.shape, dtype=np.uint16)
-        prob, sin, cos, agg = predict_panel_overlap_3ch_full(model, img, rl, device=dev)
-        cand, _ = compute_v2_features(prob[None], img[None], sin[None], cos[None], agg[None],
-                                      real_labels=rl[None], gate_pmax=0.10, verbose=False)
-        if not len(cand):
-            donef.write(f'{int(r["visit"])},{int(r["detector"])}\n'); donef.flush()
-            continue
-        feat = [c for c in RF_FEATURES_V2 if c in cand.columns]
-        cand[feat] = cand[feat].replace([np.inf, -np.inf], np.nan)
-        cand = apply_rf_v2(cand, rf)
-        xy = cand[["x_centroid", "y_centroid"]].to_numpy(np.float64)
-        sky_all = wcs.all_pix2world(xy, 0)
-        # Trail ENDPOINTS for trail->tracklet linking: half-length along mf_beta (PCA), with the
-        # +~30px ADCNN ends-bloom removed (L_true ≈ (mf_length-33.4)/0.887; Veres-validated) so the
-        # endpoint separation matches the true on-sky motion over the exposure. -> RA/Dec via WCS.
-        beta_rad = np.radians(cand.get("mf_beta", pd.Series(np.zeros(len(cand)))).to_numpy(np.float64))
-        L_db = np.clip((cand.get("mf_length", pd.Series(np.zeros(len(cand)))).to_numpy(np.float64) - 33.4) / 0.887, 0, None)
-        hdx = 0.5 * L_db * np.cos(beta_rad); hdy = 0.5 * L_db * np.sin(beta_rad)
-        sky0 = wcs.all_pix2world(np.stack([xy[:, 0] - hdx, xy[:, 1] - hdy], 1), 0)
-        sky1 = wcs.all_pix2world(np.stack([xy[:, 0] + hdx, xy[:, 1] + hdy], 1), 0)
-        cand = cand.assign(ra=sky_all[:, 0], dec=sky_all[:, 1], mjd=mjd,
-                           ra0=sky0[:, 0], dec0=sky0[:, 1], ra1=sky1[:, 0], dec1=sky1[:, 1],
-                           len_db=L_db,
-                           visit=int(r["visit"]), detector=int(r["detector"]), band=str(r["band"])[:1] or "r")
-        if feat_out is not None:  # dump EVERY candidate's features+sky for RF (re)training
-            feats.append(cand)
-        keep = cand[cand.score_rf >= rf_thr]
-        prows = [dict(mjd=mjd, ra=float(c.ra), dec=float(c.dec), mag=21.0, band=c.band,
-                      obscode=OBSCODE, visit=int(r["visit"]), detector=int(r["detector"]),
-                      x=float(c.x_centroid), y=float(c.y_centroid), score_rf=float(c.score_rf),
-                      length=float(c.get("mf_length", np.nan)), len_db=float(c.len_db),
-                      mf_snr=float(c.get("mf_snr", np.nan)),
-                      ra0=float(c.ra0), dec0=float(c.dec0), ra1=float(c.ra1), dec1=float(c.dec1),
-                      # trail PA from footprint PCA (or_beta = NN head is r≈0 vs truth, kept as diagnostic)
-                      beta=float(c.get("mf_beta", np.nan)), beta_nn=float(c.get("or_beta", np.nan)),
-                      nn_pmax=float(c.get("max_p", np.nan))) for _, c in keep.iterrows()]
-        if prows:   # append THIS panel's detections immediately (preemption-safe)
-            pd.DataFrame(prows).to_csv(out_csv, mode="a", header=write_header, index=False)
-            write_header = False; out.extend(prows)
+    n_done = len(done); n_det = 0
+    pending = deque()
+
+    def drain():
+        """Pop one finished feature-worker result, convert pixels->sky (+ trail endpoints), append."""
+        nonlocal write_header, n_det
+        fut, r, wcs, mjd = pending.popleft()
+        cand = fut.result()   # catalog public schema (x,y,beta=PCA,length,score_rf>=thr) or None
+        if cand is not None and len(cand):
+            xy = cand[["x", "y"]].to_numpy(np.float64)
+            sky = wcs.all_pix2world(xy, 0)
+            # Trail ENDPOINTS for tracklets: half-length along mf_beta (=cand.beta), +30px ADCNN
+            # ends-bloom removed (L_true≈(mf_length-33.4)/0.887) so endpoint sep matches sky motion.
+            beta_rad = np.radians(cand["beta"].to_numpy(np.float64))
+            L_db = np.clip((cand["length"].to_numpy(np.float64) - 33.4) / 0.887, 0, None)
+            hdx = 0.5 * L_db * np.cos(beta_rad); hdy = 0.5 * L_db * np.sin(beta_rad)
+            sky0 = wcs.all_pix2world(np.stack([xy[:, 0] - hdx, xy[:, 1] - hdy], 1), 0)
+            sky1 = wcs.all_pix2world(np.stack([xy[:, 0] + hdx, xy[:, 1] + hdy], 1), 0)
+            out = pd.DataFrame(dict(
+                mjd=mjd, ra=sky[:, 0], dec=sky[:, 1], mag=21.0, band=str(r["band"])[:1] or "r",
+                obscode=OBSCODE, visit=int(r["visit"]), detector=int(r["detector"]),
+                x=xy[:, 0], y=xy[:, 1], score_rf=cand["score_rf"].to_numpy(),
+                length=cand["length"].to_numpy(), len_db=L_db, mf_snr=cand["mf_snr"].to_numpy(),
+                ra0=sky0[:, 0], dec0=sky0[:, 1], ra1=sky1[:, 0], dec1=sky1[:, 1],
+                beta=cand["beta"].to_numpy(),
+                beta_nn=cand.get("beta_nn", pd.Series(np.nan, index=cand.index)).to_numpy(),
+                nn_pmax=cand["nn_pmax"].to_numpy()))
+            out.to_csv(out_csv, mode="a", header=write_header, index=False)
+            write_header = False; n_det += len(out)
         donef.write(f'{int(r["visit"])},{int(r["detector"])}\n'); donef.flush()
+
+    ctx = mp.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=max(2, n_workers), mp_context=ctx,
+                             initializer=_worker_init, initargs=(rf_pkl, config)) as pool:
+        for i, (img, wcs, mjd) in _prefetch(paths, prefetch):
+            rl = np.zeros(img.shape, dtype=np.uint16)
+            prob, sin, cos, agg = predict_panel_overlap_3ch_full(model, img, rl, device=dev)
+            pending.append((pool.submit(_worker, (i, prob, img, sin, cos, agg, rl)), rows[i], wcs, mjd))
+            if len(pending) >= 2 * max(2, n_workers):   # backpressure: bound RAM + queue depth
+                drain()
+        while pending:
+            drain()
     donef.close()
-    if feat_out is not None and feats:
-        pd.concat(feats, ignore_index=True).to_parquet(feat_out, index=False)
-    print(f"[gpu{gpu_id}] {len(rows)} new panels (+{n_done} done before) -> {len(out)} new detections"
-          f"{' (+features dumped)' if feat_out else ''}", flush=True)
+    print(f"[gpu{gpu_id}] {len(rows)} new panels (+{n_done} done) -> {n_det} new detections", flush=True)
 
 
 def main():
@@ -158,6 +163,12 @@ def main():
     if a.limit:
         man = man.head(a.limit)
     n_gpus = a.n_gpus or max(1, torch.cuda.device_count())
+    try:
+        cores = len(os.sched_getaffinity(0))
+    except AttributeError:
+        cores = os.cpu_count() or 8
+    n_workers = max(2, cores // n_gpus - 1)   # feature procs per GPU shard (n_gpus×n_workers ≈ cores)
+    print(f"[discover] {n_gpus} GPUs × {n_workers} feature workers ({cores} cores)", flush=True)
     shards = [man.iloc[g::n_gpus].to_dict("records") for g in range(n_gpus)]
     tmp = Path(a.out).parent
     tmp.mkdir(parents=True, exist_ok=True)
@@ -165,11 +176,11 @@ def main():
     feat_pqs = [str(tmp / f"_feat{g}.parquet") if a.dump_features else None for g in range(n_gpus)]
 
     if n_gpus == 1:
-        run_shard(0, shards[0], a.v7, a.rf, a.rf_thr, a.prefetch, shard_csvs[0], feat_pqs[0])
+        run_shard(0, shards[0], a.v7, a.rf, a.rf_thr, a.prefetch, shard_csvs[0], n_workers, feat_pqs[0])
     else:
         ctx = torch.multiprocessing.get_context("spawn")
         procs = [ctx.Process(target=run_shard,
-                             args=(g, shards[g], a.v7, a.rf, a.rf_thr, a.prefetch, shard_csvs[g], feat_pqs[g]))
+                             args=(g, shards[g], a.v7, a.rf, a.rf_thr, a.prefetch, shard_csvs[g], n_workers, feat_pqs[g]))
                  for g in range(n_gpus) if shards[g]]
         for p in procs:
             p.start()
