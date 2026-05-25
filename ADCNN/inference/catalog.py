@@ -53,7 +53,8 @@ _COLMAP = {
     "image_id": "image_id",
     "x_centroid": "x",          # measured centroid (px)
     "y_centroid": "y",
-    "or_beta": "beta",          # measured orientation (deg, image convention 0=+x)
+    "mf_beta": "beta",          # trail PA from footprint PCA (deg, 0=+x); recovers truth ~8-10deg MAD
+    "or_beta": "beta_nn",       # NN sin2β/cos2β-head orientation (DIAGNOSTIC ONLY: r≈0 vs truth)
     "mf_length": "length",      # measured trail length (px)
     "mf_flux": "flux",          # integrated matched-filter flux (brightness proxy)
     "mf_snr": "mf_snr",
