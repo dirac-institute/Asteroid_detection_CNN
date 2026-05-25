@@ -368,9 +368,17 @@ def _add_low_thr_pca(cand_df, panel_probs, diffims, panel_sigmas, *,
 def _add_orient(cand_df, panel_probs, diffims, panel_sigmas,
                  sin_maps, cos_maps, agg_maps, *,
                  win: int = 48, low_thr: float = 0.10,
-                 lengths: Iterable[int] = (30, 50, 80), line_width: int = 2):
-    """Prob-weighted mean of orient_sin/cos in a window → β = 0.5 atan2(...);
-    MF along β; aggregate sigmoid(agg) inside the window."""
+                 lengths: Iterable[int] = (30, 50, 80), line_width: int = 2,
+                 orient_mode: str = "pca"):
+    """Orientation features (or_beta + MF along β as or_snr_L*/or_flux_L*).
+
+    ``orient_mode``:
+      - ``"pca"`` (default): β = footprint principal axis (PCA of the prob>low_thr mask).
+        Validated at ~8-10° MAD vs truth — the orientation the MF should integrate along.
+      - ``"nnhead"``: β = 0.5·atan2 of the prob-weighted NN sin2β/cos2β head (the original
+        behaviour; uncorrelated with truth, r≈0, ~44° MAD). Kept for A/B retraining only.
+
+    ``or_r`` (coherence of the NN sin/cos field) is angle-agnostic and identical in both modes."""
     n = len(cand_df)
     pid_arr = cand_df["panel_id"].to_numpy()
     cy_arr  = cand_df["y_centroid"].to_numpy()
@@ -417,8 +425,22 @@ def _add_orient(cand_df, panel_probs, diffims, panel_sigmas,
         w = pp_w[mask]
         sn_m = float((sn_w[mask] * w).sum() / w.sum())
         cs_m = float((cs_w[mask] * w).sum() / w.sum())
+        # or_r = coherence of the NN sin2β/cos2β field (how line-like, angle-agnostic) — keep.
         or_r[i] = math.hypot(sn_m, cs_m)
-        beta = 0.5 * math.atan2(sn_m, cs_m)
+        if orient_mode == "nnhead":
+            # Original (broken) estimator: angle of the NN sin2β/cos2β head. r≈0 vs truth.
+            beta = 0.5 * math.atan2(sn_m, cs_m)
+        else:
+            # Footprint principal-axis angle (PCA of the prob>low_thr mask) — ~8-10° MAD vs
+            # truth. Makes or_beta true AND makes or_snr_L*/or_flux_L* integrate flux along the
+            # REAL trail axis. Changes these 7 RF features -> RF must be retrained to match.
+            ys_m, xs_m = np.nonzero(mask)
+            ym = ys_m.astype(np.float64) - ys_m.mean()
+            xm = xs_m.astype(np.float64) - xs_m.mean()
+            cov = np.array([[float((ym * ym).sum()), float((ym * xm).sum())],
+                            [float((ym * xm).sum()), float((xm * xm).sum())]]) / max(len(ys_m) - 1, 1)
+            evec = np.linalg.eigh(cov)[1][:, -1]   # principal axis (largest eigenvalue)
+            beta = math.atan2(evec[0], evec[1])    # evec[0]=y-comp, evec[1]=x-comp
         or_beta[i] = math.degrees(beta) % 180.0
         or_n_pix[i] = int(mask.sum())
         or_agg_ti[i] = float(_sigmoid(ag_w[mask]).mean())
@@ -467,6 +489,7 @@ def compute_v2_features(
     line_width: int = 2,
     pad_length: int = 4,
     gate_pmax: float = 0.0,
+    orient_mode: str = "pca",
     verbose: bool = False,
 ):
     """Extract candidates and compute the full RF feature set.
@@ -561,7 +584,7 @@ def compute_v2_features(
     if verbose:
         t = time.time()
     _add_orient(cand_df, panel_probs, diffims, panel_sigmas,
-                sin_maps, cos_maps, agg_maps)
+                sin_maps, cos_maps, agg_maps, orient_mode=orient_mode)
     if verbose:
         print(f"  [v2] orient          {time.time()-t:.1f}s", flush=True)
 

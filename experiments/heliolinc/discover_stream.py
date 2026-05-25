@@ -89,7 +89,11 @@ def run_shard(gpu_id, rows, v7_ckpt, rf_pkl, rf_thr, prefetch, out_csv, feat_out
         for _, c in keep.iterrows():
             out.append(dict(mjd=mjd, ra=float(c.ra), dec=float(c.dec), mag=21.0, band=c.band,
                             obscode=OBSCODE, visit=int(r["visit"]), detector=int(r["detector"]),
-                            x=float(c.x_centroid), y=float(c.y_centroid), score_rf=float(c.score_rf)))
+                            x=float(c.x_centroid), y=float(c.y_centroid), score_rf=float(c.score_rf),
+                            length=float(c.get("mf_length", np.nan)), mf_snr=float(c.get("mf_snr", np.nan)),
+                            # trail PA from footprint PCA (or_beta = NN head is r≈0 vs truth, kept as diagnostic)
+                            beta=float(c.get("mf_beta", np.nan)), beta_nn=float(c.get("or_beta", np.nan)),
+                            nn_pmax=float(c.get("max_p", np.nan))))
     pd.DataFrame(out).to_csv(out_csv, index=False)
     if feat_out is not None and feats:
         pd.concat(feats, ignore_index=True).to_parquet(feat_out, index=False)

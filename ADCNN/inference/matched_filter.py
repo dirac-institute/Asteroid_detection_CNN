@@ -120,19 +120,28 @@ def matched_filter_for_nn_candidates(
     line_width: int = 2,
     pad_length: int = 4,
 ) -> pd.DataFrame:
-    """Add columns mf_snr, mf_n_line, mf_flux, mf_length to `cand_df`.
+    """Add columns mf_snr, mf_n_line, mf_flux, mf_length, mf_beta to `cand_df`.
 
     Optimised: label the whole panel ONCE (not per candidate). All
     candidates on a panel share the same effective_t_low (the adaptive
     formula depends only on panel statistics), so a single threshold +
     label call per panel covers them all. This is ~hundreds of times
     faster than the previous per-candidate implementation.
+
+    ``mf_beta`` is the footprint principal-axis orientation (deg in [0,180),
+    image convention 0=+x) — the SAME PCA axis the matched filter integrates
+    along, so it is a faithful trail position angle. It is emitted for the
+    downstream catalog (HelioLinC trail PA) and is NOT an RF feature, so adding
+    it does not change the trained RandomForest's input vector. (The NN
+    sin2β/cos2β head's ``or_beta`` is uncorrelated with truth — r≈0 — whereas
+    this PCA angle recovers truth to ~8-10° MAD.)
     """
     n = len(cand_df)
     snr_out = np.zeros(n, dtype=np.float32)
     n_out = np.zeros(n, dtype=np.int32)
     flux_out = np.zeros(n, dtype=np.float32)
     len_out = np.zeros(n, dtype=np.float32)
+    beta_out = np.zeros(n, dtype=np.float32)
 
     # Group candidates by panel.
     pid_arr = cand_df["panel_id"].to_numpy()
@@ -198,12 +207,16 @@ def matched_filter_for_nn_candidates(
             n_out[ridx] = nline
             flux_out[ridx] = flux
             len_out[ridx] = Leff
+            # Footprint principal-axis angle (same PCA the MF integrates along).
+            _, _, beta_rad, _ = _footprint_principal_axis(ys, xs)
+            beta_out[ridx] = math.degrees(beta_rad) % 180.0
 
     out = cand_df.copy()
     out["mf_snr"] = snr_out
     out["mf_n_line"] = n_out
     out["mf_flux"] = flux_out
     out["mf_length"] = len_out
+    out["mf_beta"] = beta_out
     return out
 
 
