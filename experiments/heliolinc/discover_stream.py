@@ -74,14 +74,25 @@ def run_shard(gpu_id, rows, v7_ckpt, rf_pkl, rf_thr, prefetch, out_csv, feat_out
         rl = np.zeros(img.shape, dtype=np.uint16)
         prob, sin, cos, agg = predict_panel_overlap_3ch_full(model, img, rl, device=dev)
         cand, _ = compute_v2_features(prob[None], img[None], sin[None], cos[None], agg[None],
-                                      real_labels=rl[None], verbose=False)
+                                      real_labels=rl[None], gate_pmax=0.10, verbose=False)
         if not len(cand):
             continue
         feat = [c for c in RF_FEATURES_V2 if c in cand.columns]
         cand[feat] = cand[feat].replace([np.inf, -np.inf], np.nan)
         cand = apply_rf_v2(cand, rf)
-        sky_all = wcs.all_pix2world(cand[["x_centroid", "y_centroid"]].to_numpy(np.float64), 0)
+        xy = cand[["x_centroid", "y_centroid"]].to_numpy(np.float64)
+        sky_all = wcs.all_pix2world(xy, 0)
+        # Trail ENDPOINTS for trail->tracklet linking: half-length along mf_beta (PCA), with the
+        # +~30px ADCNN ends-bloom removed (L_true ≈ (mf_length-33.4)/0.887; Veres-validated) so the
+        # endpoint separation matches the true on-sky motion over the exposure. -> RA/Dec via WCS.
+        beta_rad = np.radians(cand.get("mf_beta", pd.Series(np.zeros(len(cand)))).to_numpy(np.float64))
+        L_db = np.clip((cand.get("mf_length", pd.Series(np.zeros(len(cand)))).to_numpy(np.float64) - 33.4) / 0.887, 0, None)
+        hdx = 0.5 * L_db * np.cos(beta_rad); hdy = 0.5 * L_db * np.sin(beta_rad)
+        sky0 = wcs.all_pix2world(np.stack([xy[:, 0] - hdx, xy[:, 1] - hdy], 1), 0)
+        sky1 = wcs.all_pix2world(np.stack([xy[:, 0] + hdx, xy[:, 1] + hdy], 1), 0)
         cand = cand.assign(ra=sky_all[:, 0], dec=sky_all[:, 1], mjd=mjd,
+                           ra0=sky0[:, 0], dec0=sky0[:, 1], ra1=sky1[:, 0], dec1=sky1[:, 1],
+                           len_db=L_db,
                            visit=int(r["visit"]), detector=int(r["detector"]), band=str(r["band"])[:1] or "r")
         if feat_out is not None:  # dump EVERY candidate's features+sky for RF (re)training
             feats.append(cand)
@@ -90,7 +101,9 @@ def run_shard(gpu_id, rows, v7_ckpt, rf_pkl, rf_thr, prefetch, out_csv, feat_out
             out.append(dict(mjd=mjd, ra=float(c.ra), dec=float(c.dec), mag=21.0, band=c.band,
                             obscode=OBSCODE, visit=int(r["visit"]), detector=int(r["detector"]),
                             x=float(c.x_centroid), y=float(c.y_centroid), score_rf=float(c.score_rf),
-                            length=float(c.get("mf_length", np.nan)), mf_snr=float(c.get("mf_snr", np.nan)),
+                            length=float(c.get("mf_length", np.nan)), len_db=float(c.len_db),
+                            mf_snr=float(c.get("mf_snr", np.nan)),
+                            ra0=float(c.ra0), dec0=float(c.dec0), ra1=float(c.ra1), dec1=float(c.dec1),
                             # trail PA from footprint PCA (or_beta = NN head is r≈0 vs truth, kept as diagnostic)
                             beta=float(c.get("mf_beta", np.nan)), beta_nn=float(c.get("or_beta", np.nan)),
                             nn_pmax=float(c.get("max_p", np.nan))))
