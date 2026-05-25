@@ -1,25 +1,19 @@
-"""Stage 3 — FALSE-POSITIVE CLEANING of the trailed-detection catalog (the step the pipeline
-still needs to make linking productive).
+"""Stage 3 — FALSE-POSITIVE CLEANING + source merge, tuned to NOT lose low-SNR trails.
 
-On real diffims the trailed-detection set is FP-dominated (~18k/night of subtraction residuals /
-instrumental artefacts that the Veres model happily fits as trails). HelioLinC then drowns in
-chance-alignment links. This stage cuts the catalog down to plausible real trails BEFORE linking.
+Two detection streams feed the linker, cleaned DIFFERENTLY (validated on truth):
+  • diaSources (5σ stack): apply Rubin's real/bogus RELIABILITY cut (≥thr & !isNegative).
+      On truth this keeps 95.7% of TP while removing 93.6% of FP — a clean, TP-safe FP cleaner
+      for the stack stream.
+  • ADCNN detections: DO NOT apply real/bogus here. Tested (rb_synthetic_test.py): the point-source
+      real/bogus model has an SNR floor (0% kept <SNR5) and a trail-length ceiling (>30px), so it
+      would discard exactly ADCNN's faint/fast trails. Instead keep ADCNN at a LOW score threshold
+      and let multi-epoch ORBITAL LINKING reject its FP (a faint real trail recurs on a consistent
+      orbit; faint noise does not). See [[realbogus-fp-filter-limits]], [[linking-needs-recall]].
 
-Currently applies the cheap, defensible cuts (fast, vectorised pandas):
-  - RF score              >= score_min        (detector confidence)
-  - Veres reduced chi^2   <= rchisq_max        (a real trail fits the trailed-PSF model; junk doesn't)
-  - de-biased length      >= lendb_min         (fast movers; sub-px trails carry no velocity)
+Both streams are restricted to trailed/fast candidates (de-biased trail length ≥ lendb_min ~6px ≈
+1 deg/day) and merged into one catalog with sky endpoints for trail_tracklets.
 
->>> FP-CLEANING HOOK (the real missing work) <<<
-The cheap cuts above are necessary but NOT sufficient — see notes/simreal-gap. Add here, in order
-of expected impact:
-  1. diaSource real/bogus RELIABILITY join: match each detection to the Rubin diaSource catalog and
-     keep only high-reliability (real/bogus score) sources — the single biggest FP reducer on DP2.
-  2. trail-COHERENCE cut: require the flux to be coherent along the fitted line (e.g. fraction of the
-     line's pixels above N·sigma, or low residual structure) — rejects dipoles / star-halo residuals
-     that fit a line but aren't trails.
-  3. de-duplication / merge of multiple detections of the same trail on a panel.
-Each is a pure post-processing filter on this catalog; wire it as another vectorised mask below.
+    python clean_fp.py --adcnn adcnn_dets_veres.csv --dia diasources.csv --out dets_clean.csv
 """
 from __future__ import annotations
 import argparse
@@ -28,34 +22,57 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-
-def clean(df: pd.DataFrame, *, score_min: float, rchisq_max: float, lendb_min: float) -> pd.DataFrame:
-    n0 = len(df)
-    m = np.ones(n0, bool)
-    if "score_rf" in df:    m &= df.score_rf.to_numpy() >= score_min
-    if "veres_rchi" in df:  m &= df.veres_rchi.to_numpy() <= rchisq_max
-    if "len_db" in df:      m &= df.len_db.to_numpy() >= lendb_min
-    # --- FP-CLEANING HOOK: add reliability / coherence / dedup masks here (see module docstring) ---
-    out = df[m].copy()
-    print(f"[clean] {n0} -> {len(out)} detections "
-          f"(score>={score_min}, rChiSq<={rchisq_max}, len_db>={lendb_min}px); "
-          f"per-night now {len(out)//max(out['mjd'].astype(int).nunique(),1) if len(out) else 0}", flush=True)
-    return out
+COLS = ["detid", "mjd", "ra", "dec", "ra0", "dec0", "ra1", "dec1", "len_db",
+        "mag", "band", "obscode", "score_rf", "source"]
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--in", dest="inp", required=True, help="Veres-measured detection catalog")
-    ap.add_argument("--out", required=True, help="cleaned catalog (input to linking)")
-    ap.add_argument("--score-min", type=float, default=0.5)
-    ap.add_argument("--rchisq-max", type=float, default=1.5)
-    ap.add_argument("--lendb-min", type=float, default=6.0)
+    ap.add_argument("--adcnn", required=True, help="ADCNN Veres-measured catalog (sky endpoints, len_db)")
+    ap.add_argument("--dia", default=None, help="stack diaSource catalog (reliability, trailLength)")
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--adcnn-score-min", type=float, default=0.3, help="LOW threshold -> keep faint/low-SNR trails")
+    ap.add_argument("--dia-reliability-min", type=float, default=0.5, help="real/bogus cut (diaSources ONLY)")
+    ap.add_argument("--lendb-min", type=float, default=6.0, help="de-biased trail length px (~1 deg/day) — fast movers")
     a = ap.parse_args()
-    df = pd.read_csv(a.inp)
-    out = clean(df, score_min=a.score_min, rchisq_max=a.rchisq_max, lendb_min=a.lendb_min)
+
+    parts = []
+    # --- ADCNN stream: low threshold, trailed; NO real/bogus (preserve low-SNR trails) ---
+    ad = pd.read_csv(a.adcnn)
+    n0 = len(ad)
+    if "score_rf" in ad:
+        ad = ad[ad.score_rf >= a.adcnn_score_min]
+    if "len_db" in ad:
+        ad = ad[ad.len_db >= a.lendb_min]
+    ad["source"] = "adcnn"
+    print(f"[clean] ADCNN {n0} -> {len(ad)} (score>={a.adcnn_score_min}, len_db>={a.lendb_min}; NO real/bogus)", flush=True)
+    parts.append(ad)
+
+    # --- diaSource stream: real/bogus reliability cut (TP-safe FP cleaner), trailed ---
+    if a.dia and Path(a.dia).exists():
+        dia = pd.read_csv(a.dia); m0 = len(dia)
+        keep = (dia.reliability >= a.dia_reliability_min)
+        if "isNegative" in dia:
+            keep &= ~dia.isNegative.astype(bool)
+        if "trailLength" in dia:
+            keep &= dia.trailLength >= a.lendb_min
+        dia = dia[keep].copy()
+        # diaSource carries trailLength but not endpoints -> trail_tracklets/Veres adds them; map names
+        if "len_db" not in dia and "trailLength" in dia:
+            dia["len_db"] = dia.trailLength
+        dia["source"] = "dia"
+        dia["score_rf"] = dia.get("reliability", np.nan)
+        print(f"[clean] diaSource {m0} -> {len(dia)} (reliability>={a.dia_reliability_min} & !neg & trailLen>={a.lendb_min})", flush=True)
+        parts.append(dia)
+
+    out = pd.concat(parts, ignore_index=True, sort=False)
+    keep_cols = [c for c in COLS if c in out.columns]
+    out = out[keep_cols]
+    nnight = out["mjd"].astype(int).nunique() if len(out) else 1
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     out.to_csv(a.out, index=False)
-    print(f"[clean] wrote {len(out)} -> {a.out}", flush=True)
+    print(f"[clean] merged -> {len(out)} detections ({len(out)//max(nnight,1)}/night) "
+          f"[ADCNN={(out.source=='adcnn').sum()}, dia={(out.source=='dia').sum()}] -> {a.out}", flush=True)
 
 
 if __name__ == "__main__":

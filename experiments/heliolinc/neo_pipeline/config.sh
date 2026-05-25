@@ -25,11 +25,14 @@ N_GPUS=${N_GPUS:-4}
 MEAS_LENGTH_MIN=${MEAS_LENGTH_MIN:-40}   # raw mf_length cut (px) -> only measure trailed/fast candidates
 MEAS_WORKERS=${MEAS_WORKERS:-60}
 
-# ---- stage 3: clean FP -----------------------------------------------------
-# (the step the machinery still needs; see clean_fp.py for the cuts + hook)
-CLEAN_SCORE_MIN=${CLEAN_SCORE_MIN:-0.5}
-CLEAN_RCHISQ_MAX=${CLEAN_RCHISQ_MAX:-1.5}   # Veres reduced-chi^2 (real trail fits ~1)
-CLEAN_LENDB_MIN=${CLEAN_LENDB_MIN:-6}       # de-biased length px; ~6px ≈ 1 deg/day (fast movers)
+# ---- stage 3: clean FP (dual-stream, validated on truth) -------------------
+# diaSources (stack): Rubin real/bogus RELIABILITY cut (TP-safe: 95.7% TP / 93.6% FP removed).
+# ADCNN: NO real/bogus (its SNR-floor + trail-ceiling would drop faint/fast trails) -> keep at a
+#        LOW score threshold and let LINKING reject FP. See [[realbogus-fp-filter-limits]].
+ADCNN_SCORE_MIN=${ADCNN_SCORE_MIN:-0.3}      # low -> preserve low-SNR / faint trails
+DIA_RELIABILITY_MIN=${DIA_RELIABILITY_MIN:-0.5}   # real/bogus, diaSources ONLY
+CLEAN_LENDB_MIN=${CLEAN_LENDB_MIN:-6}        # de-biased length px; ~6px ≈ 1 deg/day (fast movers)
+DIASRC=${DIASRC:-$RUN/diasources.csv}        # stack diaSource catalog (reliability + trailLength)
 
 # ---- stage 4: link (grid-parallel HelioLinC) ------------------------------
 HELIODIST=${HELIODIST:-heliohypo_all.txt}   # hypothesis grid (relative to RUN); 109,983 pts
