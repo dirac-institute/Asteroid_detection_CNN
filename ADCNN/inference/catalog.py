@@ -226,19 +226,25 @@ def _gpu_shard_worker(gpu_id, h5_path, v7_ckpt, rf_pkl, shard, config, n_workers
 
 def build_detection_catalog_multigpu(h5_path, v7_ckpt, rf_pkl, *,
                                      config: InferenceConfig = DEFAULT_CONFIG,
-                                     panels_csv=None, n_gpus: Optional[int] = None) -> pd.DataFrame:
+                                     panels_csv=None, panel_ids: Optional[Iterable[int]] = None,
+                                     n_gpus: Optional[int] = None) -> pd.DataFrame:
     """Data-parallel catalog build: panels are round-robin sharded across `n_gpus`, each GPU
     runs the engine (with its own CPU feature pool) in a separate process. Output is identical
-    to the single-GPU path (sorted by image_id). Falls back to single-GPU when n_gpus<=1."""
+    to the single-GPU path (sorted by image_id). Falls back to single-GPU when n_gpus<=1.
+    `panel_ids` restricts processing to those panels (e.g. a discovery window)."""
     import torch
     if n_gpus is None:
         n_gpus = max(1, torch.cuda.device_count())
     if n_gpus <= 1:
-        return build_detection_catalog(h5_path, v7_ckpt, rf_pkl, config=config, panels_csv=panels_csv)
+        return build_detection_catalog(h5_path, v7_ckpt, rf_pkl, config=config,
+                                       panels_csv=panels_csv, panel_ids=panel_ids)
 
-    with h5py.File(h5_path, "r") as f:
-        n_panels = int(f["images"].shape[0])
-    shards = [list(range(g, n_panels, n_gpus)) for g in range(n_gpus)]  # round-robin load balance
+    if panel_ids is None:
+        with h5py.File(h5_path, "r") as f:
+            ids = list(range(int(f["images"].shape[0])))
+    else:
+        ids = list(panel_ids)
+    shards = [ids[g::n_gpus] for g in range(n_gpus)]  # round-robin load balance
     try:
         cores = len(os.sched_getaffinity(0))
     except AttributeError:
@@ -274,17 +280,26 @@ def main():
     ap.add_argument("--n-gpus", type=int, default=1, help=">1 = data-parallel across GPUs")
     ap.add_argument("--n-workers", type=int, default=0, help="single-GPU: feature procs (0 = all cores)")
     ap.add_argument("--limit", type=int, default=0, help="single-GPU: first N panels only (0 = all)")
+    ap.add_argument("--panel-ids", help="restrict to these image_ids: a CSV with an 'image_id' column, or a comma list")
     ap.add_argument("--device", default="cuda")
     a = ap.parse_args()
+
+    panel_ids = None
+    if a.panel_ids:
+        if Path(a.panel_ids).exists():
+            panel_ids = sorted(pd.read_csv(a.panel_ids)["image_id"].astype(int).unique())
+        else:
+            panel_ids = [int(s) for s in a.panel_ids.split(",")]
+    elif a.limit:
+        panel_ids = list(range(a.limit))
 
     config = InferenceConfig(rf_thr=a.rf_thr, gate_pmax=a.gate_pmax, stride=a.stride, tile_batch=a.tile_batch)
     if a.n_gpus and a.n_gpus > 1:
         cat = build_detection_catalog_multigpu(a.h5, a.v7, a.rf, config=config,
-                                               panels_csv=a.panels, n_gpus=a.n_gpus)
+                                               panels_csv=a.panels, panel_ids=panel_ids, n_gpus=a.n_gpus)
     else:
         cat = build_detection_catalog(a.h5, a.v7, a.rf, config=config, panels_csv=a.panels,
-                                      panel_ids=(range(a.limit) if a.limit else None),
-                                      device=a.device, n_workers=(a.n_workers or None))
+                                      panel_ids=panel_ids, device=a.device, n_workers=(a.n_workers or None))
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     cat.to_csv(a.out, index=False)
     npan = cat["image_id"].nunique() if len(cat) else 0

@@ -53,3 +53,6 @@ DATA_DIFFIM_tiles/
 DATA_DIFFIM_stream_buffer/
 DATA_DIFFIM_realistic_big2/
 experiments/heliolinc/heliolinc2/
+experiments/heliolinc/run_*/
+experiments/heliolinc/*.log
+adcnn_stageA_*.log
