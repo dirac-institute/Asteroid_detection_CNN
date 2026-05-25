@@ -8,7 +8,11 @@
 #SBATCH -t 2:30:00
 #SBATCH -J neo1_detect
 #SBATCH -o %x_%j.log
+#SBATCH --requeue
+#SBATCH --open-mode=append
 set -eo pipefail
+# ampere is PREEMPTIBLE; discover_stream now writes detections incrementally + a .done log, so a
+# preempted+requeued run RESUMES the remaining panels instead of losing everything.
 source "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc/neo_pipeline/config.sh"
 eval "$TORCH_ENV"
 cd "$REPO"

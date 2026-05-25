@@ -14,6 +14,15 @@ import argparse
 import os
 import sys
 import warnings
+# Cap BLAS/OMP threads BEFORE numpy import. We run n_gpus shard processes per node, each calling
+# compute_v2_features (NumPy/BLAS-heavy); with default threading each shard grabs ALL cores ->
+# n_gpus×ncores oversubscription (observed loadavg ~121 on a 32-core node, GPUs starved at ~70%).
+# It was never filesystem I/O (jobs run on different nodes, iowait≈0) — it's CPU oversubscription.
+# Default 6 threads/shard (4 shards × 6 = 24 ≤ 32 cores); override with ADCNN_BLAS_THREADS.
+_NTHREAD = os.environ.get("ADCNN_BLAS_THREADS", "6")
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+           "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+    os.environ.setdefault(_v, _NTHREAD)
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -67,8 +76,20 @@ def run_shard(gpu_id, rows, v7_ckpt, rf_pkl, rf_thr, prefetch, out_csv, feat_out
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = torch.jit.load(v7_ckpt, map_location=dev).eval()
     rf = load_rf(rf_pkl)
+    # RESUME: skip (visit,detector) panels already processed (sidecar .done log) so a preempted +
+    # requeued job continues instead of losing everything. Detections are appended per panel.
+    done_path = out_csv + ".done"
+    done = set()
+    if os.path.exists(done_path):
+        for line in open(done_path):
+            p = line.strip().split(",")
+            if len(p) == 2:
+                done.add((int(p[0]), int(p[1])))
+    rows = [r for r in rows if (int(r["visit"]), int(r["detector"])) not in done]
+    write_header = not (os.path.exists(out_csv) and os.path.getsize(out_csv) > 0)
+    donef = open(done_path, "a")
     paths = [r["fits_path"] for r in rows]
-    out, feats = [], []
+    out, feats, n_done = [], [], len(done)
     for i, (img, wcs, mjd) in _prefetch(paths, prefetch):
         r = rows[i]
         rl = np.zeros(img.shape, dtype=np.uint16)
@@ -76,6 +97,7 @@ def run_shard(gpu_id, rows, v7_ckpt, rf_pkl, rf_thr, prefetch, out_csv, feat_out
         cand, _ = compute_v2_features(prob[None], img[None], sin[None], cos[None], agg[None],
                                       real_labels=rl[None], gate_pmax=0.10, verbose=False)
         if not len(cand):
+            donef.write(f'{int(r["visit"])},{int(r["detector"])}\n'); donef.flush()
             continue
         feat = [c for c in RF_FEATURES_V2 if c in cand.columns]
         cand[feat] = cand[feat].replace([np.inf, -np.inf], np.nan)
@@ -97,20 +119,23 @@ def run_shard(gpu_id, rows, v7_ckpt, rf_pkl, rf_thr, prefetch, out_csv, feat_out
         if feat_out is not None:  # dump EVERY candidate's features+sky for RF (re)training
             feats.append(cand)
         keep = cand[cand.score_rf >= rf_thr]
-        for _, c in keep.iterrows():
-            out.append(dict(mjd=mjd, ra=float(c.ra), dec=float(c.dec), mag=21.0, band=c.band,
-                            obscode=OBSCODE, visit=int(r["visit"]), detector=int(r["detector"]),
-                            x=float(c.x_centroid), y=float(c.y_centroid), score_rf=float(c.score_rf),
-                            length=float(c.get("mf_length", np.nan)), len_db=float(c.len_db),
-                            mf_snr=float(c.get("mf_snr", np.nan)),
-                            ra0=float(c.ra0), dec0=float(c.dec0), ra1=float(c.ra1), dec1=float(c.dec1),
-                            # trail PA from footprint PCA (or_beta = NN head is r≈0 vs truth, kept as diagnostic)
-                            beta=float(c.get("mf_beta", np.nan)), beta_nn=float(c.get("or_beta", np.nan)),
-                            nn_pmax=float(c.get("max_p", np.nan))))
-    pd.DataFrame(out).to_csv(out_csv, index=False)
+        prows = [dict(mjd=mjd, ra=float(c.ra), dec=float(c.dec), mag=21.0, band=c.band,
+                      obscode=OBSCODE, visit=int(r["visit"]), detector=int(r["detector"]),
+                      x=float(c.x_centroid), y=float(c.y_centroid), score_rf=float(c.score_rf),
+                      length=float(c.get("mf_length", np.nan)), len_db=float(c.len_db),
+                      mf_snr=float(c.get("mf_snr", np.nan)),
+                      ra0=float(c.ra0), dec0=float(c.dec0), ra1=float(c.ra1), dec1=float(c.dec1),
+                      # trail PA from footprint PCA (or_beta = NN head is r≈0 vs truth, kept as diagnostic)
+                      beta=float(c.get("mf_beta", np.nan)), beta_nn=float(c.get("or_beta", np.nan)),
+                      nn_pmax=float(c.get("max_p", np.nan))) for _, c in keep.iterrows()]
+        if prows:   # append THIS panel's detections immediately (preemption-safe)
+            pd.DataFrame(prows).to_csv(out_csv, mode="a", header=write_header, index=False)
+            write_header = False; out.extend(prows)
+        donef.write(f'{int(r["visit"])},{int(r["detector"])}\n'); donef.flush()
+    donef.close()
     if feat_out is not None and feats:
         pd.concat(feats, ignore_index=True).to_parquet(feat_out, index=False)
-    print(f"[gpu{gpu_id}] {len(rows)} panels -> {len(out)} detections"
+    print(f"[gpu{gpu_id}] {len(rows)} new panels (+{n_done} done before) -> {len(out)} new detections"
           f"{' (+features dumped)' if feat_out else ''}", flush=True)
 
 
@@ -166,6 +191,7 @@ def main():
                 Path(f).unlink(missing_ok=True)
     for c in shard_csvs:
         Path(c).unlink(missing_ok=True)
+        Path(c + ".done").unlink(missing_ok=True)   # resume sidecars (only here, after success)
     print(f"[discover] {len(cat)} detections over {man.shape[0]} panels (thr={a.rf_thr}) -> {a.out}", flush=True)
     print(f"[discover] {cat.visit.nunique()} visits, {len({int(str(v)[:8]) for v in cat.visit})} nights", flush=True)
 
