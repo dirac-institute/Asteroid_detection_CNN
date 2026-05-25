@@ -40,7 +40,6 @@ def main():
     newc = pd.read_csv(run / "new_candidates.csv") if (run / "new_candidates.csv").exists() else pd.DataFrame()
     if not len(newc):
         print("no NEW candidates to vet"); return
-    sc = pd.read_csv(run / "adcnn_dets.csv")[["mjd", "ra", "dec", "score_rf"]] if (run / "adcnn_dets.csv").exists() else None
 
     rows = []
     for cl in newc.cluster:

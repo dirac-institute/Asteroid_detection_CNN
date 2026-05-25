@@ -9,7 +9,7 @@
 set -euo pipefail
 HL=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc
 BIN=$HL/heliolinc2/src
-RUN=$HL/run_disco
+RUN=${RUN:-$HL/run_disco}
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
 cd "$RUN"

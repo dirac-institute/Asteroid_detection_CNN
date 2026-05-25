@@ -59,7 +59,7 @@ def _prefetch(paths, workers):
             nxt += 1
 
 
-def run_shard(gpu_id, rows, v7_ckpt, rf_pkl, rf_thr, prefetch, out_csv):
+def run_shard(gpu_id, rows, v7_ckpt, rf_pkl, rf_thr, prefetch, out_csv, feat_out=None):
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     import torch
     from ADCNN.inference.predict import predict_panel_overlap_3ch_full
@@ -68,7 +68,7 @@ def run_shard(gpu_id, rows, v7_ckpt, rf_pkl, rf_thr, prefetch, out_csv):
     model = torch.jit.load(v7_ckpt, map_location=dev).eval()
     rf = load_rf(rf_pkl)
     paths = [r["fits_path"] for r in rows]
-    out = []
+    out, feats = [], []
     for i, (img, wcs, mjd) in _prefetch(paths, prefetch):
         r = rows[i]
         rl = np.zeros(img.shape, dtype=np.uint16)
@@ -79,17 +79,22 @@ def run_shard(gpu_id, rows, v7_ckpt, rf_pkl, rf_thr, prefetch, out_csv):
             continue
         feat = [c for c in RF_FEATURES_V2 if c in cand.columns]
         cand[feat] = cand[feat].replace([np.inf, -np.inf], np.nan)
-        keep = apply_rf_v2(cand, rf)
-        keep = keep[keep.score_rf >= rf_thr]
-        if not len(keep):
-            continue
-        sky = wcs.all_pix2world(keep[["x_centroid", "y_centroid"]].to_numpy(np.float64), 0)
-        for (ra, dec), (_, c) in zip(sky, keep.iterrows()):
-            out.append(dict(mjd=mjd, ra=float(ra), dec=float(dec), mag=21.0, band=str(r["band"])[:1] or "r",
+        cand = apply_rf_v2(cand, rf)
+        sky_all = wcs.all_pix2world(cand[["x_centroid", "y_centroid"]].to_numpy(np.float64), 0)
+        cand = cand.assign(ra=sky_all[:, 0], dec=sky_all[:, 1], mjd=mjd,
+                           visit=int(r["visit"]), detector=int(r["detector"]), band=str(r["band"])[:1] or "r")
+        if feat_out is not None:  # dump EVERY candidate's features+sky for RF (re)training
+            feats.append(cand)
+        keep = cand[cand.score_rf >= rf_thr]
+        for _, c in keep.iterrows():
+            out.append(dict(mjd=mjd, ra=float(c.ra), dec=float(c.dec), mag=21.0, band=c.band,
                             obscode=OBSCODE, visit=int(r["visit"]), detector=int(r["detector"]),
                             x=float(c.x_centroid), y=float(c.y_centroid), score_rf=float(c.score_rf)))
     pd.DataFrame(out).to_csv(out_csv, index=False)
-    print(f"[gpu{gpu_id}] {len(rows)} panels -> {len(out)} detections", flush=True)
+    if feat_out is not None and feats:
+        pd.concat(feats, ignore_index=True).to_parquet(feat_out, index=False)
+    print(f"[gpu{gpu_id}] {len(rows)} panels -> {len(out)} detections"
+          f"{' (+features dumped)' if feat_out else ''}", flush=True)
 
 
 def main():
@@ -102,6 +107,8 @@ def main():
     ap.add_argument("--prefetch", type=int, default=6, help="FITS reads in flight per GPU (bounds memory)")
     ap.add_argument("--n-gpus", type=int, default=0, help="0 = all visible")
     ap.add_argument("--out", default=str(REPO / "experiments/heliolinc/run_disco/adcnn_dets.csv"))
+    ap.add_argument("--dump-features", default=None,
+                    help="also write EVERY candidate's 72 features + ra/dec/mjd here (parquet, for RF retraining)")
     ap.add_argument("--limit", type=int, default=0, help="first N panels only (smoke test)")
     a = ap.parse_args()
 
@@ -113,13 +120,14 @@ def main():
     tmp = Path(a.out).parent
     tmp.mkdir(parents=True, exist_ok=True)
     shard_csvs = [str(tmp / f"_shard{g}.csv") for g in range(n_gpus)]
+    feat_pqs = [str(tmp / f"_feat{g}.parquet") if a.dump_features else None for g in range(n_gpus)]
 
     if n_gpus == 1:
-        run_shard(0, shards[0], a.v7, a.rf, a.rf_thr, a.prefetch, shard_csvs[0])
+        run_shard(0, shards[0], a.v7, a.rf, a.rf_thr, a.prefetch, shard_csvs[0], feat_pqs[0])
     else:
         ctx = torch.multiprocessing.get_context("spawn")
         procs = [ctx.Process(target=run_shard,
-                             args=(g, shards[g], a.v7, a.rf, a.rf_thr, a.prefetch, shard_csvs[g]))
+                             args=(g, shards[g], a.v7, a.rf, a.rf_thr, a.prefetch, shard_csvs[g], feat_pqs[g]))
                  for g in range(n_gpus) if shards[g]]
         for p in procs:
             p.start()
@@ -132,6 +140,13 @@ def main():
     cat.insert(0, "detid", range(len(cat)))
     cat.to_csv(a.out, index=False)
     (Path(a.out).parent / "colformat.txt").write_text(COLFORMAT)
+    if a.dump_features:
+        feats = pd.concat([pd.read_parquet(f) for f in feat_pqs if f and Path(f).exists()], ignore_index=True)
+        feats.to_parquet(a.dump_features, index=False)
+        print(f"[discover] dumped {len(feats)} candidate feature rows -> {a.dump_features}", flush=True)
+        for f in feat_pqs:
+            if f:
+                Path(f).unlink(missing_ok=True)
     for c in shard_csvs:
         Path(c).unlink(missing_ok=True)
     print(f"[discover] {len(cat)} detections over {man.shape[0]} panels (thr={a.rf_thr}) -> {a.out}", flush=True)
