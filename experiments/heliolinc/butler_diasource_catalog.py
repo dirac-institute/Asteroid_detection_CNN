@@ -16,6 +16,7 @@ from lsst.daf.butler import Butler
 
 REPO = Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
 STAGE4 = "LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage4"
+PIXSCALE = 0.2  # arcsec/px (LSSTCam) — trailLength is in pixels
 COLFORMAT = "IDCOL 1\nMJDCOL 2\nRACOL 3\nDECCOL 4\nMAGCOL 5\nBANDCOL 6\nOBSCODECOL 7\n"
 
 
@@ -46,13 +47,27 @@ def main():
             continue
         flux = df.get("psfFlux", pd.Series(np.nan, index=df.index)).to_numpy()
         mag = np.where(flux > 0, 31.4 - 2.5 * np.log10(np.abs(flux) + 1e-9), 21.0)
+        ra = df.ra.to_numpy(); dec = df.dec.to_numpy()
+        # Trail ENDPOINTS for trail->tracklet linking, from the stack's own trail fit:
+        # trailLength (px) + measured trail vector (trailRa/Dec is ~one endpoint vs the ra/dec
+        # centroid). Build symmetric endpoints centred on (ra,dec): direction from the trail
+        # vector, magnitude = trailLength/2 * pixscale. (No Veres re-run needed.)
+        tL = df.get("trailLength", pd.Series(np.nan, index=df.index)).to_numpy()
+        tra = df.get("trailRa", pd.Series(ra, index=df.index)).to_numpy()
+        tdec = df.get("trailDec", pd.Series(dec, index=df.index)).to_numpy()
+        cosd = np.cos(np.radians(dec))
+        ux = (tra - ra) * cosd; uy = (tdec - dec)            # trail-vector components (deg)
+        nrm = np.hypot(ux, uy); nrm = np.where(nrm > 1e-9, nrm, 1.0)
+        half = (tL * PIXSCALE / 3600.0) / 2.0                 # px -> deg, half-length
+        dra = (half * ux / nrm) / np.where(cosd > 1e-6, cosd, 1.0); ddec = half * uy / nrm
         rows.append(pd.DataFrame({
-            "mjd": df.midpointMjdTai.to_numpy(), "ra": df.ra.to_numpy(), "dec": df.dec.to_numpy(),
+            "mjd": df.midpointMjdTai.to_numpy(), "ra": ra, "dec": dec,
+            "ra0": ra - dra, "dec0": dec - ddec, "ra1": ra + dra, "dec1": dec + ddec,
             "mag": mag, "band": df.get("band", "r").astype(str).str[:1], "obscode": "I11",
             "reliability": df.reliability.to_numpy(),
             "isNegative": df.get("isNegative", False).astype(bool).to_numpy(),
             "snr": df.get("snr", np.nan).to_numpy(),
-            "trailLength": df.get("trailLength", np.nan).to_numpy(), "visit": int(v),
+            "trailLength": tL, "trailAngle": df.get("trailAngle", np.nan).to_numpy(), "visit": int(v),
         }))
     cat = pd.concat(rows, ignore_index=True).sort_values(["mjd"]).reset_index(drop=True)
     cat.insert(0, "detid", range(len(cat)))
