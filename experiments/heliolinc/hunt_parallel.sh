@@ -41,6 +41,7 @@ for f in grid_chunk_*; do
   s=${f#grid_chunk_}
   "$BIN/heliolinc" -dets pairdets.csv -pairs pairs.txt -mjd "$MJDREF" \
     -obspos Earth1day2020s_02a.txt -heliodist "$f" \
+    -clustrad "${CLUSTRAD:-100000}" \
     -npt "$NPT" -minobsnights "$MINNIGHTS" -mintimespan "$MINTIMESPAN" \
     -out "hl_clusters_${s}.csv" -outsum "hl_summary_${s}.csv" >"hl_${s}.log" 2>&1 &
   pids+=($!)
