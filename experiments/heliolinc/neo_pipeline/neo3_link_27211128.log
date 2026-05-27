@@ -1,0 +1,236 @@
+[clean] ADCNN 217834 -> 13398 (score>=0.9, len_db>=6.0; NO real/bogus)
+[clean] diaSource 1061642 -> 7 (reliability>=0.5 & !neg & trailLen>=6.0)
+[clean] merged -> 13405 detections (1218/night) [ADCNN=13398, dia=7] -> /sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc/run_neo_field/adcnn_dets_clean.csv
+[hunt] 13405 trailed detections (score>=0.5, len_db>=6.0px) -> trail-tracklets
+[trail->tracklets] 13405 trails -> 26810 pairdets, 26810 tracklets -> /sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc/run_neo_field
+=== grid-parallel heliolinc | grid=109983 pts x 96 shards | tracklets=26810 | mjdref=60863.125 ===
+launched 96 heliolinc shards; waiting...
+shards done (failures=0); clusters across shards: 856
+link_refine over 96 shard files
+Checking out argv[1] = -pairdet.
+Checking out argv[3] = -lflist.
+Checking out argv[5] = -maxrms.
+Checking out argv[7] = -outfile.
+Checking out argv[9] = -outrms.
+input paired detection file pairdets.csv
+input cluster list file lflist.txt
+Maximum RMS in km: 100000
+output cluster file lr.csv
+output rms file lr_rms.csv
+Header line from input paired detection file pairdets.csv:
+#MJD,RA,Dec,observerX,observerY,observerZ,stringID,mag,band,obscode,origindex
+Successfully read 26810 detections from pairdets.csv
+Read names of 96 cluster files from lflist.txt
+Reading cluster file hl_clusters_000.csv
+Reading rms file hl_summary_000.csv
+Reading cluster file hl_clusters_001.csv
+Reading rms file hl_summary_001.csv
+Reading cluster file hl_clusters_002.csv
+Reading rms file hl_summary_002.csv
+Reading cluster file hl_clusters_003.csv
+Reading rms file hl_summary_003.csv
+Reading cluster file hl_clusters_004.csv
+Reading rms file hl_summary_004.csv
+Reading cluster file hl_clusters_005.csv
+Reading rms file hl_summary_005.csv
+Reading cluster file hl_clusters_006.csv
+Reading rms file hl_summary_006.csv
+Reading cluster file hl_clusters_007.csv
+Reading rms file hl_summary_007.csv
+Reading cluster file hl_clusters_008.csv
+Reading rms file hl_summary_008.csv
+Reading cluster file hl_clusters_009.csv
+Reading rms file hl_summary_009.csv
+Reading cluster file hl_clusters_010.csv
+Reading rms file hl_summary_010.csv
+Reading cluster file hl_clusters_011.csv
+Reading rms file hl_summary_011.csv
+Reading cluster file hl_clusters_012.csv
+Reading rms file hl_summary_012.csv
+Reading cluster file hl_clusters_013.csv
+Reading rms file hl_summary_013.csv
+Reading cluster file hl_clusters_014.csv
+Reading rms file hl_summary_014.csv
+Reading cluster file hl_clusters_015.csv
+Reading rms file hl_summary_015.csv
+Reading cluster file hl_clusters_016.csv
+Reading rms file hl_summary_016.csv
+Reading cluster file hl_clusters_017.csv
+Reading rms file hl_summary_017.csv
+Reading cluster file hl_clusters_018.csv
+Reading rms file hl_summary_018.csv
+Reading cluster file hl_clusters_019.csv
+Reading rms file hl_summary_019.csv
+Reading cluster file hl_clusters_020.csv
+Reading rms file hl_summary_020.csv
+Reading cluster file hl_clusters_021.csv
+Reading rms file hl_summary_021.csv
+Reading cluster file hl_clusters_022.csv
+Reading rms file hl_summary_022.csv
+Reading cluster file hl_clusters_023.csv
+Reading rms file hl_summary_023.csv
+Reading cluster file hl_clusters_024.csv
+Reading rms file hl_summary_024.csv
+Reading cluster file hl_clusters_025.csv
+Reading rms file hl_summary_025.csv
+Reading cluster file hl_clusters_026.csv
+Reading rms file hl_summary_026.csv
+Reading cluster file hl_clusters_027.csv
+Reading rms file hl_summary_027.csv
+Reading cluster file hl_clusters_028.csv
+Reading rms file hl_summary_028.csv
+Reading cluster file hl_clusters_029.csv
+Reading rms file hl_summary_029.csv
+Reading cluster file hl_clusters_030.csv
+Reading rms file hl_summary_030.csv
+Reading cluster file hl_clusters_031.csv
+Reading rms file hl_summary_031.csv
+Reading cluster file hl_clusters_032.csv
+Reading rms file hl_summary_032.csv
+Reading cluster file hl_clusters_033.csv
+Reading rms file hl_summary_033.csv
+Reading cluster file hl_clusters_034.csv
+Reading rms file hl_summary_034.csv
+Reading cluster file hl_clusters_035.csv
+Reading rms file hl_summary_035.csv
+Reading cluster file hl_clusters_036.csv
+Reading rms file hl_summary_036.csv
+Reading cluster file hl_clusters_037.csv
+Reading rms file hl_summary_037.csv
+Reading cluster file hl_clusters_038.csv
+Reading rms file hl_summary_038.csv
+Reading cluster file hl_clusters_039.csv
+Reading rms file hl_summary_039.csv
+Reading cluster file hl_clusters_040.csv
+Reading rms file hl_summary_040.csv
+Reading cluster file hl_clusters_041.csv
+Reading rms file hl_summary_041.csv
+Reading cluster file hl_clusters_042.csv
+Reading rms file hl_summary_042.csv
+Reading cluster file hl_clusters_043.csv
+Reading rms file hl_summary_043.csv
+Reading cluster file hl_clusters_044.csv
+Reading rms file hl_summary_044.csv
+Reading cluster file hl_clusters_045.csv
+Reading rms file hl_summary_045.csv
+Reading cluster file hl_clusters_046.csv
+Reading rms file hl_summary_046.csv
+Reading cluster file hl_clusters_047.csv
+Reading rms file hl_summary_047.csv
+Reading cluster file hl_clusters_048.csv
+Reading rms file hl_summary_048.csv
+Reading cluster file hl_clusters_049.csv
+Reading rms file hl_summary_049.csv
+Reading cluster file hl_clusters_050.csv
+Reading rms file hl_summary_050.csv
+Reading cluster file hl_clusters_051.csv
+Reading rms file hl_summary_051.csv
+Reading cluster file hl_clusters_052.csv
+Reading rms file hl_summary_052.csv
+Reading cluster file hl_clusters_053.csv
+Reading rms file hl_summary_053.csv
+Reading cluster file hl_clusters_054.csv
+Reading rms file hl_summary_054.csv
+Reading cluster file hl_clusters_055.csv
+Reading rms file hl_summary_055.csv
+Reading cluster file hl_clusters_056.csv
+Reading rms file hl_summary_056.csv
+Reading cluster file hl_clusters_057.csv
+Reading rms file hl_summary_057.csv
+Reading cluster file hl_clusters_058.csv
+Reading rms file hl_summary_058.csv
+Reading cluster file hl_clusters_059.csv
+Reading rms file hl_summary_059.csv
+Reading cluster file hl_clusters_060.csv
+Reading rms file hl_summary_060.csv
+Reading cluster file hl_clusters_061.csv
+Reading rms file hl_summary_061.csv
+Reading cluster file hl_clusters_062.csv
+Reading rms file hl_summary_062.csv
+Reading cluster file hl_clusters_063.csv
+Reading rms file hl_summary_063.csv
+Reading cluster file hl_clusters_064.csv
+Reading rms file hl_summary_064.csv
+Reading cluster file hl_clusters_065.csv
+Reading rms file hl_summary_065.csv
+Reading cluster file hl_clusters_066.csv
+Reading rms file hl_summary_066.csv
+Reading cluster file hl_clusters_067.csv
+Reading rms file hl_summary_067.csv
+Reading cluster file hl_clusters_068.csv
+Reading rms file hl_summary_068.csv
+Reading cluster file hl_clusters_069.csv
+Reading rms file hl_summary_069.csv
+Reading cluster file hl_clusters_070.csv
+Reading rms file hl_summary_070.csv
+Reading cluster file hl_clusters_071.csv
+Reading rms file hl_summary_071.csv
+Reading cluster file hl_clusters_072.csv
+Reading rms file hl_summary_072.csv
+Reading cluster file hl_clusters_073.csv
+Reading rms file hl_summary_073.csv
+Reading cluster file hl_clusters_074.csv
+Reading rms file hl_summary_074.csv
+Reading cluster file hl_clusters_075.csv
+Reading rms file hl_summary_075.csv
+Reading cluster file hl_clusters_076.csv
+Reading rms file hl_summary_076.csv
+Reading cluster file hl_clusters_077.csv
+Reading rms file hl_summary_077.csv
+Reading cluster file hl_clusters_078.csv
+Reading rms file hl_summary_078.csv
+Reading cluster file hl_clusters_079.csv
+Reading rms file hl_summary_079.csv
+Reading cluster file hl_clusters_080.csv
+Reading rms file hl_summary_080.csv
+Reading cluster file hl_clusters_081.csv
+Reading rms file hl_summary_081.csv
+Reading cluster file hl_clusters_082.csv
+Reading rms file hl_summary_082.csv
+Reading cluster file hl_clusters_083.csv
+Reading rms file hl_summary_083.csv
+Reading cluster file hl_clusters_084.csv
+Reading rms file hl_summary_084.csv
+Reading cluster file hl_clusters_085.csv
+Reading rms file hl_summary_085.csv
+Reading cluster file hl_clusters_086.csv
+Reading rms file hl_summary_086.csv
+Reading cluster file hl_clusters_087.csv
+Reading rms file hl_summary_087.csv
+Reading cluster file hl_clusters_088.csv
+Reading rms file hl_summary_088.csv
+Reading cluster file hl_clusters_089.csv
+Reading rms file hl_summary_089.csv
+Reading cluster file hl_clusters_090.csv
+Reading rms file hl_summary_090.csv
+Reading cluster file hl_clusters_091.csv
+Reading rms file hl_summary_091.csv
+Reading cluster file hl_clusters_092.csv
+Reading rms file hl_summary_092.csv
+Reading cluster file hl_clusters_093.csv
+Reading rms file hl_summary_093.csv
+Reading cluster file hl_clusters_094.csv
+Reading rms file hl_summary_094.csv
+Reading cluster file hl_clusters_095.csv
+Reading rms file hl_summary_095.csv
+Found 158 clusters
+Accepted good cluster 1 with metric 2.26205e-05
+Accepted good cluster 2 with metric 8.60401e-06
+Accepted good cluster 3 with metric 7.14621e-06
+Accepted good cluster 4 with metric 3.71358e-06
+refined tracks: 4
+
+=== crossmatch (4 linked tracks) ===
+CONFIRMED (known) : 0 tracks -> 0 distinct known asteroids re-discovered
+NEW candidates    : 4 tracks (no known match)
+
+-- NEW candidates (vet these) --
+ cluster  ndet  nnights rating  obj  match_frac
+       1     6        2  MIXED None         0.0
+       2     6        2  MIXED None         0.0
+       3     6        2  MIXED None         0.0
+       4     6        2  MIXED None         0.0
+
+CROSSMATCH DONE
+PARALLEL HUNT DONE -> /sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc/run_neo_field
+NEO STAGE3 LINK DONE

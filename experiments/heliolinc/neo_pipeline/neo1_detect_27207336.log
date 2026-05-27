@@ -1,0 +1,8 @@
+[discover] 4 GPUs × 7 feature workers (32 cores)
+[gpu2] 498 new panels (+101 done) -> 43025 new detections
+[gpu3] 498 new panels (+101 done) -> 43295 new detections
+[gpu1] 498 new panels (+101 done) -> 43036 new detections
+[gpu0] 498 new panels (+102 done) -> 43708 new detections
+[discover] 205534 detections over 2397 panels (thr=0.5) -> /sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc/run_neo_t6337/adcnn_dets.csv
+[discover] 87 visits, 12 nights
+NEO STAGE1 DETECT DONE
