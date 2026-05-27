@@ -47,6 +47,6 @@ XM_TOL_ARCSEC=${XM_TOL_ARCSEC:-3.0}
 XM_TOL_DAY=${XM_TOL_DAY:-0.02}
 
 # ---- environments ----------------------------------------------------------
-TORCH_ENV="source $REPO/conda/etc/profile.d/conda.sh 2>/dev/null; conda activate asteroid_cnn"
+TORCH_ENV="source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh; conda activate asteroid_cnn"
 LSST_ENV="source /cvmfs/sw.lsst.eu/almalinux-x86_64/lsst_distrib/w_2026_09/loadLSST.sh; setup lsst_distrib"
 mkdir -p "$RUN"
