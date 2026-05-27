@@ -742,6 +742,7 @@ def select_good_refs_random_check(
     max_checks: int = 200000,
     check_refs: bool = True,
     exclude_keys: set | None = None,
+    include_keys: set | None = None,
     verbose: bool = False,
 ) -> List:
     """Like the direct-image variant but with one extra validation step:
@@ -775,6 +776,12 @@ def select_good_refs_random_check(
             print(f"Excluded {n_before - len(refs_by_key)} (visit,detector) pairs "
                   f"present in exclude_keys (e.g. test sets); {len(refs_by_key)} remain",
                   flush=True)
+    if include_keys is not None:
+        n_before = len(refs_by_key)
+        refs_by_key = {k: v for k, v in refs_by_key.items() if k in include_keys}
+        if verbose:
+            print(f"INCLUDE filter: kept {len(refs_by_key)} of {n_before} (requested "
+                  f"{len(include_keys)} pairs) -- regenerate an exact panel set", flush=True)
     ordered_refs = [refs_by_key[key] for key in sorted(refs_by_key)]
     rng = random.Random(int(seed))
     rng.shuffle(ordered_refs)
@@ -917,7 +924,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                            train_test_split=0, seed=123, chunks=None, test_only=False,
                            mag_mode="psf_mag", psf_template="image",
                            stack_detection_threshold=5.0, measueTrails=False,
-                           exclude_keys=None, check_refs=True, target_train_panels=0):
+                           exclude_keys=None, include_keys=None, check_refs=True, target_train_panels=0):
     butler = Butler(repo, collections=coll)
     h5train_path = os.path.join(save_path, "train.h5")
     h5test_path = os.path.join(save_path, "test.h5")
@@ -934,6 +941,7 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
         pool_size=5000,
         max_checks=200000,
         exclude_keys=exclude_keys,
+        include_keys=include_keys,
         check_refs=check_refs,
         verbose=True,
     )
@@ -1103,6 +1111,10 @@ def main():
                     help="CSV file(s) with visit,detector columns whose pairs must "
                          "NOT be selected for injection (leakage guard against test "
                          "sets). e.g. the test_5sigma and test_real catalogs.")
+    ap.add_argument("--include-pairs-csv", nargs="*", default=None,
+                    help="CSV file(s) with visit,detector columns: inject ONLY these "
+                         "pairs (regenerate an exact panel set, e.g. the split.json val "
+                         "panels). Applied after --exclude-pairs-csv.")
     ap.add_argument("--realistic-trail", action="store_true", default=False,
                     help="Render trails with the realistic (light-curve/tapered/"
                          "curved) renderer instead of the uniform galsim.Box. "
@@ -1128,6 +1140,15 @@ def main():
         print(f"[main] excluding {len(exclude_keys)} (visit,detector) pairs from "
               f"{len(args.exclude_pairs_csv)} csv(s)", flush=True)
 
+    # include guard: regenerate ONLY these (visit,detector) pairs (e.g. the exact split.json val panels)
+    include_keys = None
+    if args.include_pairs_csv:
+        ik = set()
+        for p in args.include_pairs_csv:
+            df = pd.read_csv(p); ik |= {(int(v), int(d)) for v, d in zip(df["visit"], df["detector"])}
+        include_keys = ik
+        print(f"[main] INCLUDE-only {len(include_keys)} (visit,detector) pairs", flush=True)
+
     coll = args.collections if len(args.collections) > 1 else args.collections[0]
 
     run_parallel_injection(
@@ -1152,6 +1173,7 @@ def main():
         stack_detection_threshold=args.stack_detection_threshold,
         measueTrails=args.measueTrails,
         exclude_keys=exclude_keys,
+        include_keys=include_keys,
         check_refs=not args.skip_prevalidation,
         target_train_panels=args.target_train_panels,
     )
