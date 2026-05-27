@@ -94,6 +94,14 @@ class InferenceConfig:
 DEFAULT_CONFIG = InferenceConfig()
 PROGRESS_S = 20.0  # heartbeat interval (s) for the per-shard progress print
 
+# v7's segmentation/matched-filter over-extends trail ends ("ends bloom"): the raw mf_length is
+# biased, mf_length ≈ MF_LEN_SLOPE*L_true + MF_LEN_OFFSET (≈0.887*L + 33.4 px, fit on test_5sigma).
+# The emitted `length` INVERTS this to the physical trail length (median residual ~0px vs truth),
+# so eval parameter-recovery is unbiased and HelioLinC gets the true length. Single source of truth:
+# downstream (notebook, discover_stream) consumes the corrected `length` directly (no re-correction).
+MF_LEN_OFFSET = 33.4
+MF_LEN_SLOPE = 0.887
+
 
 def _panel_to_catalog(pid: int, prob, img, sin, cos, agg, rl, model,
                       config: InferenceConfig) -> Optional[pd.DataFrame]:
@@ -107,7 +115,8 @@ def _panel_to_catalog(pid: int, prob, img, sin, cos, agg, rl, model,
         return None
     if config.filter == "cnn":
         from ADCNN.inference.cnn_postproc import apply_cnn
-        cand = apply_cnn(cand, model, img, prob, agg)   # CNN cutout score -> score_rf
+        dev = next(model.parameters()).device            # CNN runs on the GPU (see _load_filter)
+        cand = apply_cnn(cand, model, img, prob, agg, device=dev)   # CNN cutout score -> score_rf
         thr = config.cnn_thr
     else:
         cand[list(RF_FEATURES_V2)] = cand[list(RF_FEATURES_V2)].replace([np.inf, -np.inf], np.nan)
@@ -117,6 +126,8 @@ def _panel_to_catalog(pid: int, prob, img, sin, cos, agg, rl, model,
     if not len(cand):
         return None
     cand["image_id"] = int(pid)
+    if "mf_length" in cand.columns:   # de-bias the ends-bloom -> physical trail length (see MF_LEN_*)
+        cand["mf_length"] = np.clip((cand["mf_length"] - MF_LEN_OFFSET) / MF_LEN_SLOPE, 0.0, None)
     return cand[[c for c in _COLMAP if c in cand.columns]].rename(columns=_COLMAP)
 
 
@@ -142,10 +153,11 @@ _CONFIG = DEFAULT_CONFIG
 
 
 def _load_filter(model_path: str, config: InferenceConfig):
-    """Load the stage-2 filter model named by `config.filter`: focal cutout CNN (CPU) or the RF."""
+    """Load the stage-2 filter model named by `config.filter`: focal cutout CNN (GPU) or the RF (CPU)."""
     if config.filter == "cnn":
+        import torch
         from ADCNN.inference.cnn_postproc import load_cnn
-        return load_cnn(str(model_path), device="cpu")
+        return load_cnn(str(model_path), device=("cuda" if torch.cuda.is_available() else "cpu"))
     from ADCNN.inference.rf_postproc import load_rf
     rf = load_rf(str(model_path))
     try:
@@ -159,7 +171,10 @@ def _worker_init(rf_pkl: str, config: InferenceConfig) -> None:
     """Isolate each feature worker: hide the GPU and pin BLAS to one thread (we parallelise across
     panels, so per-worker thread pools would only oversubscribe), and load one filter model.
     `rf_pkl` is the filter-model path (RF .pkl or CNN .pt, per config.filter)."""
-    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    # RF is CPU-only -> hide the GPU. The CNN filter scores cutouts ON the GPU, so keep it visible
+    # (the worker inherits the shard's CUDA_VISIBLE_DEVICES; the tiny width-40 CNN shares it with v7).
+    if config.filter != "cnn":
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
     for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
         os.environ[var] = "1"
     global _RF, _CONFIG

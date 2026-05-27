@@ -113,10 +113,11 @@ def run_shard(gpu_id, rows, v7_ckpt, filt_model, filt, thr, prefetch, out_csv, n
         if cand is not None and len(cand):
             xy = cand[["x", "y"]].to_numpy(np.float64)
             sky = wcs.all_pix2world(xy, 0)
-            # Trail ENDPOINTS for tracklets: half-length along mf_beta (=cand.beta), +30px ADCNN
-            # ends-bloom removed (L_true≈(mf_length-33.4)/0.887) so endpoint sep matches sky motion.
+            # Trail ENDPOINTS for tracklets: half-length along mf_beta (=cand.beta). The catalog
+            # `length` is ALREADY de-biased to the physical trail length (catalog.py MF_LEN_*),
+            # so endpoint separation matches the on-sky motion directly -- no re-correction here.
             beta_rad = np.radians(cand["beta"].to_numpy(np.float64))
-            L_db = np.clip((cand["length"].to_numpy(np.float64) - 33.4) / 0.887, 0, None)
+            L_db = np.clip(cand["length"].to_numpy(np.float64), 0, None)
             hdx = 0.5 * L_db * np.cos(beta_rad); hdy = 0.5 * L_db * np.sin(beta_rad)
             sky0 = wcs.all_pix2world(np.stack([xy[:, 0] - hdx, xy[:, 1] - hdy], 1), 0)
             sky1 = wcs.all_pix2world(np.stack([xy[:, 0] + hdx, xy[:, 1] + hdy], 1), 0)
