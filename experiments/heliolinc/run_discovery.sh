@@ -48,13 +48,19 @@ fi
 if run L; then
   echo "=== Link: make_tracklets -> heliolinc -> link_refine ==="
   cd "$RUN"
+  # NEO-corrected params: maxvel 5.0 (was 2.0 = belt value, rejects fast NEOs); clustrad 100000
+  # (close NEOs spread in state-space; 16000 clustered ZERO); mjd = window midpoint (median of dets).
+  CLUSTRAD=${CLUSTRAD:-100000}; MAXVEL=${MAXVEL:-5.0}
+  MJDREF=$(python -c "import pandas as pd;print(round(pd.read_csv('adcnn_dets.csv').mjd.median(),3))")
   "$BIN/make_tracklets" -dets adcnn_dets.csv -earth Earth1day2020s_02a.txt -obscode ObsCodes.txt \
     -colformat colformat.txt -pairdets pairdets.csv -pairs pairs.txt -outimgs imgs.txt \
-    -maxtime 3.0 -mintime 0.0 -maxGCR 2.0 -mintrkpts 2 -maxvel 2.0 -minvel 0.0
+    -maxtime 3.0 -mintime 0.0 -maxGCR 2.5 -mintrkpts 2 -maxvel "$MAXVEL" -minvel 0.0
   "$BIN/heliolinc" -dets pairdets.csv -pairs pairs.txt -mjd "$MJDREF" \
-    -obspos Earth1day2020s_02a.txt -heliodist "$GRID" \
-    -npt 3 -minobsnights 3 -mintimespan 1.0 -out hl_clusters.csv -outsum hl_summary.csv
+    -obspos Earth1day2020s_02a.txt -heliodist "$GRID" -clustrad "$CLUSTRAD" \
+    -npt 3 -minobsnights 3 -mintimespan 0.5 -out hl_clusters.csv -outsum hl_summary.csv
   printf "hl_clusters.csv hl_summary.csv\n" > lflist.txt
+  # link_refine maxrms 100000 (loose) is correct for NEOs: real fast-NEO tracks have posRMS ~10-50k km;
+  # a tight cut (e.g. 2000) would reject them all (see neo_recovery_config.sh MAXPOSRMS note).
   "$BIN/link_refine" -pairdet pairdets.csv -lflist lflist.txt -maxrms 100000 -outfile lr.csv -outrms lr_rms.csv
   echo "refined tracks: $(($(wc -l < lr_rms.csv) - 1))"
 fi

@@ -25,7 +25,7 @@ pids=()
 for f in "$SCRATCH"/gc_*; do
   s=${f##*gc_}
   "$BIN/heliolinc" -dets pairdets.csv -pairs pairs.txt -mjd "$MJDREF" -obspos Earth1day2020s_02a.txt \
-    -heliodist "$f" -clustrad "${CLUSTRAD:-16000}" -npt "${NPT:-3}" -minobsnights "${MINNIGHTS:-2}" \
+    -heliodist "$f" -clustrad "${CLUSTRAD:-100000}" -npt "${NPT:-3}" -minobsnights "${MINNIGHTS:-2}" \
     -mintimespan "${MINTIMESPAN:-0.05}" \
     -out "$SCRATCH/hl_clusters_${s}.csv" -outsum "$SCRATCH/hl_summary_${s}.csv" >"$SCRATCH/hl_${s}.log" 2>&1 &
   pids+=($!)
