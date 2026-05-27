@@ -86,7 +86,7 @@ def _fit_panel(args):
     out = []
     for d in dets:
         x, y = float(d["x"]), float(d["y"])
-        L0 = max((float(d.get("length", 10.0)) - 33.4) / 0.887, 2.0)   # de-biased seed
+        L0 = max(float(d.get("length", 10.0)), 2.0)   # seed: `length` is already de-biased (catalog.py MF_LEN_*)
         half = int(L0 / 2 + 6 * psf_sig + 6)
         bb = geom.Box2I(geom.Point2I(int(x) - half, int(y) - half), geom.Extent2I(2 * half + 1, 2 * half + 1))
         bb.clip(exp.getBBox())

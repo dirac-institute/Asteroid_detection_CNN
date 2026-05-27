@@ -19,7 +19,9 @@ RUN=${RUN:-$HL/run_disco}
 H5=${H5:-$REPO/DATA_DIFFIM/test_real/test.h5}
 PANELS=${PANELS:-$HL/window_panels.csv}      # image_id,visit,detector,band of the window
 MJDREF=${MJDREF:-60873}                       # window midpoint
-RF_THR=${RF_THR:-0.15}                         # recall-favoring (HelioLinC rejects FP via physics)
+FILTER=${FILTER:-cnn}                          # stage-2 FP filter: cnn (focal-cutout CNN, GPU) or rf
+CNN_THR=${CNN_THR:-0.63}                        # CNN operating point (FP-matched to RF; same as eval)
+RF_THR=${RF_THR:-0.15}                         # RF operating point (only used when FILTER=rf)
 GRID=${GRID:-$HL/run_2wk/heliohypo_all.txt}    # full distance grid 1.05-6.5 AU
 STAGES=${STAGES:-ABLMX}                         # which stages to run: A B L(ink) M(atch) X(=all)
 
@@ -30,11 +32,11 @@ cp -n "$HL/run_truth/colformat.txt" "$HL/run_truth/Earth1day2020s_02a.txt" \
 run() { [[ "$STAGES" == *"$1"* || "$STAGES" == *X* ]]; }
 
 if run A; then
-  echo "=== Stage A: ADCNN catalog (rf_thr=$RF_THR) ==="
+  echo "=== Stage A: ADCNN catalog (filter=$FILTER, cnn_thr=$CNN_THR) ==="
   conda activate asteroid_cnn
   cd "$REPO"
   python -m ADCNN.inference.catalog --h5 "$H5" --panels "$PANELS" \
-    --panel-ids "$PANELS" --rf-thr "$RF_THR" --gate-pmax 0.10 \
+    --panel-ids "$PANELS" --filter "$FILTER" --cnn-thr "$CNN_THR" --rf-thr "$RF_THR" --gate-pmax 0.10 \
     --n-gpus "$(nvidia-smi -L | wc -l)" --out "$RUN/catalog.csv"
   conda deactivate
 fi
