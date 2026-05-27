@@ -2,14 +2,14 @@
 half of the catalog-based evaluation), then print trail-overlap metrics per set.
 
 For each test set it runs the optimized multi-GPU engine (``build_detection_catalog_multigpu``:
-v7 inference with parallel CPU prep, pipelined across all GPUs; candidate features + RF in a
-process pool; ``gate_pmax`` cheap-gate) and writes ``<out>/<set>_detections.csv``. It then
+v7 inference with parallel CPU prep, pipelined across all GPUs; candidate features + cutout CNN
+in a process pool; ``gate_pmax`` cheap-gate) and writes ``<out>/<set>_detections.csv``. It then
 matches each catalog against the set's truth CSV (``evaluate_catalog``) and prints
-recall / FP-per-panel / wall-time. Inference only — no training, fixed RF operating point.
+recall / FP-per-panel / wall-time. Inference only — no training, fixed CNN operating point.
 
 Speed (4×A100, parallel-prep + batch 64 + gate 0.10): ~1.0 s/panel on sparse synthetic
 panels, ~1.4 s/panel on the candidate-dense real set — i.e. a full ~189-detector LSST visit
-in ~3–4 min, images→catalog (NN + features + RF all included, postprocessing hidden behind
+in ~3–4 min, images→catalog (NN + features + CNN all included, postprocessing hidden behind
 the GPU forward).
 
     python -m ADCNN.pipelines.make_eval_catalogs                 # all default sets
@@ -23,7 +23,7 @@ from pathlib import Path
 import torch
 
 from ADCNN.inference.catalog import build_detection_catalog_multigpu, InferenceConfig
-from ADCNN.inference.rf_postproc import DEFAULT_THR
+from ADCNN.inference.cnn_postproc import CNN_DEFAULT_THR
 from ADCNN.evaluation.catalog_match import evaluate_catalog
 
 REPO = Path(__file__).resolve().parents[2]
@@ -36,9 +36,9 @@ def main():
     ap.add_argument("--sets", nargs="*", default=DEFAULT_SETS, help="test-set dirs under DATA_DIFFIM/")
     ap.add_argument("--data-root", default=str(REPO / "DATA_DIFFIM"))
     ap.add_argument("--v7", default=str(REPO / "models/v7_diffim_scripted.pt"))
-    ap.add_argument("--rf", default=str(REPO / "models/rf_postproc.pkl"))
+    ap.add_argument("--cnn", default=str(REPO / "models/cnn_postproc.pt"))
     ap.add_argument("--out", default=str(REPO / "Evaluation/catalogs"))
-    ap.add_argument("--rf-thr", type=float, default=DEFAULT_THR, help="RF operating point (pre-chosen)")
+    ap.add_argument("--cnn-thr", type=float, default=CNN_DEFAULT_THR, help="CNN operating point (pre-chosen)")
     ap.add_argument("--gate-pmax", type=float, default=0.10, help="cheap candidate gate (val-validated, 0 TP loss)")
     ap.add_argument("--tile-batch", type=int, default=64)
     ap.add_argument("--tol-px", type=float, default=20.0, help="trail-overlap match tolerance (fixed, pre-chosen)")
@@ -57,9 +57,9 @@ def main():
             continue
         panels = d / "panels.csv"
         t0 = time.time()
-        cfg = InferenceConfig(rf_thr=a.rf_thr, gate_pmax=a.gate_pmax, tile_batch=a.tile_batch)
+        cfg = InferenceConfig(cnn_thr=a.cnn_thr, gate_pmax=a.gate_pmax, tile_batch=a.tile_batch)
         cat = build_detection_catalog_multigpu(
-            str(h5), a.v7, a.rf, config=cfg, n_gpus=n_gpus,
+            str(h5), a.v7, a.cnn, config=cfg, n_gpus=n_gpus,
             panels_csv=str(panels) if panels.exists() else None,
         )
         out_csv = out / f"{name}_detections.csv"

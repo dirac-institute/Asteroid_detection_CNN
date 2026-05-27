@@ -227,7 +227,9 @@ def match_pairs(measured, truth, *, tol_px: float = 20.0,
                 continue
             md = measured.iloc[m_pos[j]]
             row = truth.iloc[t_lbl].to_dict()
+            # stage-2 score column is `score` (older catalogs called it `score_rf`)
+            meas_score = md.get("score", md.get("score_rf", float("nan")))
             row.update(meas_x=md["x"], meas_y=md["y"], meas_beta=md["beta"],
-                       meas_length=md[meas_length_col], meas_score=md.get("score_rf", float("nan")))
+                       meas_length=md[meas_length_col], meas_score=meas_score)
             rows.append(row)
     return pd.DataFrame(rows)

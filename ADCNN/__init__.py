@@ -4,14 +4,14 @@ Production package for detecting asteroid trails in LSST difference images:
 - ``core``       : model architectures (UNetResSEOrientHough = v7, the production model)
 - ``data``       : diffim dataset loading + preprocessing; ``data.dataset_creation`` builds
                    simulated (injected) and real test datasets from the Butler
-- ``training``   : v7 training loop + EMA
-- ``inference``  : v7 prediction, candidate extraction, matched-filter features, the
-                   RandomForest second-stage post-processor, TorchScript export
-- ``evaluation`` : object/pixel detection metrics, geometry, real-data evaluation
+- ``training``   : v7 training loop + EMA; ``training.cnn_postproc`` trains the stage-2 CNN
+- ``inference``  : v7 prediction, candidate extraction, matched-filter measurement, the focal
+                   cutout-CNN second-stage false-positive filter, TorchScript export
+- ``evaluation`` : object detection metrics, geometry, catalog-based evaluation
 - ``pipelines``  : end-to-end entry points (data production, training, inference)
 
 The deployed model (reg2: v7 with lambda_orient=0 + dropout + weight-decay +
-intensity-augmentation, plus the neg5 RandomForest) lives in the top-level ``models/``.
+intensity-augmentation, plus the focal cutout CNN) lives in the top-level ``models/``.
 """
 __version__ = "3.0.0"
 

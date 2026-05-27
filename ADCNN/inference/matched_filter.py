@@ -131,10 +131,9 @@ def matched_filter_for_nn_candidates(
     ``mf_beta`` is the footprint principal-axis orientation (deg in [0,180),
     image convention 0=+x) — the SAME PCA axis the matched filter integrates
     along, so it is a faithful trail position angle. It is emitted for the
-    downstream catalog (HelioLinC trail PA) and is NOT an RF feature, so adding
-    it does not change the trained RandomForest's input vector. (The NN
-    sin2β/cos2β head's ``or_beta`` is uncorrelated with truth — r≈0 — whereas
-    this PCA angle recovers truth to ~8-10° MAD.)
+    downstream catalog (HelioLinC trail PA). (The NN sin2β/cos2β head's
+    ``or_beta`` is uncorrelated with truth — r≈0 — whereas this PCA angle
+    recovers truth to ~8-10° MAD.)
     """
     n = len(cand_df)
     snr_out = np.zeros(n, dtype=np.float32)
