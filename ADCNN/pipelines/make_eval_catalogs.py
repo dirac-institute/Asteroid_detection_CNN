@@ -24,6 +24,7 @@ import torch
 
 from ADCNN.inference.catalog import build_detection_catalog_multigpu, InferenceConfig
 from ADCNN.inference.rf_postproc import DEFAULT_THR
+from ADCNN.inference.cnn_postproc import CNN_DEFAULT_THR
 from ADCNN.evaluation.catalog_match import evaluate_catalog
 
 REPO = Path(__file__).resolve().parents[2]
@@ -36,9 +37,13 @@ def main():
     ap.add_argument("--sets", nargs="*", default=DEFAULT_SETS, help="test-set dirs under DATA_DIFFIM/")
     ap.add_argument("--data-root", default=str(REPO / "DATA_DIFFIM"))
     ap.add_argument("--v7", default=str(REPO / "models/v7_diffim_scripted.pt"))
-    ap.add_argument("--rf", default=str(REPO / "models/rf_postproc.pkl"))
+    ap.add_argument("--filter", choices=["cnn", "rf"], default="cnn",
+                    help="stage-2 FP filter (default cnn = focal-cutout CNN; same model used by NEO discovery)")
+    ap.add_argument("--cnn", default=str(REPO / "models/cnn_postproc.pt"), help="focal-cutout CNN model")
+    ap.add_argument("--cnn-thr", type=float, default=CNN_DEFAULT_THR, help="CNN operating point (pre-chosen)")
+    ap.add_argument("--rf", default=str(REPO / "models/rf_postproc.pkl"), help="legacy RF (used only with --filter rf)")
     ap.add_argument("--out", default=str(REPO / "Evaluation/catalogs"))
-    ap.add_argument("--rf-thr", type=float, default=DEFAULT_THR, help="RF operating point (pre-chosen)")
+    ap.add_argument("--rf-thr", type=float, default=DEFAULT_THR, help="RF operating point (used only with --filter rf)")
     ap.add_argument("--gate-pmax", type=float, default=0.10, help="cheap candidate gate (val-validated, 0 TP loss)")
     ap.add_argument("--tile-batch", type=int, default=64)
     ap.add_argument("--tol-px", type=float, default=20.0, help="trail-overlap match tolerance (fixed, pre-chosen)")
@@ -48,6 +53,8 @@ def main():
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     n_gpus = a.n_gpus or torch.cuda.device_count()
     data_root = Path(a.data_root)
+    filt_model = a.cnn if a.filter == "cnn" else a.rf
+    print(f"[make_eval] stage-2 filter = {a.filter} ({Path(filt_model).name})", flush=True)
 
     for name in a.sets:
         d = data_root / name
@@ -57,9 +64,10 @@ def main():
             continue
         panels = d / "panels.csv"
         t0 = time.time()
-        cfg = InferenceConfig(rf_thr=a.rf_thr, gate_pmax=a.gate_pmax, tile_batch=a.tile_batch)
+        cfg = InferenceConfig(filter=a.filter, rf_thr=a.rf_thr, cnn_thr=a.cnn_thr,
+                              gate_pmax=a.gate_pmax, tile_batch=a.tile_batch)
         cat = build_detection_catalog_multigpu(
-            str(h5), a.v7, a.rf, config=cfg, n_gpus=n_gpus,
+            str(h5), a.v7, filt_model, config=cfg, n_gpus=n_gpus,
             panels_csv=str(panels) if panels.exists() else None,
         )
         out_csv = out / f"{name}_detections.csv"

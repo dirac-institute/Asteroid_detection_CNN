@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import multiprocessing as mp
 import os
+import time
 from collections import deque
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
@@ -41,6 +42,7 @@ import numpy as np
 import pandas as pd
 
 from ADCNN.inference.rf_postproc import DEFAULT_THR
+from ADCNN.inference.cnn_postproc import CNN_DEFAULT_THR
 
 __all__ = ["InferenceConfig", "build_detection_catalog",
            "build_detection_catalog_multigpu", "CATALOG_COLUMNS"]
@@ -72,35 +74,46 @@ class InferenceConfig:
     """Knobs for the two-stage detector.
 
     Detection-affecting (pre-chosen, never tuned on the eval set):
+      filter   : stage-2 FP filter -- "cnn" (focal cutout CNN, default) or "rf" (legacy RandomForest).
       rf_thr   : RF score operating point (keep detections with score >= this).
+      cnn_thr  : CNN score operating point (matched to the RF's FP-per-panel; see cnn_postproc).
       gate_pmax: skip the expensive features for candidates whose peak NN prob < this
-                 (the RF scores them ~0 anyway; 0 = no gate).
+                 (the filter scores them ~0 anyway; 0 = no gate).
       stride   : sliding-window stride for v7 inference.
     Speed-only (do not change detections):
       tile_batch: tiles per GPU forward.
     """
+    filter: str = "cnn"
     rf_thr: float = DEFAULT_THR
+    cnn_thr: float = CNN_DEFAULT_THR
     gate_pmax: float = 0.0
     stride: int = 64
     tile_batch: int = 64
 
 
 DEFAULT_CONFIG = InferenceConfig()
+PROGRESS_S = 20.0  # heartbeat interval (s) for the per-shard progress print
 
 
-def _panel_to_catalog(pid: int, prob, img, sin, cos, agg, rl, rf,
+def _panel_to_catalog(pid: int, prob, img, sin, cos, agg, rl, model,
                       config: InferenceConfig) -> Optional[pd.DataFrame]:
-    """Stage 2 for one panel: 72 features -> RF score -> keep score>=rf_thr -> public schema.
-    Pure-CPU (no torch/GPU); safe to run in a worker process. Returns the per-panel catalog
-    slice, or None if no detection survives."""
+    """Stage 2 for one panel: v7 candidates -> stage-2 FP filter (CNN cutout or RF) -> keep
+    score>=thr -> public schema. The chosen score goes in `score_rf` (schema unchanged). Returns the
+    per-panel catalog slice, or None if no detection survives."""
     from ADCNN.inference.rf_postproc import RF_FEATURES_V2, compute_v2_features, apply_rf_v2
     cand, _ = compute_v2_features(prob[None], img[None], sin[None], cos[None], agg[None],
                                   real_labels=rl[None], gate_pmax=config.gate_pmax, verbose=False)
     if not len(cand):
         return None
-    cand[list(RF_FEATURES_V2)] = cand[list(RF_FEATURES_V2)].replace([np.inf, -np.inf], np.nan)
-    cand = apply_rf_v2(cand, rf)
-    cand = cand[cand["score_rf"] >= config.rf_thr].copy()
+    if config.filter == "cnn":
+        from ADCNN.inference.cnn_postproc import apply_cnn
+        cand = apply_cnn(cand, model, img, prob, agg)   # CNN cutout score -> score_rf
+        thr = config.cnn_thr
+    else:
+        cand[list(RF_FEATURES_V2)] = cand[list(RF_FEATURES_V2)].replace([np.inf, -np.inf], np.nan)
+        cand = apply_rf_v2(cand, model)
+        thr = config.rf_thr
+    cand = cand[cand["score_rf"] >= thr].copy()
     if not len(cand):
         return None
     cand["image_id"] = int(pid)
@@ -123,24 +136,34 @@ def _finalize(parts: list[pd.DataFrame]) -> pd.DataFrame:
     return pd.concat(parts, ignore_index=True).sort_values("image_id").reset_index(drop=True)
 
 
-# --- feature-worker process state (one RF + config per worker, set once at spawn) ---
+# --- feature-worker process state (one filter model + config per worker, set once at spawn) ---
 _RF = None
 _CONFIG = DEFAULT_CONFIG
 
 
+def _load_filter(model_path: str, config: InferenceConfig):
+    """Load the stage-2 filter model named by `config.filter`: focal cutout CNN (CPU) or the RF."""
+    if config.filter == "cnn":
+        from ADCNN.inference.cnn_postproc import load_cnn
+        return load_cnn(str(model_path), device="cpu")
+    from ADCNN.inference.rf_postproc import load_rf
+    rf = load_rf(str(model_path))
+    try:
+        rf.n_jobs = 1
+    except Exception:
+        pass
+    return rf
+
+
 def _worker_init(rf_pkl: str, config: InferenceConfig) -> None:
-    """Isolate each feature worker: hide the GPU and pin BLAS to one thread (we parallelise
-    across panels, so per-worker thread pools would only oversubscribe), and load one RF."""
+    """Isolate each feature worker: hide the GPU and pin BLAS to one thread (we parallelise across
+    panels, so per-worker thread pools would only oversubscribe), and load one filter model.
+    `rf_pkl` is the filter-model path (RF .pkl or CNN .pt, per config.filter)."""
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
     for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
         os.environ[var] = "1"
     global _RF, _CONFIG
-    from ADCNN.inference.rf_postproc import load_rf
-    _RF = load_rf(str(rf_pkl))
-    try:
-        _RF.n_jobs = 1
-    except Exception:
-        pass
+    _RF = _load_filter(rf_pkl, config)
     _CONFIG = config
 
 
@@ -185,17 +208,36 @@ def build_detection_catalog(h5_path, v7_ckpt, rf_pkl, *, config: InferenceConfig
     dev = torch.device(device if torch.cuda.is_available() else "cpu")
     if dev.type == "cuda":
         torch.backends.cudnn.benchmark = True  # fixed 128px tiles -> autotune once
+    if panel_ids is not None:
+        panel_ids = list(panel_ids)
+        total = len(panel_ids)
+    else:
+        with h5py.File(h5_path, "r") as f:
+            total = int(f["images"].shape[0])
     model = torch.jit.load(str(v7_ckpt), map_location=dev).eval()
     panels = _iter_panel_outputs(model, h5_path, panel_ids, dev, config, prep_workers)
     parts: list[pd.DataFrame] = []
 
+    # progress heartbeat: panels v7-processed / total + detections so far + rate + ETA, every PROGRESS_S
+    tag = os.environ.get("CUDA_VISIBLE_DEVICES") or str(device)
+    t0 = time.time(); last = [t0]; n = [0]
+
+    def tick():
+        now = time.time()
+        if now - last[0] >= PROGRESS_S or n[0] == total:
+            nd = sum(len(p) for p in parts); rate = n[0] / max(now - t0, 1e-6)
+            eta = (total - n[0]) / rate if rate > 0 else 0.0
+            print(f"[catalog gpu{tag}] {n[0]}/{total} panels | {nd} det | {rate:.1f} pan/s | ETA {eta/60:.1f}m",
+                  flush=True)
+            last[0] = now
+
     if n_workers <= 1:
-        from ADCNN.inference.rf_postproc import load_rf
-        rf = load_rf(str(rf_pkl))
+        rf = _load_filter(rf_pkl, config)
         for pid, prob, img, sin, cos, agg, rl in panels:
             r = _panel_to_catalog(pid, prob, img, sin, cos, agg, rl, rf, config)
             if r is not None:
                 parts.append(r)
+            n[0] += 1; tick()
     else:
         ctx = mp.get_context("spawn")
         pending: deque = deque()
@@ -209,10 +251,12 @@ def build_detection_catalog(h5_path, v7_ckpt, rf_pkl, *, config: InferenceConfig
                                  initializer=_worker_init, initargs=(str(rf_pkl), config)) as pool:
             for out in panels:
                 pending.append(pool.submit(_worker, out))
+                n[0] += 1; tick()             # n = panels v7-processed (GPU is the bottleneck)
                 if len(pending) >= 2 * n_workers:   # backpressure: bound RAM + queue depth
                     drain()
             while pending:
                 drain()
+        n[0] = total; tick()                  # final line with the full detection count
 
     return _attach_routing_keys(_finalize(parts), panels_csv)
 
@@ -272,9 +316,14 @@ def main():
     ap.add_argument("--h5", required=True, help="diffim panel h5 (images + real_labels)")
     ap.add_argument("--panels", help="optional panels.csv -> attach visit/detector/band")
     ap.add_argument("--v7", default=str(REPO / "models/v7_diffim_scripted.pt"))
+    ap.add_argument("--filter", choices=["cnn", "rf"], default="cnn",
+                    help="stage-2 FP filter: cnn (focal cutout CNN, default) or rf (legacy RandomForest)")
     ap.add_argument("--rf", default=str(REPO / "models/rf_postproc.pkl"))
+    ap.add_argument("--cnn", default=str(REPO / "models/cnn_postproc.pt"))
     ap.add_argument("--out", required=True)
     ap.add_argument("--rf-thr", type=float, default=DEFAULT_THR, help="RF operating point (pre-chosen)")
+    ap.add_argument("--cnn-thr", type=float, default=CNN_DEFAULT_THR,
+                    help="CNN operating point (default = matched to the RF's FP/panel)")
     ap.add_argument("--gate-pmax", type=float, default=0.0, help="skip features below this peak NN prob (val-chosen)")
     ap.add_argument("--stride", type=int, default=64, help="sliding-window stride")
     ap.add_argument("--tile-batch", type=int, default=64, help="tiles per GPU forward (speed only)")
@@ -294,17 +343,20 @@ def main():
     elif a.limit:
         panel_ids = list(range(a.limit))
 
-    config = InferenceConfig(rf_thr=a.rf_thr, gate_pmax=a.gate_pmax, stride=a.stride, tile_batch=a.tile_batch)
+    config = InferenceConfig(filter=a.filter, rf_thr=a.rf_thr, cnn_thr=a.cnn_thr,
+                             gate_pmax=a.gate_pmax, stride=a.stride, tile_batch=a.tile_batch)
+    model_path = a.cnn if a.filter == "cnn" else a.rf   # the "rf_pkl" arg carries the filter model path
+    thr = a.cnn_thr if a.filter == "cnn" else a.rf_thr
     if a.n_gpus and a.n_gpus > 1:
-        cat = build_detection_catalog_multigpu(a.h5, a.v7, a.rf, config=config,
+        cat = build_detection_catalog_multigpu(a.h5, a.v7, model_path, config=config,
                                                panels_csv=a.panels, panel_ids=panel_ids, n_gpus=a.n_gpus)
     else:
-        cat = build_detection_catalog(a.h5, a.v7, a.rf, config=config, panels_csv=a.panels,
+        cat = build_detection_catalog(a.h5, a.v7, model_path, config=config, panels_csv=a.panels,
                                       panel_ids=panel_ids, device=a.device, n_workers=(a.n_workers or None))
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     cat.to_csv(a.out, index=False)
     npan = cat["image_id"].nunique() if len(cat) else 0
-    print(f"[catalog] {len(cat)} detections (score>={a.rf_thr}) over {npan} panels -> {a.out}", flush=True)
+    print(f"[catalog] {len(cat)} detections ({a.filter} score>={thr}) over {npan} panels -> {a.out}", flush=True)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 import warnings
 # Cap BLAS/OMP threads BEFORE numpy import. We run n_gpus shard processes per node, each calling
 # compute_v2_features (NumPy/BLAS-heavy); with default threading each shard grabs ALL cores ->
@@ -69,12 +70,13 @@ def _prefetch(paths, workers):
             nxt += 1
 
 
-def run_shard(gpu_id, rows, v7_ckpt, rf_pkl, rf_thr, prefetch, out_csv, n_workers=8, feat_out=None):
-    """Stream FITS -> v7 (GPU) -> feature+RF PROCESS POOL (CPU) -> sky catalog. The GPU runs v7
-    inference continuously while `n_workers` CPU processes compute the 72 features + RF in parallel
-    across panels (catalog.py's engine) -> GPU and all cores stay busy (the old inline-per-shard
-    version left the GPU idle ~90% while one process computed features). Detections + a .done log
-    are written incrementally (preemption-safe / resumable)."""
+def run_shard(gpu_id, rows, v7_ckpt, filt_model, filt, thr, prefetch, out_csv, n_workers=8, feat_out=None):
+    """Stream FITS -> v7 (GPU) -> feature + stage-2 FILTER PROCESS POOL (CPU) -> sky catalog. The
+    stage-2 filter is the focal-cutout CNN (`filt='cnn'`, models/cnn_postproc.pt) or the legacy RF
+    (`filt='rf'`) -- the SAME engine + operating point as make_eval_catalogs, so detection is
+    identical across eval and discovery. The GPU runs v7 continuously while `n_workers` CPU processes
+    compute features + the filter in parallel across panels. Detections + a .done log are written
+    incrementally (preemption-safe / resumable)."""
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     import multiprocessing as mp
     from collections import deque
@@ -84,7 +86,8 @@ def run_shard(gpu_id, rows, v7_ckpt, rf_pkl, rf_thr, prefetch, out_csv, n_worker
     from ADCNN.inference.catalog import _worker, _worker_init, InferenceConfig
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = torch.jit.load(v7_ckpt, map_location=dev).eval()
-    config = InferenceConfig(rf_thr=rf_thr, gate_pmax=0.10)
+    # one operating point `thr` drives whichever filter is active (the other field is ignored)
+    config = InferenceConfig(filter=filt, rf_thr=thr, cnn_thr=thr, gate_pmax=0.10)
     # RESUME: skip (visit,detector) panels already processed (sidecar .done log) so a preempted +
     # requeued job continues instead of losing everything. Detections are appended per panel.
     done_path = out_csv + ".done"
@@ -99,6 +102,7 @@ def run_shard(gpu_id, rows, v7_ckpt, rf_pkl, rf_thr, prefetch, out_csv, n_worker
     donef = open(done_path, "a")
     paths = [r["fits_path"] for r in rows]
     n_done = len(done); n_det = 0
+    total = len(rows); t0 = time.time(); last = t0
     pending = deque()
 
     def drain():
@@ -131,13 +135,18 @@ def run_shard(gpu_id, rows, v7_ckpt, rf_pkl, rf_thr, prefetch, out_csv, n_worker
 
     ctx = mp.get_context("spawn")
     with ProcessPoolExecutor(max_workers=max(2, n_workers), mp_context=ctx,
-                             initializer=_worker_init, initargs=(rf_pkl, config)) as pool:
+                             initializer=_worker_init, initargs=(filt_model, config)) as pool:
         for i, (img, wcs, mjd) in _prefetch(paths, prefetch):
             rl = np.zeros(img.shape, dtype=np.uint16)
             prob, sin, cos, agg = predict_panel_overlap_3ch_full(model, img, rl, device=dev)
             pending.append((pool.submit(_worker, (i, prob, img, sin, cos, agg, rl)), rows[i], wcs, mjd))
             if len(pending) >= 2 * max(2, n_workers):   # backpressure: bound RAM + queue depth
                 drain()
+            now = time.time()
+            if now - last >= 20.0:                       # progress heartbeat (panels v7-processed)
+                rate = (i + 1) / max(now - t0, 1e-6); eta = (total - i - 1) / rate if rate > 0 else 0.0
+                print(f"[gpu{gpu_id}] {i+1}/{total} panels | {n_det} det | {rate:.1f} pan/s | ETA {eta/60:.1f}m", flush=True)
+                last = now
         while pending:
             drain()
     donef.close()
@@ -149,8 +158,12 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--manifest", default=str(REPO / "experiments/heliolinc/run_disco/manifest.csv"))
     ap.add_argument("--v7", default=str(REPO / "models/v7_diffim_scripted.pt"))
-    ap.add_argument("--rf", default=str(REPO / "models/rf_postproc.pkl"))
-    ap.add_argument("--rf-thr", type=float, default=0.5, help="deployed operating point (eval-consistent)")
+    ap.add_argument("--filter", choices=["cnn", "rf"], default="cnn",
+                    help="stage-2 FP filter (default cnn = focal-cutout CNN, matches make_eval_catalogs)")
+    ap.add_argument("--cnn", default=str(REPO / "models/cnn_postproc.pt"), help="focal-cutout CNN model")
+    ap.add_argument("--cnn-thr", type=float, default=None, help="CNN operating point (default cnn_postproc.CNN_DEFAULT_THR)")
+    ap.add_argument("--rf", default=str(REPO / "models/rf_postproc.pkl"), help="legacy RF (used only with --filter rf)")
+    ap.add_argument("--rf-thr", type=float, default=0.5, help="RF operating point (used only with --filter rf)")
     ap.add_argument("--prefetch", type=int, default=6, help="FITS reads in flight per GPU (bounds memory)")
     ap.add_argument("--n-gpus", type=int, default=0, help="0 = all visible")
     ap.add_argument("--out", default=str(REPO / "experiments/heliolinc/run_disco/adcnn_dets.csv"))
@@ -158,6 +171,13 @@ def main():
                     help="also write EVERY candidate's 72 features + ra/dec/mjd here (parquet, for RF retraining)")
     ap.add_argument("--limit", type=int, default=0, help="first N panels only (smoke test)")
     a = ap.parse_args()
+
+    from ADCNN.inference.cnn_postproc import CNN_DEFAULT_THR
+    if a.filter == "cnn":
+        filt_model = a.cnn; thr = a.cnn_thr if a.cnn_thr is not None else CNN_DEFAULT_THR
+    else:
+        filt_model = a.rf; thr = a.rf_thr
+    print(f"[discover] stage-2 filter = {a.filter} ({Path(filt_model).name}) @ thr {thr}", flush=True)
 
     man = pd.read_csv(a.manifest)
     if a.limit:
@@ -176,11 +196,11 @@ def main():
     feat_pqs = [str(tmp / f"_feat{g}.parquet") if a.dump_features else None for g in range(n_gpus)]
 
     if n_gpus == 1:
-        run_shard(0, shards[0], a.v7, a.rf, a.rf_thr, a.prefetch, shard_csvs[0], n_workers, feat_pqs[0])
+        run_shard(0, shards[0], a.v7, filt_model, a.filter, thr, a.prefetch, shard_csvs[0], n_workers, feat_pqs[0])
     else:
         ctx = torch.multiprocessing.get_context("spawn")
         procs = [ctx.Process(target=run_shard,
-                             args=(g, shards[g], a.v7, a.rf, a.rf_thr, a.prefetch, shard_csvs[g], n_workers, feat_pqs[g]))
+                             args=(g, shards[g], a.v7, filt_model, a.filter, thr, a.prefetch, shard_csvs[g], n_workers, feat_pqs[g]))
                  for g in range(n_gpus) if shards[g]]
         for p in procs:
             p.start()
@@ -203,7 +223,7 @@ def main():
     for c in shard_csvs:
         Path(c).unlink(missing_ok=True)
         Path(c + ".done").unlink(missing_ok=True)   # resume sidecars (only here, after success)
-    print(f"[discover] {len(cat)} detections over {man.shape[0]} panels (thr={a.rf_thr}) -> {a.out}", flush=True)
+    print(f"[discover] {len(cat)} detections over {man.shape[0]} panels ({a.filter}@{thr}) -> {a.out}", flush=True)
     print(f"[discover] {cat.visit.nunique()} visits, {len({int(str(v)[:8]) for v in cat.visit})} nights", flush=True)
 
 
