@@ -5,9 +5,9 @@ no big files, bounded memory.
 Given the manifest of FITS paths (butler_manifest.py), the panels are sharded across the visible
 GPUs. Each GPU process prefetches FITS with a small thread pool (astropy reads image HDU 1 + WCS +
 MJD directly -- validated bit-identical to the lsst stack, WCS agree to 0.001") so disk I/O hides
-behind the GPU, then runs v7 -> 72-feature RF (deployed operating point, thr 0.5) on each panel and
+behind the GPU, then runs v7 -> focal-cutout CNN stage-2 filter on each panel and
 converts kept detections (x,y) -> (RA,Dec) via the panel's own WCS. Output: adcnn_dets.csv
-[detid, mjd, ra, dec, mag, band, obscode, visit, detector, x, y, score_rf] + colformat.txt.
+[detid, mjd, ra, dec, mag, band, obscode, visit, detector, x, y, score] + colformat.txt.
 """
 from __future__ import annotations
 import argparse
@@ -70,13 +70,12 @@ def _prefetch(paths, workers):
             nxt += 1
 
 
-def run_shard(gpu_id, rows, v7_ckpt, filt_model, filt, thr, prefetch, out_csv, n_workers=8, feat_out=None):
-    """Stream FITS -> v7 (GPU) -> feature + stage-2 FILTER PROCESS POOL (CPU) -> sky catalog. The
-    stage-2 filter is the focal-cutout CNN (`filt='cnn'`, models/cnn_postproc.pt) or the legacy RF
-    (`filt='rf'`) -- the SAME engine + operating point as make_eval_catalogs, so detection is
-    identical across eval and discovery. The GPU runs v7 continuously while `n_workers` CPU processes
-    compute features + the filter in parallel across panels. Detections + a .done log are written
-    incrementally (preemption-safe / resumable)."""
+def run_shard(gpu_id, rows, v7_ckpt, cnn_model, thr, prefetch, out_csv, n_workers=8, feat_out=None):
+    """Stream FITS -> v7 (GPU) -> feature + stage-2 focal-cutout-CNN PROCESS POOL (CPU) -> sky catalog.
+    The stage-2 filter is the focal-cutout CNN (models/cnn_postproc.pt) -- the SAME engine + operating
+    point as make_eval_catalogs, so detection is identical across eval and discovery. The GPU runs v7
+    continuously while `n_workers` CPU processes compute features + the CNN in parallel across panels.
+    Detections + a .done log are written incrementally (preemption-safe / resumable)."""
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     import multiprocessing as mp
     from collections import deque
@@ -86,8 +85,7 @@ def run_shard(gpu_id, rows, v7_ckpt, filt_model, filt, thr, prefetch, out_csv, n
     from ADCNN.inference.catalog import _worker, _worker_init, InferenceConfig
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = torch.jit.load(v7_ckpt, map_location=dev).eval()
-    # one operating point `thr` drives whichever filter is active (the other field is ignored)
-    config = InferenceConfig(filter=filt, rf_thr=thr, cnn_thr=thr, gate_pmax=0.10)
+    config = InferenceConfig(cnn_thr=thr, gate_pmax=0.10)
     # RESUME: skip (visit,detector) panels already processed (sidecar .done log) so a preempted +
     # requeued job continues instead of losing everything. Detections are appended per panel.
     done_path = out_csv + ".done"
@@ -109,7 +107,7 @@ def run_shard(gpu_id, rows, v7_ckpt, filt_model, filt, thr, prefetch, out_csv, n
         """Pop one finished feature-worker result, convert pixels->sky (+ trail endpoints), append."""
         nonlocal write_header, n_det
         fut, r, wcs, mjd = pending.popleft()
-        cand = fut.result()   # catalog public schema (x,y,beta=PCA,length,score_rf>=thr) or None
+        cand = fut.result()   # catalog public schema (x,y,beta=PCA,length,score>=thr) or None
         if cand is not None and len(cand):
             xy = cand[["x", "y"]].to_numpy(np.float64)
             sky = wcs.all_pix2world(xy, 0)
@@ -127,7 +125,7 @@ def run_shard(gpu_id, rows, v7_ckpt, filt_model, filt, thr, prefetch, out_csv, n
                 # difference_image.photoCalib). NaN = not-yet-measured, never a placeholder value.
                 mjd=mjd, ra=sky[:, 0], dec=sky[:, 1], mag=np.nan, band=str(r["band"])[:1] or "r",
                 obscode=OBSCODE, visit=int(r["visit"]), detector=int(r["detector"]),
-                x=xy[:, 0], y=xy[:, 1], score_rf=cand["score_rf"].to_numpy(),
+                x=xy[:, 0], y=xy[:, 1], score=cand["score"].to_numpy(),
                 length=cand["length"].to_numpy(), len_db=L_db, mf_snr=cand["mf_snr"].to_numpy(),
                 ra0=sky0[:, 0], dec0=sky0[:, 1], ra1=sky1[:, 0], dec1=sky1[:, 1],
                 beta=cand["beta"].to_numpy(),
@@ -139,7 +137,7 @@ def run_shard(gpu_id, rows, v7_ckpt, filt_model, filt, thr, prefetch, out_csv, n
 
     ctx = mp.get_context("spawn")
     with ProcessPoolExecutor(max_workers=max(2, n_workers), mp_context=ctx,
-                             initializer=_worker_init, initargs=(filt_model, config)) as pool:
+                             initializer=_worker_init, initargs=(cnn_model, config)) as pool:
         for i, (img, wcs, mjd) in _prefetch(paths, prefetch):
             rl = np.zeros(img.shape, dtype=np.uint16)
             prob, sin, cos, agg = predict_panel_overlap_3ch_full(model, img, rl, device=dev)
@@ -162,12 +160,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--manifest", default=str(REPO / "experiments/heliolinc/run_disco/manifest.csv"))
     ap.add_argument("--v7", default=str(REPO / "models/v7_diffim_scripted.pt"))
-    ap.add_argument("--filter", choices=["cnn", "rf"], default="cnn",
-                    help="stage-2 FP filter (default cnn = focal-cutout CNN, matches make_eval_catalogs)")
     ap.add_argument("--cnn", default=str(REPO / "models/cnn_postproc.pt"), help="focal-cutout CNN model")
     ap.add_argument("--cnn-thr", type=float, default=None, help="CNN operating point (default cnn_postproc.CNN_DEFAULT_THR)")
-    ap.add_argument("--rf", default=str(REPO / "models/rf_postproc.pkl"), help="legacy RF (used only with --filter rf)")
-    ap.add_argument("--rf-thr", type=float, default=0.5, help="RF operating point (used only with --filter rf)")
     ap.add_argument("--prefetch", type=int, default=6, help="FITS reads in flight per GPU (bounds memory)")
     ap.add_argument("--n-gpus", type=int, default=0, help="0 = all visible")
     ap.add_argument("--out", default=str(REPO / "experiments/heliolinc/run_disco/adcnn_dets.csv"))
@@ -177,11 +171,8 @@ def main():
     a = ap.parse_args()
 
     from ADCNN.inference.cnn_postproc import CNN_DEFAULT_THR
-    if a.filter == "cnn":
-        filt_model = a.cnn; thr = a.cnn_thr if a.cnn_thr is not None else CNN_DEFAULT_THR
-    else:
-        filt_model = a.rf; thr = a.rf_thr
-    print(f"[discover] stage-2 filter = {a.filter} ({Path(filt_model).name}) @ thr {thr}", flush=True)
+    cnn_model = a.cnn; thr = a.cnn_thr if a.cnn_thr is not None else CNN_DEFAULT_THR
+    print(f"[discover] stage-2 filter = focal-cutout CNN ({Path(cnn_model).name}) @ thr {thr}", flush=True)
 
     man = pd.read_csv(a.manifest)
     if a.limit:
@@ -200,11 +191,11 @@ def main():
     feat_pqs = [str(tmp / f"_feat{g}.parquet") if a.dump_features else None for g in range(n_gpus)]
 
     if n_gpus == 1:
-        run_shard(0, shards[0], a.v7, filt_model, a.filter, thr, a.prefetch, shard_csvs[0], n_workers, feat_pqs[0])
+        run_shard(0, shards[0], a.v7, cnn_model, thr, a.prefetch, shard_csvs[0], n_workers, feat_pqs[0])
     else:
         ctx = torch.multiprocessing.get_context("spawn")
         procs = [ctx.Process(target=run_shard,
-                             args=(g, shards[g], a.v7, filt_model, a.filter, thr, a.prefetch, shard_csvs[g], n_workers, feat_pqs[g]))
+                             args=(g, shards[g], a.v7, cnn_model, thr, a.prefetch, shard_csvs[g], n_workers, feat_pqs[g]))
                  for g in range(n_gpus) if shards[g]]
         for p in procs:
             p.start()
@@ -227,7 +218,7 @@ def main():
     for c in shard_csvs:
         Path(c).unlink(missing_ok=True)
         Path(c + ".done").unlink(missing_ok=True)   # resume sidecars (only here, after success)
-    print(f"[discover] {len(cat)} detections over {man.shape[0]} panels ({a.filter}@{thr}) -> {a.out}", flush=True)
+    print(f"[discover] {len(cat)} detections over {man.shape[0]} panels (cnn@{thr}) -> {a.out}", flush=True)
     print(f"[discover] {cat.visit.nunique()} visits, {len({int(str(v)[:8]) for v in cat.visit})} nights", flush=True)
 
 

@@ -1,12 +1,12 @@
 """Rejecter build Stage A (torch env): run v7 over the test_5sigma panels, extract candidate
-detections + RF_FEATURES_V2 + injection labels (1=injected TP, 0=FP), plus panel-clumping/isolation
+detections + FEATURES_V2 + injection labels (1=injected TP, 0=FP), plus panel-clumping/isolation
 context features. Writes candA.parquet for Stage B (Veres + mask features, lsst env).
 Panel-disjoint train/val is done later at training time (GroupKFold on panel_id) -- leak-free."""
 import sys, numpy as np, pandas as pd, h5py, torch
 from pathlib import Path
 REPO=Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"); sys.path.insert(0,str(REPO))
 from ADCNN.inference.rf_train import infer_candidate_features
-from ADCNN.inference.features import RF_FEATURES_V2
+from ADCNN.inference.features import FEATURES_V2
 
 H5=REPO/"DATA_DIFFIM/test_5sigma/test.h5"
 CSV=REPO/"DATA_DIFFIM/test_5sigma/test.csv"
@@ -39,5 +39,5 @@ cand=cand.groupby("panel_id",group_keys=False).apply(add_ctx)
 cand["is_long_clumped"]=((cand._len>=15)&(cand.panel_nlong>=3)).astype(int)
 
 cand.to_parquet(OUT/"candA.parquet")
-print(f"feature cols: {len(RF_FEATURES_V2)} RF + ctx(panel_nlong,panel_ncand,nn_dist,is_long_clumped)")
+print(f"feature cols: {len(FEATURES_V2)} RF + ctx(panel_nlong,panel_ncand,nn_dist,is_long_clumped)")
 print(f"-> {OUT}/candA.parquet  ({len(cand)} rows, cols={cand.shape[1]})")

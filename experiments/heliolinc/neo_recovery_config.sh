@@ -20,7 +20,6 @@ MIN_RATE=${MIN_RATE:-0.5}          # NEO-rate cut (deg/day) for the truth/target
 
 # ---- models --------------------------------------------------------------
 V7=${V7:-$REPO/models/v7_diffim_scripted.pt}
-RF=${RF:-$REPO/models/rf_postproc.pkl}
 
 # ---- stage: NEO hypothesis grid -----------------------------------------
 GRID_SRC=${GRID_SRC:-$HL/run_disco/heliohypo_all.txt}   # full grid to filter
@@ -28,7 +27,6 @@ RMAX=${RMAX:-1.6}                                        # NEO distance cap (AU)
 HELIODIST=heliohypo_neo.txt                             # produced under $RUN
 
 # ---- stage: detect (ADCNN+RF, GPU) --------------------------------------
-RF_THR=${RF_THR:-0.5}
 N_GPUS=${N_GPUS:-4}
 
 # ---- stage: tracklet construction ---------------------------------------

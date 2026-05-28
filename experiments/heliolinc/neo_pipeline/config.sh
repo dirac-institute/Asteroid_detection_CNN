@@ -15,12 +15,9 @@ KNOWN=${KNOWN:-$HL/NEO_small/known.csv}            # known-object sightings for 
 
 # ---- models ----------------------------------------------------------------
 V7=${V7:-$REPO/models/v7_diffim_scripted.pt}
-RF=${RF:-$REPO/models/rf_postproc.pkl}
 
 # ---- stage 1: detect (ADCNN, GPU) -----------------------------------------
-FILTER=${FILTER:-cnn}                # stage-2 FP filter: cnn (focal-cutout CNN, GPU) or rf
 CNN_THR=${CNN_THR:-0.63}             # CNN operating point (FP-matched to the old RF); same as eval
-RF_THR=${RF_THR:-0.5}                # RF operating point (only used when FILTER=rf)
 N_GPUS=${N_GPUS:-4}
 
 # ---- stage 2: measure (Veres trailed fit, CPU) ----------------------------

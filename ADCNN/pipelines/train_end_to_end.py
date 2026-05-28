@@ -1,4 +1,4 @@
-"""ENTRY POINT — train the full two-stage detector end to end: v7 NN, then the RandomForest.
+"""ENTRY POINT — train the full two-stage detector end to end: v7 NN, then the cutout CNN.
 
 This pipeline is the single authoritative source of the deployed **reg2** recipe: every
 training parameter decision lives in :class:`Reg2Recipe` below and is passed explicitly to
@@ -9,16 +9,18 @@ The recipe was captured from the deployed model's run config
 Stage 1 (NN): trains v7 (UNetResSE + orientation + Hough aggregator) with the reg2 recipe on
   the realistic-trail diffim shards (``--data-sources``), then exports the best checkpoint to
   TorchScript.
-Stage 2 (RF): trains the neg5 RandomForest second stage on candidate features from the
-  held-out VALIDATION panels of the freshly trained v7 (leakage-safe; never sees the test set).
+Stage 2 (CNN): trains the focal-loss cutout CNN second-stage false-positive filter on cutouts
+  from the held-out VALIDATION panels of the freshly trained v7 (leakage-safe; never sees the
+  test set). For a stronger filter, build a large dedicated cutout set with
+  ``ADCNN.training.cnn_postproc.build_cutout_dataset`` and train on that instead.
 
 Defaults reproduce reg2 out of the box on the 4 realistic shards:
 
     python -m ADCNN.pipelines.train_end_to_end --run-name v7_repro
 
 Override --data-sources / --val-* to train on other data, --epochs for a quick smoke, or
---skip-nn / --skip-rf to run a single stage. The NN stage needs a GPU + the asteroid_cnn env.
-Outputs: ``experiments/diffim_runs/<run>/ckpts/`` + ``<models-dir>/<run>_{v7_scripted.pt,rf_postproc.pkl}``.
+--skip-nn / --skip-cnn to run a single stage. The NN stage needs a GPU + the asteroid_cnn env.
+Outputs: ``experiments/diffim_runs/<run>/ckpts/`` + ``<models-dir>/<run>_{v7_scripted.pt,cnn_postproc.pt}``.
 
 NOTE: the deployed reg2 used ``init_agg_alpha=0.073``; that trainer flag was removed in the
 consolidation, so the Hough aggregator's ``agg_alpha`` now initialises at 0.0 (model default).
@@ -86,8 +88,9 @@ class Reg2Recipe:
     augment: bool = True
     orient_cache_size: int = 24
     num_workers: int = 8
-    # stage-2 RandomForest
-    neg_ratio: int = 5
+    # stage-2 cutout CNN (focal-loss FP filter)
+    cnn_epochs: int = 30
+    cnn_fp_cap: int = 600
 
 
 def _nn_train_flags(r: Reg2Recipe) -> list[str]:
@@ -130,7 +133,7 @@ def main():
     ap.add_argument("--models-dir", default=str(REPO / "models"))
     ap.add_argument("--epochs", type=int, default=None, help="override the recipe epochs (e.g. smoke run)")
     ap.add_argument("--skip-nn", action="store_true")
-    ap.add_argument("--skip-rf", action="store_true")
+    ap.add_argument("--skip-cnn", action="store_true")
     ap.add_argument("--dry-run", action="store_true", help="print the NN training command and exit")
     a = ap.parse_args()
 
@@ -157,13 +160,14 @@ def main():
     elif a.dry_run:
         return
 
-    # --- Stage 2: RF (neg5, on the trained v7's held-out val candidates) ---
-    if not a.skip_rf:
-        from ADCNN.inference.rf_train import train_rf_from_val
+    # --- Stage 2: cutout CNN (focal FP filter, on the trained v7's held-out val candidates) ---
+    if not a.skip_cnn:
+        from ADCNN.training.cnn_postproc import train_cnn_from_val
         val_ids = sorted(pd.read_csv(a.val_csv)["image_id"].unique())[: recipe.n_val_panels]
-        rf_out = Path(a.models_dir) / f"{a.run_name}_rf_postproc.pkl"
-        train_rf_from_val(scripted, a.val_h5, a.val_csv, val_ids, rf_out, neg_ratio=recipe.neg_ratio)
-        print(f"[stage2-rf] done -> {rf_out}", flush=True)
+        cnn_out = Path(a.models_dir) / f"{a.run_name}_cnn_postproc.pt"
+        train_cnn_from_val(scripted, a.val_h5, a.val_csv, val_ids, cnn_out,
+                           epochs=recipe.cnn_epochs, fp_cap=recipe.cnn_fp_cap)
+        print(f"[stage2-cnn] done -> {cnn_out}", flush=True)
     print("END-TO-END TRAINING DONE", flush=True)
 
 

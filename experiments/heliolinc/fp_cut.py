@@ -5,7 +5,7 @@ import numpy as np, pandas as pd
 from pathlib import Path
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import GroupKFold
-from ADCNN.inference.features import RF_FEATURES_V2
+from ADCNN.inference.features import FEATURES_V2
 OUT=Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc/rejecter_data")
 DATA=Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/DATA_DIFFIM/test_5sigma")
 c=pd.read_parquet(OUT/"candB.parquet")
@@ -35,7 +35,7 @@ for f in ["integrated_logit","top5_mean_p","masnr_30","mf_snr"]:
     report(f"cut: {f}", c[f].fillna(0).to_numpy().astype(float))
 # trained rejecter (out-of-fold), full feature set
 MASK=["m_SAT","m_CR","m_EDGE","m_STREAK","m_SPIKE","m_SENSOR_EDGE","m_CROSSTALK","m_ITL_DIP","m_BAD","m_SUSPECT","m_DETECTED_NEGATIVE"]
-FE=list(RF_FEATURES_V2)+["veres_len","veres_theta","veres_rchi","veres_ok","nn_dist","is_long_clumped"]+[m for m in MASK if m in c]
+FE=list(FEATURES_V2)+["veres_len","veres_theta","veres_rchi","veres_ok","nn_dist","is_long_clumped"]+[m for m in MASK if m in c]
 X=c[FE].fillna(0).to_numpy(np.float32); g=c.panel_id.to_numpy()
 oof=np.full(len(c),np.nan)
 for tr,va in GroupKFold(5).split(X,y,g):

@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 
 COLS = ["detid", "mjd", "ra", "dec", "ra0", "dec0", "ra1", "dec1", "len_db",
-        "flux", "snr", "mag", "mag_err", "band", "obscode", "score_rf", "source"]
+        "flux", "snr", "mag", "mag_err", "band", "obscode", "score", "source"]
 
 
 def main():
@@ -63,7 +63,7 @@ def main():
         if "len_db" not in dia and "trailLength" in dia:
             dia["len_db"] = dia.trailLength
         dia["source"] = "dia"
-        dia["score_rf"] = dia.get("reliability", np.nan)
+        dia["score"] = dia.get("reliability", np.nan)
         print(f"[clean] diaSource {m0} -> {len(dia)} (reliability>={a.dia_reliability_min} & !neg & trailLen>={a.lendb_min})", flush=True)
         parts.append(dia)
 

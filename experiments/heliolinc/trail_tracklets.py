@@ -135,9 +135,9 @@ def main():
     ap.add_argument("--earth", default=str(HL / "run_disco/Earth1day2020s_02a.txt"))
     ap.add_argument("--out", default=str(HL / "run_trail_validate"))
     ap.add_argument("--dets", default=None,
-                    help="REAL detection catalog (mjd,ra,dec,ra0,dec0,ra1,dec1[,score_rf,len_db]) -> build "
+                    help="REAL detection catalog (mjd,ra,dec,ra0,dec0,ra1,dec1[,score,len_db]) -> build "
                          "trail-tracklets directly (no truth synthesis). Overrides the validation path.")
-    ap.add_argument("--score-min", type=float, default=0.5, help="--dets: keep score_rf >= this")
+    ap.add_argument("--score-min", type=float, default=0.5, help="--dets: keep score >= this")
     ap.add_argument("--lendb-min", type=float, default=3.0, help="--dets: keep de-biased trail length >= this px (trailed/fast movers)")
     ap.add_argument("--min-nights", type=int, default=3, help="keep objects seen on >= this many nights")
     ap.add_argument("--single-night-only", action="store_true",
@@ -147,7 +147,7 @@ def main():
 
     if a.dets:   # REAL discovery path: build trail-tracklets from a measured detection catalog
         d = pd.read_csv(a.dets)
-        if "score_rf" in d: d = d[d.score_rf >= a.score_min]
+        if "score" in d: d = d[d.score >= a.score_min]
         if "len_db" in d:   d = d[d.len_db >= a.lendb_min]
         need = ["mjd", "ra", "dec", "ra0", "dec0", "ra1", "dec1"]
         miss = [c for c in need if c not in d.columns]

@@ -18,6 +18,6 @@ eval "$TORCH_ENV"
 cd "$REPO"
 # Stage 1: stream butler diffims -> ADCNN + focal-cutout CNN (GPU) -> sky detections + de-biased trail endpoints.
 python experiments/heliolinc/discover_stream.py --n-gpus "$N_GPUS" \
-  --filter "$FILTER" --cnn-thr "$CNN_THR" --rf-thr "$RF_THR" \
+  --cnn-thr "$CNN_THR" \
   --manifest "$MANIFEST" --out "$RUN/adcnn_dets.csv"
 echo "NEO STAGE1 DETECT DONE"

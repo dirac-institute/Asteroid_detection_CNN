@@ -1,11 +1,15 @@
-"""Stage-2 RF feature extraction for the diffim detector.
+"""Stage-2 candidate extraction + measurement for the diffim detector.
 
-For each NN candidate, ``compute_v2_features`` builds the 72-column ``RF_FEATURES_V2``
-vector spanning: long matched-filter response (``_add_long_mf``), blob morphology
-(``_add_morphology``), panel context (``_add_panel_context``), multi-angle matched
-filter (``_add_multiangle_mf``), low-threshold PCA elongation (``_add_low_thr_pca``),
-and orientation-head agreement (``_add_orient``). This feature set must stay in
-lock-step with the shipped ``models/rf_postproc.pkl`` — do not reorder or drop columns.
+``compute_v2_features`` runs the v7 candidate extractor and measures each candidate: it returns
+the centroid, the matched-filter trail geometry (``mf_length`` / ``mf_beta`` / ``mf_snr`` /
+``mf_flux``) the detection catalog emits, plus the full ``FEATURES_V2`` vector spanning long
+matched-filter response (``_add_long_mf``), blob morphology (``_add_morphology``), panel context
+(``_add_panel_context``), multi-angle matched filter (``_add_multiangle_mf``), low-threshold PCA
+elongation (``_add_low_thr_pca``) and orientation-head agreement (``_add_orient``).
+
+``label_candidates_by_injection_overlap`` labels candidates against an injection truth catalog
+(1 = the candidate's connected component overlaps an injected trail) — the supervision signal for
+training the stage-2 cutout CNN (``ADCNN.training.cnn_postproc``).
 """
 from __future__ import annotations
 
@@ -27,7 +31,7 @@ from ADCNN.inference.matched_filter import (
     panel_mad_sigma,
     matched_filter_for_nn_candidates,
 )
-from ADCNN.utils.helpers import to_panel_dict
+from ADCNN.utils.helpers import to_panel_dict, trail_bbox
 
 
 
@@ -38,7 +42,7 @@ def _lpca_col(prefix: str, win: int, thr: float, suffix: str = "") -> str:
     return f"lpca_{prefix}_w{win}_t{int(round(thr*100)):02d}{suffix}"
 
 
-RF_FEATURES_V2: tuple[str, ...] = (
+FEATURES_V2: tuple[str, ...] = (
     # extract_candidates geometry / prob features
     "area", "bbox_h", "bbox_w", "aspect", "elongation",
     "max_p", "mean_p", "top5_mean_p", "integrated_logit",
@@ -98,8 +102,8 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
 #   3. reuse a per-panel scratch buffer (buf[:Hl,:Wl].fill(0)) instead of np.zeros.
 # REQUIREMENT: any change here MUST be guarded by a bit-equivalence test — compute
 # the full 72-feature matrix on a sample of test_5sigma candidates before and after
-# and assert identical — because the RF (models/rf_postproc.pkl) and the verified
-# 96.0% recall depend on these feature values being unchanged.
+# and assert identical — because the emitted trail geometry (mf_length/beta/snr) and the
+# verified 96.0% recall depend on these feature values being unchanged.
 # ------------------------------------------------------------------------------
 
 
@@ -492,14 +496,15 @@ def compute_v2_features(
     orient_mode: str = "pca",
     verbose: bool = False,
 ):
-    """Extract candidates and compute the full RF feature set.
+    """Extract candidates and compute the full ``FEATURES_V2`` set + trail geometry.
 
     All array-like inputs can be either an (N, H, W) array or a {pid: array}
     mapping. orient_sin / orient_cos / orient_agg should be the model's
     auxiliary outputs (see `predict_panel_overlap_3ch_full`).
 
-    Returns (cand_df, panel_probs_dict). panel_probs_dict can be passed to
-    `materialize_label_mask_v2` for fast mask reconstruction after filtering.
+    Returns (cand_df, panel_probs_dict). cand_df carries the per-candidate centroid
+    (`x_centroid`/`y_centroid`), trail geometry (`mf_length`/`mf_beta`/`mf_snr`/`mf_flux`)
+    and the `FEATURES_V2` columns; panel_probs_dict is the thresholded prob map per panel.
     """
     panel_probs = to_panel_dict(panel_probs)
     diffims     = to_panel_dict(diffim_panels)
@@ -589,5 +594,80 @@ def compute_v2_features(
         print(f"  [v2] orient          {time.time()-t:.1f}s", flush=True)
 
     return cand_df, panel_probs
+
+
+def label_candidates_by_injection_overlap(
+    cand_df,
+    catalog,
+    panel_probs,
+    *,
+    psf_width: int = 40,
+) -> np.ndarray:
+    """Return (N,) int8 labels aligned with cand_df: 1 iff the candidate's connected component
+    overlaps any catalog injection trail.
+
+    This mirrors ``objectwise_confusion``'s matching exactly, so the candidate-level labels and
+    the eval metric agree — important when training a candidate-level filter (the stage-2 CNN).
+
+    Args:
+        cand_df: candidate DataFrame from ``compute_v2_features``.
+        catalog: DataFrame with columns image_id, x, y, beta, trail_length.
+        panel_probs: (N, H, W) probability array OR {pid: (H, W) array}.
+        psf_width: PSF width passed into ``draw_one_line`` for the trail mask.
+    """
+    from ADCNN.utils.helpers import draw_one_line  # local import (cv2 optional)
+
+    probs_dict = to_panel_dict(panel_probs)
+    pid_sample = next(iter(probs_dict.values()))
+    H, W = pid_sample.shape
+    half_psf = psf_width // 2
+    structure = ndi.generate_binary_structure(2, 2)
+
+    # Build per-panel injection coverage mask
+    inj_mask_by_pid = {}
+    for pid, sub in catalog.groupby("image_id"):
+        pid = int(pid)
+        if pid not in probs_dict:
+            continue
+        canvas = np.zeros((H, W), dtype=np.uint8)
+        for _, row in sub.iterrows():
+            x = float(row["x"]); y = float(row["y"])
+            beta = float(row["beta"]); L = float(row["trail_length"])
+            pad = half_psf + 4
+            x0, x1, y0, y1 = trail_bbox(x, y, beta, L, H, W, pad)
+            if x1 <= x0 or y1 <= y0:
+                continue
+            roi_h = y1 - y0; roi_w = x1 - x0
+            try:
+                m = draw_one_line(
+                    np.zeros((roi_h, roi_w), dtype=np.uint8),
+                    (x - x0, y - y0), beta, L,
+                    true_value=1, line_thickness=half_psf,
+                )
+                canvas[y0:y1, x0:x1] |= m.astype(np.uint8)
+            except Exception:
+                cy = int(y); cx = int(x)
+                if 0 <= cy < H and 0 <= cx < W:
+                    canvas[cy, cx] = 1
+        inj_mask_by_pid[pid] = canvas.astype(bool)
+
+    labels = np.zeros(len(cand_df), dtype=np.int8)
+    for pid, idxs in cand_df.groupby("panel_id").indices.items():
+        pid = int(pid)
+        if pid not in probs_dict:
+            continue
+        inj_mask = inj_mask_by_pid.get(pid)
+        if inj_mask is None or not inj_mask.any():
+            continue
+        sub = cand_df.iloc[idxs]
+        panel = probs_dict[pid].astype(np.float32, copy=False)
+        eff = float(sub["effective_t_low"].iloc[0])
+        cc_labels, _ = ndi.label(panel > eff, structure=structure)
+        intersect = set(int(v) for v in np.unique(cc_labels[inj_mask]) if v > 0)
+        cids = sub["candidate_id"].astype(int).to_numpy()
+        for j, cid in zip(idxs, cids):
+            if int(cid) in intersect:
+                labels[j] = 1
+    return labels
 
 

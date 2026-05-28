@@ -133,7 +133,7 @@ def _fit_panel(args):
                         len_db=float(abs(Lf)), theta=float(np.degrees(th) % 180), veres_rchi=rchi,
                         flux=float(flux), snr=float(snr), mag=mag, mag_err=mag_err,
                         band=str(d.get("band", "r"))[:1] or "r", obscode="I11",
-                        score_rf=float(d.get("score_rf", np.nan)),
+                        score=float(d.get("score", np.nan)),
                         visit=int(visit), detector=int(detector)))
     return out
 

@@ -7,8 +7,8 @@ import sys, argparse, numpy as np, pandas as pd, h5py, torch
 from pathlib import Path
 REPO=Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"); sys.path.insert(0,str(REPO))
 from ADCNN.inference.predict import predict_panel_overlap_3ch_full
-from ADCNN.inference.features import compute_v2_features, RF_FEATURES_V2
-from ADCNN.inference.rf_postproc import label_candidates_by_injection_overlap
+from ADCNN.inference.features import compute_v2_features, FEATURES_V2
+from ADCNN.inference.features import label_candidates_by_injection_overlap
 
 ap=argparse.ArgumentParser(); ap.add_argument("h5"); ap.add_argument("csv"); ap.add_argument("out")
 ap.add_argument("--k",type=int,default=48); ap.add_argument("--fp-cap",type=int,default=600); ap.add_argument("--chunk",type=int,default=40)
@@ -43,7 +43,7 @@ with h5py.File(a.h5,"r") as f:
         if len(cand):
             lab=label_candidates_by_injection_overlap(cand,cat,{pid:prob})
             s=float(np.median(np.abs(img-np.median(img)))*1.4826) or 1.0
-            feat=cand[list(RF_FEATURES_V2)].fillna(0.0).to_numpy(np.float32)
+            feat=cand[list(FEATURES_V2)].fillna(0.0).to_numpy(np.float32)
             keep=set(range(len(cand)))
             if a.fp_cap>0:
                 fp_i=[i for i in range(len(cand)) if lab[i]==0]
@@ -57,5 +57,5 @@ with h5py.File(a.h5,"r") as f:
             print(f"  panel {pid}: {len(cand)} cand, {int((lab==1).sum())} TP",flush=True)
         if len(chunk_pids)>=a.chunk: flush()
 flush()
-np.save(OUT/"feat_names.npy",np.array(list(RF_FEATURES_V2)))
+np.save(OUT/"feat_names.npy",np.array(list(FEATURES_V2)))
 print(f"CUTOUTS DONE: {len(done)} panels -> {OUT}/ ({len(list(OUT.glob('part_*.npz')))} parts)")
