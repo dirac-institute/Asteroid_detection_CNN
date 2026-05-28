@@ -13,7 +13,7 @@ cd "$HL"
 # Stage 2: precise per-panel-PSF Veres trailed fit -> accurate sky endpoints (parallel over panels).
 python -u veres_measure_catalog.py \
   --dets "$RUN/adcnn_dets.csv" --manifest "$MANIFEST" \
-  --score-min "$RF_THR" --length-min "$MEAS_LENGTH_MIN" --workers "$MEAS_WORKERS" \
+  --length-min "$MEAS_LENGTH_MIN" --workers "$MEAS_WORKERS" \
   --out "$RUN/adcnn_dets_veres.csv"
 # also build the stack diaSource catalog (carries Rubin real/bogus reliability + trailLength)
 python -u butler_diasource_catalog.py --manifest "$MANIFEST" \

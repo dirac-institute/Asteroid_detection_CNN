@@ -11,11 +11,12 @@ source "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiment
 eval "$TORCH_ENV"
 cd "$HL"
 
-# Stage 3a: FP-clean + merge. real/bogus reliability on diaSources ONLY (TP-safe); ADCNN kept at a
-# low threshold (NO real/bogus -> preserve low-SNR trails), linking rejects its FP.
+# Stage 3a: FP-clean + merge. real/bogus reliability on diaSources ONLY (TP-safe); ADCNN gets NO
+# score cut (done once at detect) and NO real/bogus -> linking rejects its FP. Fast-mover cut is on
+# the Veres-measured length (CLEAN_LENDB_MIN).
 python "$PIPE/clean_fp.py" --adcnn "$RUN/adcnn_dets_veres.csv" --dia "$DIASRC" \
   --out "$RUN/adcnn_dets_clean.csv" \
-  --adcnn-score-min "$ADCNN_SCORE_MIN" --dia-reliability-min "$DIA_RELIABILITY_MIN" --lendb-min "$CLEAN_LENDB_MIN"
+  --dia-reliability-min "$DIA_RELIABILITY_MIN" --lendb-min "$CLEAN_LENDB_MIN"
 
 # Stage 3b: trail->tracklets -> grid-parallel HelioLinC -> link_refine -> crossmatch -> CONFIRMED/NEW
 DETS="$RUN/adcnn_dets_clean.csv" LENDB_MIN="$CLEAN_LENDB_MIN" \

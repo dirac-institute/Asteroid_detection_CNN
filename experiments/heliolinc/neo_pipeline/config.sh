@@ -24,19 +24,22 @@ RF_THR=${RF_THR:-0.5}                # RF operating point (only used when FILTER
 N_GPUS=${N_GPUS:-4}
 
 # ---- stage 2: measure (Veres trailed fit, CPU) ----------------------------
-MEAS_LENGTH_MIN=${MEAS_LENGTH_MIN:-6}    # de-biased trail length px (the `length` col == len_db); 6px ≈ 1 deg/day,
-# the fast-mover floor we target + matches CLEAN_LENDB_MIN. WAS 40 -> dropped ALL fast movers (their length
-# is median ~10px, 95th ~29px; <0.1% reach 40) -> 0 known recovered. At 6 -> ~224k dets measured, the full
-# >1 deg/day population (144 linkable known fast objects available vs 0).
+# MEAS_LENGTH_MIN is a SPEED PRE-GATE ONLY (not a quality cut, not a score filter): which detections
+# are worth the expensive Veres fit, judged on the ADCNN de-biased length (the accurate Veres length
+# isn't computed yet). Keep it loose; the real >1 deg/day cut is applied later on the Veres length
+# (CLEAN_LENDB_MIN). WAS 40 -> demanded ~7 deg/day and dropped ALL fast movers (their ADCNN length is
+# median ~10px); 6px ≈ 1 deg/day.
+MEAS_LENGTH_MIN=${MEAS_LENGTH_MIN:-6}
 MEAS_WORKERS=${MEAS_WORKERS:-60}
 
 # ---- stage 3: clean FP (dual-stream, validated on truth) -------------------
 # diaSources (stack): Rubin real/bogus RELIABILITY cut (TP-safe: 95.7% TP / 93.6% FP removed).
-# ADCNN: NO real/bogus (its SNR-floor + trail-ceiling would drop faint/fast trails) -> keep at a
-#        LOW score threshold and let LINKING reject FP. See [[realbogus-fp-filter-limits]].
-ADCNN_SCORE_MIN=${ADCNN_SCORE_MIN:-0.3}      # low -> preserve low-SNR / faint trails
+# ADCNN: NO score cut here -- the stage-2 FP/score cut already happened ONCE at detect (CNN); a
+#        second score threshold here would be a redundant, contradictory filter. NO real/bogus either
+#        (its SNR-floor + trail-ceiling drop faint/fast trails) -> LINKING rejects residual FP. See
+#        [[realbogus-fp-filter-limits]].
 DIA_RELIABILITY_MIN=${DIA_RELIABILITY_MIN:-0.5}   # real/bogus, diaSources ONLY
-CLEAN_LENDB_MIN=${CLEAN_LENDB_MIN:-6}        # de-biased length px; ~6px ≈ 1 deg/day (fast movers)
+CLEAN_LENDB_MIN=${CLEAN_LENDB_MIN:-6}        # VERES-measured trail length px (accurate); ~6px ≈ 1 deg/day = the real fast-mover cut
 DIASRC=${DIASRC:-$RUN/diasources.csv}        # stack diaSource catalog (reliability + trailLength)
 
 # ---- stage 4: link (grid-parallel HelioLinC) ------------------------------

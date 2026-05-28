@@ -15,7 +15,7 @@ across panels (lsst_distrib env, CPU).
 
     setup lsst_distrib
     python veres_measure_catalog.py --dets run_wide/adcnn_dets.csv --manifest run_wide/manifest.csv \
-        --score-min 0.5 --length-min 60 --out run_wide_v2/adcnn_dets_veres.csv --workers 32
+        --length-min 6 --out run_wide_v2/adcnn_dets_veres.csv --workers 32
 """
 from __future__ import annotations
 import argparse
@@ -124,18 +124,23 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dets", default=str(REPO / "experiments/heliolinc/run_wide/adcnn_dets.csv"))
     ap.add_argument("--manifest", default=str(REPO / "experiments/heliolinc/run_wide/manifest.csv"))
-    ap.add_argument("--score-min", type=float, default=0.5)
-    ap.add_argument("--length-min", type=float, default=60.0, help="raw mf_length cut (biased px) -> trailed/fast movers")
+    # length-min is a SPEED pre-gate ONLY: it picks which detections are worth the (expensive) Veres
+    # fit, using the ADCNN trail length because the accurate Veres length isn't computed yet. It is
+    # NOT a quality cut and is NOT a score filter -- the stage-2 FP/score cut already happened ONCE at
+    # detect (CNN score). The precise >1 deg/day length cut is applied later, in clean_fp on the
+    # Veres-measured length. Keep this loose enough to not pre-drop borderline fast movers.
+    ap.add_argument("--length-min", type=float, default=6.0,
+                    help="ADCNN trail-length pre-gate (px) for which dets to Veres-fit (speed only, NOT a cut)")
     ap.add_argument("--workers", type=int, default=32)
     ap.add_argument("--out", default=str(REPO / "experiments/heliolinc/run_wide_v2/adcnn_dets_veres.csv"))
     a = ap.parse_args()
 
     d = pd.read_csv(a.dets)
-    d = d[(d.score_rf >= a.score_min) & (d.length >= a.length_min)].copy()
+    d = d[d.length >= a.length_min].copy()   # ADCNN-length speed pre-gate only; no score re-filter (done at detect)
     man = pd.read_csv(a.manifest)[["visit", "detector", "fits_path"]].drop_duplicates(["visit", "detector"])
     d = d.merge(man, on=["visit", "detector"], how="inner")
-    print(f"[veres-measure] {len(d)} trailed dets over {d.groupby(['visit','detector']).ngroups} panels "
-          f"(score>={a.score_min}, length>={a.length_min}px)", flush=True)
+    print(f"[veres-measure] {len(d)} dets to fit over {d.groupby(['visit','detector']).ngroups} panels "
+          f"(ADCNN length>={a.length_min}px pre-gate; score cut already applied at detect)", flush=True)
 
     tasks = []
     for (v, det), g in d.groupby(["visit", "detector"]):

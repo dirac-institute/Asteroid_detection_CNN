@@ -4,14 +4,17 @@ Two detection streams feed the linker, cleaned DIFFERENTLY (validated on truth):
   • diaSources (5σ stack): apply Rubin's real/bogus RELIABILITY cut (≥thr & !isNegative).
       On truth this keeps 95.7% of TP while removing 93.6% of FP — a clean, TP-safe FP cleaner
       for the stack stream.
-  • ADCNN detections: DO NOT apply real/bogus here. Tested (rb_synthetic_test.py): the point-source
-      real/bogus model has an SNR floor (0% kept <SNR5) and a trail-length ceiling (>30px), so it
-      would discard exactly ADCNN's faint/fast trails. Instead keep ADCNN at a LOW score threshold
-      and let multi-epoch ORBITAL LINKING reject its FP (a faint real trail recurs on a consistent
-      orbit; faint noise does not). See [[realbogus-fp-filter-limits]], [[linking-needs-recall]].
+  • ADCNN detections: DO NOT apply any FP/score cut here. The stage-2 false-positive cut already
+      happened ONCE upstream (the CNN score at detect); re-thresholding the same score here would be
+      a redundant, contradictory second filter. Nor do we apply real/bogus (tested,
+      rb_synthetic_test.py: its SNR floor + >30px trail ceiling would discard exactly ADCNN's
+      faint/fast trails). ADCNN's residual FP are left for multi-epoch ORBITAL LINKING to reject (a
+      faint real trail recurs on a consistent orbit; faint noise does not). See
+      [[realbogus-fp-filter-limits]], [[linking-needs-recall]].
 
-Both streams are restricted to trailed/fast candidates (de-biased trail length ≥ lendb_min ~6px ≈
-1 deg/day) and merged into one catalog with sky endpoints for trail_tracklets.
+Both streams are restricted to fast/trailed candidates by the **Veres-measured** trail length
+(len_db ≥ lendb_min ~6px ≈ 1 deg/day — the accurate forward-model length, not the ADCNN estimate)
+and merged into one catalog with sky endpoints for trail_tracklets.
 
     python clean_fp.py --adcnn adcnn_dets_veres.csv --dia diasources.csv --out dets_clean.csv
 """
@@ -31,21 +34,20 @@ def main():
     ap.add_argument("--adcnn", required=True, help="ADCNN Veres-measured catalog (sky endpoints, len_db)")
     ap.add_argument("--dia", default=None, help="stack diaSource catalog (reliability, trailLength)")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--adcnn-score-min", type=float, default=0.3, help="LOW threshold -> keep faint/low-SNR trails")
     ap.add_argument("--dia-reliability-min", type=float, default=0.5, help="real/bogus cut (diaSources ONLY)")
-    ap.add_argument("--lendb-min", type=float, default=6.0, help="de-biased trail length px (~1 deg/day) — fast movers")
+    ap.add_argument("--lendb-min", type=float, default=6.0,
+                    help="Veres-measured trail length px (~1 deg/day) — the fast-mover cut (accurate length)")
     a = ap.parse_args()
 
     parts = []
-    # --- ADCNN stream: low threshold, trailed; NO real/bogus (preserve low-SNR trails) ---
+    # --- ADCNN stream: keep fast/trailed by the ACCURATE Veres length; NO score cut (done once at
+    #     detect), NO real/bogus (preserve low-SNR trails) -> linking rejects residual FP. ---
     ad = pd.read_csv(a.adcnn)
     n0 = len(ad)
-    if "score_rf" in ad:
-        ad = ad[ad.score_rf >= a.adcnn_score_min]
-    if "len_db" in ad:
+    if "len_db" in ad:                       # len_db here = Veres-fit length (adcnn_dets_veres.csv)
         ad = ad[ad.len_db >= a.lendb_min]
     ad["source"] = "adcnn"
-    print(f"[clean] ADCNN {n0} -> {len(ad)} (score>={a.adcnn_score_min}, len_db>={a.lendb_min}; NO real/bogus)", flush=True)
+    print(f"[clean] ADCNN {n0} -> {len(ad)} (Veres len_db>={a.lendb_min}px; no score cut, no real/bogus)", flush=True)
     parts.append(ad)
 
     # --- diaSource stream: real/bogus reliability cut (TP-safe FP cleaner), trailed ---
