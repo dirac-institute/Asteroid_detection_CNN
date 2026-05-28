@@ -171,6 +171,7 @@ def evaluate_catalog(
     *,
     tol_px: float = 20.0,
     flag_col: str = "nn_detected",
+    n_panels: int | None = None,
 ) -> tuple[dict[str, float], pd.DataFrame]:
     """Catalog-based evaluation entry point.
 
@@ -182,6 +183,10 @@ def evaluate_catalog(
         measured / truth: DataFrames or paths to CSVs.
         tol_px: fixed trail-overlap tolerance (pixels), chosen in advance.
         flag_col: name of the boolean detection flag added to the truth catalog.
+        n_panels: total panels processed, for the ``fp_per_panel`` denominator. If None it is
+            inferred as the panels carrying a detection OR a truth trail (so empty-background
+            panels that produced false positives are still counted); pass the exact panel count
+            (e.g. the h5 image count) for full correctness on sets with all-empty panels.
 
     Returns:
         ``(counts, truth_out)`` where ``counts`` has ``TP, FP, FN`` plus derived
@@ -192,7 +197,17 @@ def evaluate_catalog(
     truth_out, _, counts = match_trail_catalogs(
         measured_df, truth_df, tol_px=tol_px, flag_col=flag_col,
     )
-    n_panels = int(truth_df["image_id"].nunique()) if "image_id" in truth_df.columns else 0
+    if n_panels is None:
+        # Old code used truth_df.image_id.nunique(), which omitted empty-injection panels (no
+        # truth rows) whose FPs were still counted -> inflated fp_per_panel. Use the union of
+        # panels seen in `measured` or `truth` instead.
+        ids: set = set()
+        if "image_id" in measured_df.columns:
+            ids |= set(measured_df["image_id"].unique())
+        if "image_id" in truth_df.columns:
+            ids |= set(truth_df["image_id"].unique())
+        n_panels = len(ids)
+    n_panels = int(n_panels)
     metrics: dict[str, float] = dict(counts)
     metrics["recall"] = counts["TP"] / max(counts["TP"] + counts["FN"], 1)
     metrics["n_panels"] = n_panels

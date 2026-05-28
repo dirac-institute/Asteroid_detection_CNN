@@ -144,22 +144,35 @@ def load_cutout_parts(path):
 # ---------------------------------------------------------------------------
 # Focal-loss training
 # ---------------------------------------------------------------------------
-def _focal_loss_fn(pos_weight):
-    """Focal-modulated BCE-with-logits: ((1 - p_t)^2) * BCE, with class-balancing pos_weight."""
+def _focal_loss_fn(pos_weight, gamma: float = 2.0, alpha: float | None = None):
+    """Focal-modulated BCE-with-logits: ((1 - p_t)^gamma) * BCE.
+
+    Default (alpha=None) keeps the class-balancing ``pos_weight`` INSIDE the BCE -- this is what the
+    DEPLOYED ``models/cnn_postproc.pt`` was trained with, kept as the reproducible default. Note that
+    combining ``pos_weight`` with the focal modulator is non-standard (it double-counts the class
+    imbalance); to retrain with the canonical alpha-balanced focal loss instead, pass ``alpha`` (e.g.
+    0.25), which drops ``pos_weight`` and applies a per-class alpha factor.
+    """
     import torch
     import torch.nn.functional as F
 
     def loss(logits, targets):
         p = torch.sigmoid(logits)
-        ce = F.binary_cross_entropy_with_logits(logits, targets, reduction="none", pos_weight=pos_weight)
-        return ((1 - torch.where(targets == 1, p, 1 - p)) ** 2 * ce).mean()
+        p_t = torch.where(targets == 1, p, 1 - p)
+        mod = (1 - p_t) ** gamma
+        if alpha is None:
+            ce = F.binary_cross_entropy_with_logits(logits, targets, reduction="none", pos_weight=pos_weight)
+            return (mod * ce).mean()
+        ce = F.binary_cross_entropy_with_logits(logits, targets, reduction="none")
+        a_t = torch.where(targets == 1, alpha, 1.0 - alpha)
+        return (a_t * mod * ce).mean()
     return loss
 
 
 def train_cnn(X, y, panel=None, *, width: int = NET_WIDTH, epochs: int = EPOCHS, lr: float = LR,
               weight_decay: float = WEIGHT_DECAY, batch_size: int = BATCH_SIZE,
               holdout_frac: float = HOLDOUT_FRAC, recall_target: float = RECALL_TARGET,
-              device: str = "cuda", seed: int = 7):
+              focal_alpha: float | None = None, device: str = "cuda", seed: int = 7):
     """Fit the focal-loss cutout CNN on cutouts `X`(N,3,k,k) with labels `y`(N).
 
     A PANEL-DISJOINT holdout (by `panel`, when given) is used only to report the operating
@@ -192,7 +205,7 @@ def train_cnn(X, y, panel=None, *, width: int = NET_WIDTH, epochs: int = EPOCHS,
 
     net = build_net(width).to(dev)
     opt = torch.optim.AdamW(net.parameters(), lr, weight_decay=weight_decay)
-    loss_fn = _focal_loss_fn(pw)
+    loss_fn = _focal_loss_fn(pw, alpha=focal_alpha)
 
     def score(Xa):
         net.eval()

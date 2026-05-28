@@ -117,6 +117,15 @@ def _round_box(ax, cx, cy, w, h, color, lw=1.0, z=2, alpha=1.0, ec=None):
                 cx=cx, cy=cy)
 
 
+def _save(fig, savepath):
+    """Save a figure as 300-dpi PNG + a sibling vector PDF, robust to any input suffix."""
+    if not savepath:
+        return
+    p = Path(savepath)
+    fig.savefig(p, dpi=300)
+    fig.savefig(p.with_suffix(".pdf"))
+
+
 # --------------------------------------------------------------------------------------------------
 # model loading + tracing  (everything below reads the real architecture)
 # --------------------------------------------------------------------------------------------------
@@ -351,7 +360,7 @@ def plot_unet(spec, savepath=None):
     ax.set_xlim(xin - 2.5, XR + 9.7)
     ax.set_ylim(ylev(L - 1) - 1.4, ylev(0) + 2.15)
     if savepath:
-        fig.savefig(savepath, dpi=300); fig.savefig(str(savepath).replace(".png", ".pdf"))
+        _save(fig, savepath)
     return fig
 
 
@@ -389,7 +398,7 @@ def plot_resse_block(spec, savepath=None):
     _label(ax, x / 2 - 0.4, 1.12, "identity (residual)", size=8.0, color=PALETTE["skip"])
     ax.set_xlim(-1.8, x + 1.8); ax.set_ylim(-1.0, 1.45)
     if savepath:
-        fig.savefig(savepath, dpi=300); fig.savefig(str(savepath).replace(".png", ".pdf"))
+        _save(fig, savepath)
     return fig
 
 
@@ -403,9 +412,8 @@ def plot_hough(spec, savepath=None):
     ax.set_title("Hough line-aggregator", fontsize=13, weight="bold", pad=12)
     h = spec["hough"]
     if not h:
-        _label(ax, 0.5, 0.5, "no Hough aggregator", size=11);
-        if savepath:
-            fig.savefig(savepath, dpi=300)
+        _label(ax, 0.5, 0.5, "no Hough aggregator", size=11)
+        _save(fig, savepath)
         return fig
     # input: the raw seg logit from the U-Net head
     _label(ax, 0.06, 0.62, "raw seg logit\n(from U-Net head)", size=8.6, ha="center")
@@ -443,7 +451,7 @@ def plot_hough(spec, savepath=None):
     _label(ax, 0.965, 0.16, "detection\nprobability", size=8.4, ha="left")
     ax.set_xlim(0.0, 1.12); ax.set_ylim(0.0, 0.95)
     if savepath:
-        fig.savefig(savepath, dpi=300); fig.savefig(str(savepath).replace(".png", ".pdf"))
+        _save(fig, savepath)
     return fig
 
 
@@ -494,11 +502,10 @@ def plot_filter_cnn(spec, thr=0.63, savepath=None):
     kb = _round_box(ax, x, 0.2, 1.5, 0.7, PALETTE["keep"], alpha=0.9)
     _label(ax, x, 0.2, f"keep if\nscore ≥ {thr}", size=8.2, color="white", weight="bold")
     _arrow(ax, sb["r"], kb["l"], lw=1.7)
-    _label(ax, x, -1.05, "op-point matched to RF FP/panel\n(thr 0.63: 72.5 FP/panel, recall 0.75)",
-           size=7.6, color="#555")
+    _label(ax, x, -1.05, f"stage-2 operating point: score ≥ {thr}", size=7.8, color="#555")
     ax.set_xlim(-0.3, x + 1.55); ax.set_ylim(-1.6, 1.9)
     if savepath:
-        fig.savefig(savepath, dpi=300); fig.savefig(str(savepath).replace(".png", ".pdf"))
+        _save(fig, savepath)
     return fig
 
 
@@ -550,7 +557,7 @@ def plot_system(seg_spec=None, cnn_spec=None, savepath=None):
         prev = a; x += dx
     ax.set_xlim(-0.9, x - dx + 0.9); ax.set_ylim(-1.7, 1.5)
     if savepath:
-        fig.savefig(savepath, dpi=300); fig.savefig(str(savepath).replace(".png", ".pdf"))
+        _save(fig, savepath)
     return fig
 
 
@@ -577,11 +584,14 @@ def make_architecture_figures(seg_path="models/v7_diffim_scripted.pt",
         figs["unet"] = plot_unet(seg_spec, savepath=out("unet"))
         figs["resse_block"] = plot_resse_block(seg_spec, savepath=out("resse_block"))
         figs["hough"] = plot_hough(seg_spec, savepath=out("hough"))
+        _alpha = seg_spec["hough"]["alpha"] if seg_spec.get("hough") else float("nan")
         print(f"[architecture] seg: in_ch={in_ch} widths={widths} out_ch={seg_spec['out_ch']} "
-              f"levels={len(seg_spec['encoder'])} hough_alpha={seg_spec['hough']['alpha']:.3f}")
+              f"levels={len(seg_spec['encoder'])} hough_alpha={_alpha:.3f}")
     except Exception as e:
+        import traceback
         seg_spec = None
         print(f"[architecture] segmentation figures skipped: {type(e).__name__}: {e}")
+        traceback.print_exc()
 
     try:
         cnn = load_cnn(cnn_path)

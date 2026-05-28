@@ -162,8 +162,15 @@ def main():
 
     # --- Stage 2: cutout CNN (focal FP filter, on the trained v7's held-out val candidates) ---
     if not a.skip_cnn:
+        import json
         from ADCNN.training.cnn_postproc import train_cnn_from_val
-        val_ids = sorted(pd.read_csv(a.val_csv)["image_id"].unique())[: recipe.n_val_panels]
+        # Use the EXACT panels stage 1 held out (split.json) so the FP-filter CNN is never built on
+        # panels v7 trained on. Fall back to the deterministic multi-source selection only if absent.
+        split = run_dir / "split.json"
+        if split.exists():
+            val_ids = json.loads(split.read_text())["val_panels"]
+        else:
+            val_ids = sorted(pd.read_csv(a.val_csv)["image_id"].unique())[: recipe.n_val_panels]
         cnn_out = Path(a.models_dir) / f"{a.run_name}_cnn_postproc.pt"
         train_cnn_from_val(scripted, a.val_h5, a.val_csv, val_ids, cnn_out,
                            epochs=recipe.cnn_epochs, fp_cap=recipe.cnn_fp_cap)
