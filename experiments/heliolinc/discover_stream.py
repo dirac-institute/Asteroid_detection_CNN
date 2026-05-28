@@ -122,7 +122,10 @@ def run_shard(gpu_id, rows, v7_ckpt, filt_model, filt, thr, prefetch, out_csv, n
             sky0 = wcs.all_pix2world(np.stack([xy[:, 0] - hdx, xy[:, 1] - hdy], 1), 0)
             sky1 = wcs.all_pix2world(np.stack([xy[:, 0] + hdx, xy[:, 1] + hdy], 1), 0)
             out = pd.DataFrame(dict(
-                mjd=mjd, ra=sky[:, 0], dec=sky[:, 1], mag=21.0, band=str(r["band"])[:1] or "r",
+                # mag is NOT set here: the GPU streaming detector has no PhotoCalib. The calibrated AB
+                # magnitude (+ SNR) is MEASURED downstream in veres_measure_catalog (which loads the
+                # difference_image.photoCalib). NaN = not-yet-measured, never a placeholder value.
+                mjd=mjd, ra=sky[:, 0], dec=sky[:, 1], mag=np.nan, band=str(r["band"])[:1] or "r",
                 obscode=OBSCODE, visit=int(r["visit"]), detector=int(r["detector"]),
                 x=xy[:, 0], y=xy[:, 1], score_rf=cand["score_rf"].to_numpy(),
                 length=cand["length"].to_numpy(), len_db=L_db, mf_snr=cand["mf_snr"].to_numpy(),

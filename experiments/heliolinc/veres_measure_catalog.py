@@ -64,8 +64,9 @@ def _fit_panel(args):
 
     try:
         b = _BUTLER  # reused per-worker Butler (set in _worker_init)
-        psf = b.get("difference_image.psf", dataId={"instrument": "LSSTCam",
-                                                    "visit": int(visit), "detector": int(detector)})
+        _did = {"instrument": "LSSTCam", "visit": int(visit), "detector": int(detector)}
+        psf = b.get("difference_image.psf", dataId=_did)
+        photocalib = b.get("difference_image.photoCalib", dataId=_did)  # for calibrated AB magnitudes
         with fits.open(fits_path, memmap=False) as h:
             img = np.nan_to_num(h[1].data.astype(np.float32))
             var = np.nan_to_num(h[3].data.astype(np.float32))
@@ -101,12 +102,28 @@ def _fit_panel(args):
         try:
             r = sciOpt.minimize(model, seed, method="L-BFGS-B", jac=model.gradient, bounds=bounds,
                                 options=dict(maxiter=500))
-            xc, yc, flux, Lf, th = r.x
+            xc, yc, _, Lf, th = r.x          # NB: L-BFGS-B doesn't optimise the flux dim; measure it below
             rchi = float(r.fun / max(cut.image.array.size - 6, 1))
         except Exception:
             continue
         if not np.isfinite(Lf) or Lf < 2.0 or Lf > 295.0:   # reject collapsed/runaway fits
             continue
+        # PHOTOMETRY (measured, no placeholder): the analytic optimal flux for the fitted trail shape
+        # (VeresModel.computeFluxWithGradient), its matched-filter SNR from the unit-flux trail model
+        # vs the diffim variance, and the calibrated AB magnitude via the difference_image PhotoCalib.
+        try:
+            flux = float(model.computeFluxWithGradient(r.x)[0])      # diffim instFlux (nJy here)
+            munit = np.asarray(model.computeModelImage([xc, yc, 1.0, Lf, th]).array, np.float64)
+            cvar = cut.variance.array
+            wsum = float(np.nansum(munit ** 2 / np.where(cvar > 0, cvar, np.inf)))
+            snr = flux * np.sqrt(wsum) if wsum > 0 else float("nan")
+            if flux > 0 and np.isfinite(snr) and snr > 0:
+                meas = photocalib.instFluxToMagnitude(flux, flux / snr)
+                mag, mag_err = float(meas.value), float(meas.error)
+            else:
+                mag, mag_err = float("nan"), float("nan")
+        except Exception:
+            flux = snr = mag = mag_err = float("nan")
         a = Lf / 2.0
         ex0, ey0 = xc - a * np.cos(th), yc - a * np.sin(th)
         ex1, ey1 = xc + a * np.cos(th), yc + a * np.sin(th)
@@ -114,8 +131,9 @@ def _fit_panel(args):
         out.append(dict(detid=int(d.get("detid", -1)), mjd=float(d["mjd"]), ra=float(ra), dec=float(dec),
                         ra0=float(ra0), dec0=float(dec0), ra1=float(ra1), dec1=float(dec1),
                         len_db=float(abs(Lf)), theta=float(np.degrees(th) % 180), veres_rchi=rchi,
-                        mag=float(d.get("mag", 21.0)), band=str(d.get("band", "r"))[:1] or "r",
-                        obscode="I11", score_rf=float(d.get("score_rf", np.nan)),
+                        flux=float(flux), snr=float(snr), mag=mag, mag_err=mag_err,
+                        band=str(d.get("band", "r"))[:1] or "r", obscode="I11",
+                        score_rf=float(d.get("score_rf", np.nan)),
                         visit=int(visit), detector=int(detector)))
     return out
 
@@ -172,7 +190,8 @@ def main():
     out.to_csv(a.out, index=False)
     print(f"[veres-measure] wrote {len(out)} Veres-measured detections -> {a.out}", flush=True)
     if len(out):
-        print(f"  Veres length px: med {out.len_db.median():.1f} | rChiSq med {out.veres_rchi.median():.2f}", flush=True)
+        print(f"  Veres length px: med {out.len_db.median():.1f} | rChiSq med {out.veres_rchi.median():.2f} | "
+              f"mag med {out.mag.median():.2f} | SNR med {out.snr.median():.1f}", flush=True)
     print("VERES MEASURE DONE", flush=True)
 
 

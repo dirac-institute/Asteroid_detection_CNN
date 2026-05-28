@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 
 COLS = ["detid", "mjd", "ra", "dec", "ra0", "dec0", "ra1", "dec1", "len_db",
-        "mag", "band", "obscode", "score_rf", "source"]
+        "flux", "snr", "mag", "mag_err", "band", "obscode", "score_rf", "source"]
 
 
 def main():
