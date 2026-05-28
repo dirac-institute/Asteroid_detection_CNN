@@ -24,7 +24,10 @@ RF_THR=${RF_THR:-0.5}                # RF operating point (only used when FILTER
 N_GPUS=${N_GPUS:-4}
 
 # ---- stage 2: measure (Veres trailed fit, CPU) ----------------------------
-MEAS_LENGTH_MIN=${MEAS_LENGTH_MIN:-40}   # raw mf_length cut (px) -> only measure trailed/fast candidates
+MEAS_LENGTH_MIN=${MEAS_LENGTH_MIN:-6}    # de-biased trail length px (the `length` col == len_db); 6px ≈ 1 deg/day,
+# the fast-mover floor we target + matches CLEAN_LENDB_MIN. WAS 40 -> dropped ALL fast movers (their length
+# is median ~10px, 95th ~29px; <0.1% reach 40) -> 0 known recovered. At 6 -> ~224k dets measured, the full
+# >1 deg/day population (144 linkable known fast objects available vs 0).
 MEAS_WORKERS=${MEAS_WORKERS:-60}
 
 # ---- stage 3: clean FP (dual-stream, validated on truth) -------------------
