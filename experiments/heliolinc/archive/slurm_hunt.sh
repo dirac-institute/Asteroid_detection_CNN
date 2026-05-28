@@ -12,5 +12,5 @@ set -eo pipefail
 # heliolinc is single-threaded and verbose -> its live progress lands in this log.
 HELIODIST=heliohypo_coarse.txt \
 bash /sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc/hunt_new.sh \
-  /sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc/run_wide_v2
+  /sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc/NEO_small_v2
 echo "SLURM HUNT WRAPPER DONE"

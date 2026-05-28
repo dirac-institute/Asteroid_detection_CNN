@@ -14,8 +14,8 @@ Per (visit,detector): butler.get the diffim PSF (component fetch), read the diff
 across panels (lsst_distrib env, CPU).
 
     setup lsst_distrib
-    python veres_measure_catalog.py --dets run_wide/adcnn_dets.csv --manifest run_wide/manifest.csv \
-        --length-min 6 --out run_wide_v2/adcnn_dets_veres.csv --workers 32
+    python veres_measure_catalog.py --dets NEO_small/adcnn_dets.csv --manifest NEO_small/manifest.csv \
+        --length-min 6 --out NEO_small_v2/adcnn_dets_veres.csv --workers 32
 """
 from __future__ import annotations
 import argparse
@@ -140,8 +140,8 @@ def _fit_panel(args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--dets", default=str(REPO / "experiments/heliolinc/run_wide/adcnn_dets.csv"))
-    ap.add_argument("--manifest", default=str(REPO / "experiments/heliolinc/run_wide/manifest.csv"))
+    ap.add_argument("--dets", default=str(REPO / "experiments/heliolinc/NEO_small/adcnn_dets.csv"))
+    ap.add_argument("--manifest", default=str(REPO / "experiments/heliolinc/NEO_small/manifest.csv"))
     # length-min is a SPEED pre-gate ONLY: it picks which detections are worth the (expensive) Veres
     # fit, using the ADCNN trail length because the accurate Veres length isn't computed yet. It is
     # NOT a quality cut and is NOT a score filter -- the stage-2 FP/score cut already happened ONCE at
@@ -150,7 +150,7 @@ def main():
     ap.add_argument("--length-min", type=float, default=6.0,
                     help="ADCNN trail-length pre-gate (px) for which dets to Veres-fit (speed only, NOT a cut)")
     ap.add_argument("--workers", type=int, default=32)
-    ap.add_argument("--out", default=str(REPO / "experiments/heliolinc/run_wide_v2/adcnn_dets_veres.csv"))
+    ap.add_argument("--out", default=str(REPO / "experiments/heliolinc/NEO_small_v2/adcnn_dets_veres.csv"))
     a = ap.parse_args()
 
     d = pd.read_csv(a.dets)

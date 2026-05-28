@@ -10,7 +10,7 @@ set -eo pipefail
 # After the array finishes: link_refine over all nodes' clusters + crossmatch vs known NEOs (recovery)
 # + classify (KNOWN / RECOVERED-NEO / NEW-clean).
 HL=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc
-RUN=$HL/run_neo_wide; BIN=$HL/heliolinc2/src
+RUN=$HL/NEO_large; BIN=$HL/heliolinc2/src
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
 cd "$RUN"

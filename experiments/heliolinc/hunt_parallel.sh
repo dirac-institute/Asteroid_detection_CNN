@@ -18,7 +18,7 @@ source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
 cp -n "$HL/run_disco/Earth1day2020s_02a.txt" "$HL/run_disco/ObsCodes.txt" \
       "$HL/run_disco/heliohypo_all.txt" "$HL/run_disco/colformat.txt" "$RUN/" 2>/dev/null || true
-cp -n "$HL/run_neo_wide/heliohypo_neo.txt" "$RUN/" 2>/dev/null || true   # NEO-targeted grid (default)
+cp -n "$HL/NEO_large/heliohypo_neo.txt" "$RUN/" 2>/dev/null || true   # NEO-targeted grid (default)
 
 # 1) trail -> tracklets
 python "$HL/trail_tracklets.py" --dets "$DETS" --earth "$RUN/Earth1day2020s_02a.txt" \

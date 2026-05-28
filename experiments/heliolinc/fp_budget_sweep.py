@@ -1,5 +1,5 @@
 """Derive HelioLinC's FP budget empirically. Fix the true-positive detections of the catalogued
-objects in a real DP2 field (run_neo_wide, 719 visits / 16 nights / 29 d); sweep the density of
+objects in a real DP2 field (NEO_large, 719 visits / 16 nights / 29 d); sweep the density of
 REAL ADCNN false positives added back (FP per visit); at each level run the full linker
 (make_tracklets -> heliolinc -> link_refine -> crossmatch) and record:
   * completeness  -- distinct known asteroids recovered / linkable ceiling
@@ -19,7 +19,7 @@ from trail_tracklets import build_tracklet_files
 
 HL = Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc")
 BIN = HL / "heliolinc2/src"
-SRC = HL / "run_neo_wide"               # source field: labeled dets + aux files
+SRC = HL / "NEO_large"               # source field: labeled dets + aux files
 AUX = ["colformat.txt", "Earth1day2020s_02a.txt", "ObsCodes.txt", "heliohypo_all.txt"]
 LINKABLE_NIGHTS = 3                      # heliolinc -minobsnights 3
 

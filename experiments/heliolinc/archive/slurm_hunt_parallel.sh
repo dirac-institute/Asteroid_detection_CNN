@@ -12,5 +12,5 @@ set -eo pipefail
 # NEO config: minobsnights=2 (fast movers cross a single field in ~2 nights, never 3).
 HELIODIST=heliohypo_all.txt NSHARD=96 MINNIGHTS=2 NPT=3 MINTIMESPAN=0.05 \
 bash /sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc/hunt_parallel.sh \
-  /sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc/run_wide_v2
+  /sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc/NEO_small_v2
 echo "SLURM PARALLEL HUNT WRAPPER DONE"

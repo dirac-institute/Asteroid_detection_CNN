@@ -13,7 +13,7 @@ setup lsst_distrib
 cd /sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc
 # Precise Veres trailed-fit measurement -> sky endpoints, for trailed (fast-mover) detections.
 python -u veres_measure_catalog.py \
-  --dets run_wide/adcnn_dets.csv --manifest run_wide/manifest.csv \
+  --dets NEO_small/adcnn_dets.csv --manifest NEO_small/manifest.csv \
   --score-min 0.5 --length-min 40 --workers 60 \
-  --out run_wide_v2/adcnn_dets_veres.csv
+  --out NEO_small_v2/adcnn_dets_veres.csv
 echo "VERES MEASURE DONE"

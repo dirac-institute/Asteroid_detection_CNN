@@ -1,5 +1,5 @@
 """#1a investigation: do the diffim MASK planes (STREAK/SPIKE/CR/SAT/...) flag ADCNN's false-positive
-streaks while sparing real asteroids? For a sample of run_neo_wide panels, read the MASK HDU and, for
+streaks while sparing real asteroids? For a sample of NEO_large panels, read the MASK HDU and, for
 each ADCNN detection, OR the mask bits over a small footprint around (x,y) AND along the trail
 (beta,len_db). Split detections into REAL (match a catalogued object within 2") vs FP and report the
 mask-overlap fraction per bit. A good free filter = high FP-on-mask, ~0 real-on-mask."""
@@ -7,7 +7,7 @@ import pandas as pd, numpy as np, random
 from astropy.io import fits
 
 HL="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc"
-RUN=f"{HL}/run_neo_wide"
+RUN=f"{HL}/NEO_large"
 BITS={"SAT":1,"CR":3,"EDGE":4,"STREAK":10,"SPIKE":19,"SENSOR_EDGE":18,"CROSSTALK":12,
       "ITL_DIP":14,"BAD":0,"SUSPECT":7,"DETECTED":5,"DETECTED_NEGATIVE":6}
 NPANELS=150

@@ -11,7 +11,7 @@ set -eo pipefail
 # NEO-rate objects (neo_truth.csv). NEO-tuned: high maxvel + NEO-distance grid (r<1.6 AU, no main
 # belt) + tight clustrad + node-local scratch.
 HL=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc
-RUN=$HL/run_neo_wide
+RUN=$HL/NEO_large
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
 

@@ -8,10 +8,10 @@ HL=$REPO/experiments/heliolinc
 PIPE=$HL/neo_pipeline
 
 # ---- run identity & I/O ----------------------------------------------------
-RUN_NAME=${RUN_NAME:-run_wide_v2}            # output dir under $HL/<RUN_NAME>
+RUN_NAME=${RUN_NAME:-NEO_small_v2}            # output dir under $HL/<RUN_NAME>
 RUN=$HL/$RUN_NAME
-MANIFEST=${MANIFEST:-$HL/run_wide/manifest.csv}   # butler diffim FITS list (visit,detector,band,fits_path)
-KNOWN=${KNOWN:-$HL/run_wide/known.csv}            # known-object sightings for crossmatch (ObjID,mjd,ra,dec)
+MANIFEST=${MANIFEST:-$HL/NEO_small/manifest.csv}   # butler diffim FITS list (visit,detector,band,fits_path)
+KNOWN=${KNOWN:-$HL/NEO_small/known.csv}            # known-object sightings for crossmatch (ObjID,mjd,ra,dec)
 
 # ---- models ----------------------------------------------------------------
 V7=${V7:-$REPO/models/v7_diffim_scripted.pt}

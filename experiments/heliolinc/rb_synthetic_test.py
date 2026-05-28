@@ -6,7 +6,7 @@ butler) on cutouts at the injected-trail centroids (TP, known length) vs random/
 (FP). Reports the reliability score of REAL trails by trail length — answering whether running
 real/bogus on ADCNN trailed detections would clean FP without killing the trailed TP.
 
-(The run_wide diaSources showed trailed->low reliability, but those may be bogus artefacts; here
+(The NEO_small diaSources showed trailed->low reliability, but those may be bogus artefacts; here
 the trails are known-real injections, so the score is unambiguous.)
 
     setup lsst_distrib

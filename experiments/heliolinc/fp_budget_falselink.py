@@ -33,7 +33,7 @@ PANEL_AREA = 0.05                     # deg^2 per detector diffim (LSST CCD)
 CLUSTRAD, GATE = 1.0e5, 2.0e3         # km: DBSCAN radius, posRMS gate
 
 # --- CADENCE SETS ---  (false-link combinatorics depend on nights & window)
-# run_neo_wide = the targeted field the MC ran on (for validating the theory mechanism)
+# NEO_large = the targeted field the MC ran on (for validating the theory mechanism)
 # LSST = baseline survey cadence: ~2 visits/night (pairs), ~3-6 nights per 15-day SSP discovery window
 import sys
 CAD = sys.argv[1] if len(sys.argv) > 1 else "LSST"

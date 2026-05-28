@@ -11,7 +11,7 @@ set -eo pipefail
 # Array task k of 4: process grid lines where (line %% 4 == k) with 90 local heliolinc shards, publish
 # clusters to shared disk. Independent single-node jobs (robust) -> ~4x faster than one node, same math.
 HL=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc
-[ "$SLURM_ARRAY_TASK_ID" = "0" ] && { rm -rf "$HL/run_neo_wide/clusters_mn"; mkdir -p "$HL/run_neo_wide/clusters_mn"; }
+[ "$SLURM_ARRAY_TASK_ID" = "0" ] && { rm -rf "$HL/NEO_large/clusters_mn"; mkdir -p "$HL/NEO_large/clusters_mn"; }
 sleep 3   # let task 0 create the shared dir
 NODE_IDX=$SLURM_ARRAY_TASK_ID NNODE=4 NSHARD=90 CLUSTRAD=${CLUSTRAD:-100000} NPT=3 MINNIGHTS=2 MINTIMESPAN=0.05 \
   bash "$HL/node_worker_neo.sh"

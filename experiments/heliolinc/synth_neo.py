@@ -89,7 +89,7 @@ if __name__ == "__main__":
     nights = [base, base+3.5, base+8.0, base+14.0]
     epochs = np.array([n + dv for n in nights for dv in (0.0, 0.02)])  # pairs ~30 min
     import time; t0=time.time()
-    df = generate(epochs, n_target=200, earth_file="run_neo_wide/Earth1day2020s_02a.txt")
+    df = generate(epochs, n_target=200, earth_file="NEO_large/Earth1day2020s_02a.txt")
     print(f"gen time {time.time()-t0:.1f}s | {df.ObjID.nunique()} NEOs, {len(df)} dets")
     # check trail length ~ rate*exptime (>=6px = >=1.25 arcsec at 1 deg/d)
     g=df.groupby("ObjID").first(); tl=np.hypot((g.ra1-g.ra0)*np.cos(np.radians(g.dec)),g.dec1-g.dec0)*3600

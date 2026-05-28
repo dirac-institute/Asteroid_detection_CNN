@@ -1,7 +1,7 @@
 """Build the NEO-distance HelioLinC hypothesis grid by filtering the full grid to r < RMAX AU.
 NEOs sit near 1 AU; cutting the main-belt distances (r>~1.6) both speeds linking and removes the
 main-belt FP chance-clusters that otherwise explode the cluster count. Usage:
-  python make_neo_grid.py --src heliohypo_all.txt --rmax 1.6 --out run_neo_wide/heliohypo_neo.txt
+  python make_neo_grid.py --src heliohypo_all.txt --rmax 1.6 --out NEO_large/heliohypo_neo.txt
 """
 import argparse
 from pathlib import Path

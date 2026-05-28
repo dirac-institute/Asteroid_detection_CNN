@@ -131,7 +131,7 @@ def synth_trails_from_ephemeris(known, exptime_s=30.0):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--known", default=str(HL / "run_wide/known.csv"))
+    ap.add_argument("--known", default=str(HL / "NEO_small/known.csv"))
     ap.add_argument("--earth", default=str(HL / "run_disco/Earth1day2020s_02a.txt"))
     ap.add_argument("--out", default=str(HL / "run_trail_validate"))
     ap.add_argument("--dets", default=None,

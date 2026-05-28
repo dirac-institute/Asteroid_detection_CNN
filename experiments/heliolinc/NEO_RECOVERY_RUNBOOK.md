@@ -11,8 +11,8 @@ end-to-end, with every detection in each track correctly belonging to one NEO (`
 | 3 | 7  | 3 | **2025 ND73** |
 | 4 | 14 | 3 | **2025 MJ1**  |
 
-Run: `run_neo_wide`. Field: RA 295–320, Dec −25..−15 (DP2 NEO ecliptic-opposition strip),
-day_obs 20250620–20250720. Output files in `run_neo_wide/`: `recovered_neo.csv`, `classified.csv`,
+Run: `NEO_large`. Field: RA 295–320, Dec −25..−15 (DP2 NEO ecliptic-opposition strip),
+day_obs 20250620–20250720. Output files in `NEO_large/`: `recovered_neo.csv`, `classified.csv`,
 `lr.csv`/`lr_rms.csv`, `adcnn_dets.csv`, `manifest.csv`, `neo_truth.csv`.
 
 DP2 is **real data** (not a simulation); `ObjID`s are real MPC designations, so a "recovery" means a
@@ -24,7 +24,7 @@ linked track lands on an MPC object's predicted track within 3″.
 
 ```bash
 cd /sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc
-./neo_recovery.sh                      # full chain into run_neo_wide/
+./neo_recovery.sh                      # full chain into NEO_large/
 # or a fresh run dir:
 RUN_NAME=run_neo_test ./neo_recovery.sh
 ```
@@ -80,7 +80,7 @@ dependencies: **prep → detect → tracklets → link → finalize**. Resume/�
 
 ## Expected output / verification
 
-`finalize` prints, and writes to `run_neo_wide/`:
+`finalize` prints, and writes to `NEO_large/`:
 ```
 refined tracks: ~287
 CONFIRMED (known) : 4 tracks -> 4 distinct known asteroids re-discovered   # recovered_neo.csv

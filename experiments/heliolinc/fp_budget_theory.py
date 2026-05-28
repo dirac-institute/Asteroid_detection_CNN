@@ -37,7 +37,7 @@ HL = Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experim
 AU = 1.495978707e8                 # km
 DEG = np.pi / 180.0
 
-# --- measured field + pipeline constants (run_neo_wide, NEO config) ---
+# --- measured field + pipeline constants (NEO_large, NEO config) ---
 OMEGA = 37.0 * DEG**2              # footprint (sr)
 NVIS, NNIGHT, TSPAN = 719, 16, 29.2
 ELONG = 164.3 * DEG               # field solar elongation (Sun pos at mean MJD)
@@ -63,7 +63,7 @@ def p1_of_r(r, R_pos=CLUSTRAD, p_vel=1.0):
     return (np.pi * R_pos**2 / A_x) * p_vel
 
 def f_velocity_band(wmin=WMIN, wmax=WMAX):
-    d = pd.read_csv(HL / "run_neo_wide/adcnn_dets_labeled.csv")
+    d = pd.read_csv(HL / "NEO_large/adcnn_dets_labeled.csv")
     fp = d[d.objid.isna()]
     w = np.hypot((fp.ra1 - fp.ra0) * np.cos(np.radians(fp.dec)), fp.dec1 - fp.dec0) / (30.0 / 86400.0)
     return float(((w >= wmin) & (w <= wmax)).mean())
@@ -75,7 +75,7 @@ def budget(r, R_pos, p_vel, eps, t_persist=1.0, f_v=0.113):
 
 def main():
     f_v = f_velocity_band()
-    g = pd.read_csv(HL / "run_neo_wide/heliohypo_all.txt", sep=r"\s+"); g.columns = [c.lstrip("#") for c in g.columns]
+    g = pd.read_csv(HL / "NEO_large/heliohypo_all.txt", sep=r"\s+"); g.columns = [c.lstrip("#") for c in g.columns]
     r = g["r(AU)"].values; r = r[np.isfinite(p1_of_r(r))]
 
     print("THEORETICAL FP budget -- HelioLinC fast-mover (>1 deg/day, trail>=6px), with the two")

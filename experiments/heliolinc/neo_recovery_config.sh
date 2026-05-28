@@ -1,13 +1,13 @@
 # =============================================================================
 # NEO RECOVERY pipeline — central config (sourced by the orchestrator + stages)
-# Reproduces the run that recovered 4 real NEOs from real Rubin DP2 data (run_neo_wide).
+# Reproduces the run that recovered 4 real NEOs from real Rubin DP2 data (NEO_large).
 # Every tunable lives here; change RUN_NAME to start a fresh run.
 # =============================================================================
 REPO=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN
 HL=$REPO/experiments/heliolinc
 
 # ---- run identity --------------------------------------------------------
-RUN_NAME=${RUN_NAME:-run_neo_wide}
+RUN_NAME=${RUN_NAME:-NEO_large}
 RUN=$HL/$RUN_NAME
 
 # ---- discovery field: the DP2 NEO ecliptic-opposition strip --------------
@@ -57,7 +57,7 @@ XM_TOL_ARCSEC=${XM_TOL_ARCSEC:-3.0}
 XM_TOL_DAY=${XM_TOL_DAY:-0.02}
 # MAXPOSRMS: orbit-quality gate (km) for NEW-candidate classification.
 # *** CORRECTED 2026-05-27: was 2000 (a SLOW-main-belt value). REAL fast NEOs link with posRMS
-# ~9,000-54,000 km (run_neo_wide production tracks incl. the 4 recovered NEOs; median 39k); synthetic
+# ~9,000-54,000 km (NEO_large production tracks incl. the 4 recovered NEOs; median 39k); synthetic
 # >=1 deg/day NEOs ~6,000-26,000 km. A 2000 km cut classifies EVERY real NEO as SPURIOUS -> silently
 # kills the undiscovered-NEO (NEW-CANDIDATE) output. posRMS is a WEAK discriminator for fast NEOs
 # (real 10-50k overlaps trash chance-clusters at 40-50k), so the gate is loose; real false-link

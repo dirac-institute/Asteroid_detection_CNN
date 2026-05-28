@@ -28,7 +28,7 @@ import fp_budget_mn as mn
 
 HL = Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc")
 BIN = HL / "heliolinc2/src"
-SRC = HL / "run_neo_wide"
+SRC = HL / "NEO_large"
 AUX = ["Earth1day2020s_02a.txt", "ObsCodes.txt", "heliohypo_all.txt"]
 NIGHT_GATE = 3
 MAXRMS = 100000.0                           # link_refine loose gate (production fast-NEO value)

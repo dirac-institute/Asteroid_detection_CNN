@@ -13,7 +13,7 @@ set -eo pipefail
 # across 4 nodes (~4x faster, no accuracy change). Reuses existing pairdets/pairs. Each node writes
 # small (clustrad-bounded) clusters to SHARED disk; head node then link_refines across all + crossmatch.
 HL=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc
-RUN=$HL/run_neo_wide
+RUN=$HL/NEO_large
 BIN=$HL/heliolinc2/src
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
