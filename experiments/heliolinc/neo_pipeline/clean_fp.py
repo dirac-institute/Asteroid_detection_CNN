@@ -43,6 +43,8 @@ def main():
     # --- ADCNN stream: keep fast/trailed by the ACCURATE Veres length; NO score cut (done once at
     #     detect), NO real/bogus (preserve low-SNR trails) -> linking rejects residual FP. ---
     ad = pd.read_csv(a.adcnn)
+    if "score_rf" in ad and "score" not in ad:               # back-compat: pre-rename cached catalogs
+        ad = ad.rename(columns={"score_rf": "score"})
     n0 = len(ad)
     if "len_db" in ad:                       # len_db here = Veres-fit length (adcnn_dets_veres.csv)
         ad = ad[ad.len_db >= a.lendb_min]

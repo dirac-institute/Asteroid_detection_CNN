@@ -3,7 +3,7 @@
 # heliocentric grid across N cores, run N heliolinc processes in parallel on the SAME tracklets,
 # then let link_refine merge all shards (-lflist accepts many cluster/summary pairs). Makes the
 # full fine grid tractable. Usage: hunt_parallel.sh <run_dir>
-set -eo pipefail
+set -euo pipefail
 RUN=${1:?usage: hunt_parallel.sh <run_dir>}
 DETS=${DETS:-$RUN/adcnn_dets_veres.csv}
 LENDB_MIN=${LENDB_MIN:-6}

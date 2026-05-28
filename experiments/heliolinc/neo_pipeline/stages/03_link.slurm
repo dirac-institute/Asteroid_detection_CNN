@@ -6,7 +6,7 @@
 #SBATCH -t 3:00:00
 #SBATCH -J neo3_link
 #SBATCH -o %x_%j.log
-set -eo pipefail
+set -euo pipefail
 source "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc/neo_pipeline/config.sh"
 eval "$TORCH_ENV"
 cd "$HL"

@@ -67,7 +67,9 @@ def generate(epochs, n_target=200, ra0=305.0, dec0=-20.0, field_rad=3.0,
             topo = Rx @ (state[:3] - Ei(t)); cra, cdec = _radec(topo)
             topo2 = Rx @ (state[:3] + state[3:]*half - Ei(t+half))   # +half-exposure position (linear in 15s)
             r1ra, r1dec = _radec(topo2)
-            out.append((t, cra, cdec, 2*cra - r1ra, 2*cdec - r1dec, r1ra, r1dec))   # endpoint0 = mirror
+            d_ra = ((r1ra - cra + 180.0) % 360.0) - 180.0   # signed half-trail in RA (0/360-safe)
+            out.append((t, cra, cdec, (cra - d_ra) % 360.0, 2 * cdec - r1dec,
+                        (cra + d_ra) % 360.0, r1dec))        # -half endpoint, center, +half endpoint
         out = np.array(out)
         dr = np.diff(out[:,1]); dr = (dr+180)%360-180; dd = np.diff(out[:,2]); dt_ = np.diff(epochs); m = dt_ > 0.01
         if not m.any(): continue

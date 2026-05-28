@@ -10,7 +10,7 @@
 #   RUN_NAME=run_aug MANIFEST=/path/manifest.csv ./run.sh
 #   ./run.sh --from 2              # resume from stage 2 (e.g. detections already exist)
 #   ./run.sh --only 3              # just re-run link+crossmatch (e.g. retune linking)
-set -eo pipefail
+set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 source "$HERE/config.sh"
 S="$HERE/stages"

@@ -146,6 +146,7 @@ def main():
 
     if a.dets:   # REAL discovery path: build trail-tracklets from a measured detection catalog
         d = pd.read_csv(a.dets)
+        if "score_rf" in d and "score" not in d: d = d.rename(columns={"score_rf": "score"})  # back-compat
         if "score" in d: d = d[d.score >= a.score_min]
         if "len_db" in d:   d = d[d.len_db >= a.lendb_min]
         need = ["mjd", "ra", "dec", "ra0", "dec0", "ra1", "dec1"]

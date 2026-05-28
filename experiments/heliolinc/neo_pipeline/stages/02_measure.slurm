@@ -6,7 +6,7 @@
 #SBATCH -t 1:30:00
 #SBATCH -J neo2_measure
 #SBATCH -o %x_%j.log
-set -eo pipefail
+set -euo pipefail
 source "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/heliolinc/neo_pipeline/config.sh"
 eval "$LSST_ENV"
 cd "$HL"

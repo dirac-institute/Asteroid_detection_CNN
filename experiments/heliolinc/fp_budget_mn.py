@@ -103,6 +103,9 @@ def run_grid_shards(rd: Path, grid_path: Path, mjdref: float, *, node_idx: int, 
         time.sleep(2)
 
     npub = len(list(shared.glob(f"hl_clusters_{node_idx}_*.csv")))
+    # publish a per-node completion marker so finalize can verify the WHOLE grid was searched
+    (shared / f"_node_{node_idx}.done").write_text(json.dumps(
+        dict(node_idx=node_idx, nnode=nnode, total=total, fail=fail, npub=npub)))
     print(f"[shard {tag} node {node_idx}] DONE: {done} chunks, {fail} failed, {npub} published, "
           f"{(time.time()-t0)/60:.1f}m", flush=True)
     return fail
@@ -111,6 +114,20 @@ def run_grid_shards(rd: Path, grid_path: Path, mjdref: float, *, node_idx: int, 
 def finalize_link_refine(rd: Path, bin_dir: Path, *, maxrms: float = 100000.0):
     """link_refine over every published shard in <rd>/clusters_mn -> lr.csv / lr_rms.csv (in rd)."""
     shared = rd / "clusters_mn"
+    # Integrity check: every node must have published a completion marker with zero failed chunks,
+    # else part of the hypothesis grid was never searched and link_refine would silently report a
+    # partial result as complete (losing any cluster whose grid point fell in a dead node/shard).
+    markers = [json.loads(m.read_text()) for m in shared.glob("_node_*.done")]
+    if markers:
+        nnode = max(m["nnode"] for m in markers)
+        missing = set(range(nnode)) - {m["node_idx"] for m in markers}
+        tot_fail = sum(m["fail"] for m in markers)
+        if missing:
+            raise SystemExit(f"[finalize] ABORT: nodes {sorted(missing)}/{nnode} never finished -> "
+                             "partial grid; refusing to report an incomplete result")
+        if tot_fail:
+            raise SystemExit(f"[finalize] ABORT: {tot_fail} heliolinc chunks failed across nodes -> "
+                             "partial grid; refusing to report an incomplete result")
     lf = []
     for c in sorted(shared.glob("hl_clusters_*.csv")):
         s = c.name[len("hl_clusters_"):-len(".csv")]

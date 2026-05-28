@@ -157,7 +157,9 @@ def main():
     a = ap.parse_args()
 
     d = pd.read_csv(a.dets)
-    d = d[d.length >= a.length_min].copy()   # ADCNN-length speed pre-gate only; no score re-filter (done at detect)
+    if "score_rf" in d and "score" not in d:                 # back-compat: pre-rename cached catalogs
+        d = d.rename(columns={"score_rf": "score"})
+    d = (d[d.length >= a.length_min] if "length" in d.columns else d).copy()   # ADCNN-length speed pre-gate
     man = pd.read_csv(a.manifest)[["visit", "detector", "fits_path"]].drop_duplicates(["visit", "detector"])
     d = d.merge(man, on=["visit", "detector"], how="inner")
     print(f"[veres-measure] {len(d)} dets to fit over {d.groupby(['visit','detector']).ngroups} panels "
