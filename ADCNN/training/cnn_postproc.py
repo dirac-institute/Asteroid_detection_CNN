@@ -158,12 +158,14 @@ def _focal_loss_fn(pos_weight, gamma: float = 2.0, alpha: float | None = None):
 def train_cnn(X, y, panel=None, *, width: int = NET_WIDTH, epochs: int = EPOCHS, lr: float = LR,
               weight_decay: float = WEIGHT_DECAY, batch_size: int = BATCH_SIZE,
               holdout_frac: float = HOLDOUT_FRAC, recall_target: float = RECALL_TARGET,
-              focal_alpha: float | None = None, device: str = "cuda", seed: int = 7):
+              focal_alpha: float | None = None, device: str = "cuda", seed: int = 7,
+              X_holdout=None, y_holdout=None):
     """Fit the focal-loss cutout CNN on cutouts `X`(N,3,k,k) with labels `y`(N).
 
-    A PANEL-DISJOINT holdout (by `panel`, when given) is used only to report the operating
-    threshold at `recall_target` trail recall and the holdout AUC — never to tune weights.
-    Returns (net, info) where info has the holdout threshold/auc and the class counts.
+    The held-out set is used only to report the operating threshold at `recall_target` trail
+    recall and its AUC — never to tune weights. Pass an EXPLICIT `X_holdout`/`y_holdout` (the
+    val2 set) to set the threshold on dedicated panels; otherwise a PANEL-DISJOINT slice of the
+    training cutouts (by `panel`, when given) is held out. Returns (net, info).
     """
     import torch
     from sklearn.metrics import roc_auc_score
@@ -173,22 +175,32 @@ def train_cnn(X, y, panel=None, *, width: int = NET_WIDTH, epochs: int = EPOCHS,
     dev = torch.device(device if torch.cuda.is_available() else "cpu")
     torch.manual_seed(int(seed))  # deterministic weight init + minibatch shuffle (reproducible reruns)
     np.random.seed(int(seed))
-
-    # panel-disjoint train / holdout split (fallback to a row split if no panel ids)
     rng = np.random.default_rng(seed)
-    if panel is not None and len(np.unique(panel)) > 1:
-        pans = np.unique(panel); rng.shuffle(pans)
-        hp = set(pans[:max(1, int(len(pans) * holdout_frac))].tolist())
-        m_h = np.isin(panel, list(hp))
-    else:
-        idx = rng.permutation(len(y)); n_h = max(1, int(len(y) * holdout_frac))
-        m_h = np.zeros(len(y), bool); m_h[idx[:n_h]] = True
-    m_t = ~m_h
 
-    Xt = torch.tensor(X[m_t]); yt = torch.tensor(y[m_t]); N = len(yt)
+    if X_holdout is not None and len(X_holdout):
+        # explicit threshold set (val2): train on ALL of (X, y); threshold/AUC on val2.
+        Xtr, ytr = X, y
+        Xho = np.clip(np.asarray(X_holdout, np.float32), -20, 20)
+        yho = np.asarray(y_holdout, np.float32)
+        holdout_src = "val2"
+    else:
+        # panel-disjoint (fallback row) holdout carved from the training cutouts
+        if panel is not None and len(np.unique(panel)) > 1:
+            pans = np.unique(panel); rng.shuffle(pans)
+            hp = set(pans[:max(1, int(len(pans) * holdout_frac))].tolist())
+            m_h = np.isin(panel, list(hp))
+        else:
+            idx = rng.permutation(len(y)); n_h = max(1, int(len(y) * holdout_frac))
+            m_h = np.zeros(len(y), bool); m_h[idx[:n_h]] = True
+        m_t = ~m_h
+        Xtr, ytr = X[m_t], y[m_t]
+        Xho, yho = X[m_h], y[m_h]
+        holdout_src = "internal"
+
+    Xt = torch.tensor(Xtr); yt = torch.tensor(ytr); N = len(yt)
     npos = float((yt == 1).sum()); nneg = float((yt == 0).sum())
     pw = torch.tensor([nneg / max(npos, 1.0)], device=dev)
-    print(f"[cnn-train] train {N} (pos {int(npos)}) | holdout {int(m_h.sum())} | "
+    print(f"[cnn-train] train {N} (pos {int(npos)}) | holdout {len(yho)} ({holdout_src}) | "
           f"epochs {epochs} pos_weight {float(pw):.1f}", flush=True)
 
     net = build_net(width).to(dev)
@@ -211,13 +223,13 @@ def train_cnn(X, y, panel=None, *, width: int = NET_WIDTH, epochs: int = EPOCHS,
         if ep % 5 == 4:
             print(f"  ep{ep} done", flush=True)
 
-    # operating threshold @ recall_target + AUC on the held-out panels
-    info = {"n_train": int(N), "n_pos_train": int(npos), "n_holdout": int(m_h.sum())}
-    if m_h.any() and (y[m_h] == 1).any():
-        sh = score(X[m_h]); yh = y[m_h]
-        info["threshold"] = round(float(np.quantile(sh[yh == 1], 1 - recall_target)), 4)
-        if (yh == 0).any() and (yh == 1).any():
-            info["holdout_auc"] = round(float(roc_auc_score(yh, sh)), 4)
+    # operating threshold @ recall_target + AUC on the held-out cutouts
+    info = {"n_train": int(N), "n_pos_train": int(npos), "n_holdout": int(len(yho)), "holdout_src": holdout_src}
+    if len(yho) and (yho == 1).any():
+        sh = score(Xho)
+        info["threshold"] = round(float(np.quantile(sh[yho == 1], 1 - recall_target)), 4)
+        if (yho == 0).any() and (yho == 1).any():
+            info["holdout_auc"] = round(float(roc_auc_score(yho, sh)), 4)
     return net, info
 
 
@@ -231,39 +243,56 @@ def save_cnn(net, out_pt):
 # ---------------------------------------------------------------------------
 # Production stage-2 hook (called by train_end_to_end)
 # ---------------------------------------------------------------------------
-def train_cnn_from_val(seg_ckpt, val_h5, val_csv, val_panel_ids, out_pt, *,
-                       fp_cap: int = FP_CAP, epochs: int = EPOCHS, device: str = "cuda"):
-    """Full stage-2 CNN training: load the TorchScript segmentation model, build labelled cutouts on the held-out
-    val panels (in-memory), fit the focal CNN, and save the state_dict to `out_pt`.
+def _cutouts_for_panels(model, h5_path, csv_path, panel_ids, *, fp_cap, device):
+    """Build labelled cutouts (X, y, panel) for the given panels of an h5/csv. The truth catalog
+    image_ids are remapped into the 0..N stacking order before injection-overlap labelling (so it
+    works even when the panels are a high-index slice of a shared shard h5)."""
+    cat = pd.read_csv(csv_path)
+    remap = {orig: i for i, orig in enumerate(panel_ids)}
+    cat = cat[cat["image_id"].isin(remap)].copy()
+    cat["image_id"] = cat["image_id"].map(remap)
+    Xs, ys, pans = [], [], []
+    with h5py.File(h5_path, "r") as f:
+        for i, orig in enumerate(panel_ids):
+            img = f["images"][orig][:].astype(np.float32)
+            rl = f["real_labels"][orig][:].astype(np.uint16)
+            panel_cat = cat[cat["image_id"] == i]
+            X, y, _, _ = panel_cutouts(model, img, rl, panel_cat, pid=i, fp_cap=fp_cap, device=device)
+            if len(X):
+                Xs.append(X); ys.append(y); pans.append(np.full(len(X), i, np.int32))
+    if not Xs:
+        return (np.zeros((0, 3, CUTOUT_K, CUTOUT_K), np.float32),
+                np.zeros((0,), np.float32), np.zeros((0,), np.int32))
+    return np.concatenate(Xs), np.concatenate(ys), np.concatenate(pans)
 
-    Leakage-safe contract: the val panels' truth catalog image_ids are remapped into the
-    0..N stacking order before injection-overlap labelling (so it works even when the val
-    panels are a high-index slice of a shared shard h5)."""
+
+def train_cnn_from_val(seg_ckpt, train_h5, train_csv, train_panel_ids, out_pt, *,
+                       thr_h5=None, thr_csv=None, thr_panel_ids=None,
+                       fp_cap: int = FP_CAP, epochs: int = EPOCHS, device: str = "cuda"):
+    """Full stage-2 CNN training: load the TorchScript segmentation model, build labelled cutouts
+    on `train_panel_ids` (in-memory), fit the focal CNN, save the state_dict to `out_pt`.
+
+    If a separate threshold set (`thr_h5`/`thr_csv`/`thr_panel_ids`, the val2 set) is given, the
+    operating threshold + AUC are reported on it (and the CNN trains on ALL the train cutouts);
+    otherwise a panel-disjoint slice of the train cutouts is held out for the threshold.
+
+    Leakage-safe: the segmentation model must not have trained on these panels."""
     import torch
     dev = torch.device(device if torch.cuda.is_available() else "cpu")
     model = torch.jit.load(str(seg_ckpt), map_location=dev).eval()
 
-    cat = pd.read_csv(val_csv)
-    remap = {orig: i for i, orig in enumerate(val_panel_ids)}
-    cat = cat[cat["image_id"].isin(remap)].copy()
-    cat["image_id"] = cat["image_id"].map(remap)
+    X, y, panel = _cutouts_for_panels(model, train_h5, train_csv, train_panel_ids, fp_cap=fp_cap, device=dev)
+    if not len(X):
+        raise RuntimeError("train_cnn_from_val: no candidates extracted on the train panels")
+    print(f"[cnn-train] train pool: {len(y)} cutouts ({int((y == 1).sum())} pos) over "
+          f"{len(np.unique(panel))} panels", flush=True)
 
-    Xs, ys, pans = [], [], []
-    with h5py.File(val_h5, "r") as f:
-        for i, orig in enumerate(val_panel_ids):
-            img = f["images"][orig][:].astype(np.float32)
-            rl = f["real_labels"][orig][:].astype(np.uint16)
-            panel_cat = cat[cat["image_id"] == i]
-            X, y, _, _ = panel_cutouts(model, img, rl, panel_cat, pid=i, fp_cap=fp_cap, device=dev)
-            if len(X):
-                Xs.append(X); ys.append(y); pans.append(np.full(len(X), i, np.int32))
-    if not Xs:
-        raise RuntimeError("train_cnn_from_val: no candidates extracted on the val panels")
-    X = np.concatenate(Xs); y = np.concatenate(ys); panel = np.concatenate(pans)
-    print(f"[cnn-train] pool: {len(y)} cutouts ({int((y == 1).sum())} pos) over "
-          f"{len(np.unique(panel))} val panels", flush=True)
+    Xho = yho = None
+    if thr_h5:
+        Xho, yho, _ = _cutouts_for_panels(model, thr_h5, thr_csv, thr_panel_ids, fp_cap=fp_cap, device=dev)
+        print(f"[cnn-train] val2 threshold pool: {len(yho)} cutouts ({int((yho == 1).sum())} pos)", flush=True)
 
-    net, info = train_cnn(X, y, panel, epochs=epochs, device=dev)
+    net, info = train_cnn(X, y, panel, epochs=epochs, device=dev, X_holdout=Xho, y_holdout=yho)
     save_cnn(net, out_pt)
-    print(f"[cnn-train] saved -> {out_pt} | holdout {info}", flush=True)
+    print(f"[cnn-train] saved -> {out_pt} | {info}", flush=True)
     return net, info

@@ -9,31 +9,31 @@
 #SBATCH --output=%x_%j.log
 #SBATCH --requeue
 #
-# ENTRY POINT (a) — generate the TRAIN / TRAIN2 / TEST diffim datasets, deterministically.
+# ENTRY POINT (a) — generate ALL the simulated diffim datasets in ONE deterministic command:
 #
-#   train   stage-1 segmentation-model training data
-#   train2  stage-2 focal cutout-CNN training data (the dedicated FP-filter set)
-#   test    held-out evaluation set (synthetic, at a fixed stack-detection sigma)
+#   train  (+ val)   stage-1 segmentation training   (val  -> model selection)
+#   train2 (+ val2)  stage-2 cutout-CNN training      (val2 -> FP-filter threshold)
+#   test             held-out evaluation
 #
-# DETERMINISM (rerun -> identical datasets, given the same pinned DP2 Butler release):
-#   * Fixed per-set SEEDS + a fixed --where region + the Butler collections pinned in
-#     ADCNN.data.dataset_creation.simulate. Panel selection is a sorted-then-seeded shuffle;
-#     each panel's injections are seeded by (seed, visit, detector); realistic-trail morphology
-#     is seeded per injection. No global/unseeded RNG is used.
-#   * The three sets are DISJOINT BY CONSTRUCTION: test is built first, train2 excludes the test
-#     panels, train excludes test+train2 (--exclude-pairs-csv leakage guard). No (visit,detector)
-#     panel is ever in two sets, so the stage-1 / stage-2 / eval data never overlap.
+# A single panel universe is selected for --where, partitioned ONCE into the five mutually
+# disjoint sets (cached in <DATA_ROOT>/split.json), and each set injected with the same
+# validated core. DETERMINISTIC: a fixed --seed fixes panel selection + partition + every
+# panel's injections, so every rerun selects the same panels and injects identical trails
+# (a panel that fails to subtract is dropped; failures are repeatable).
 #
-# Resumable: a set whose output h5 already exists is skipped (set FORCE=1 to rebuild all).
+# LEVERS — build only some groups via SETS (the partition still covers all five, so partial /
+# incremental builds stay consistent with a full build, and split.json is reused):
+#   SETS="test"            sbatch ...   # only test
+#   SETS="train"           sbatch ...   # only train + val
+#   SETS="train2"          sbatch ...   # only train2 + val2
+#   SETS="train train2 test"            # everything (default)
 #
-# Runs in the lsst_distrib env (Butler). CPU-bound (~minutes/panel: 2 AlardLupton subtractions
-# + 2 DIA detects each). The reg2-scale train set (~4300 panels) was built as several shards
-# across jobs; for that scale, run this per shard (distinct --seed + day_obs window) or raise
-# N_TRAIN with a longer --time.
+# lsst_distrib env (Butler). CPU-bound (~minutes/panel: 2 AlardLupton subtractions + 2 DIA
+# detects each); the universe = sum of all --n-* sizes. For very large train sets, build the
+# groups across separate jobs (SETS=...) — split.json keeps them consistent — or raise --time.
 #
-# Usage:
 #   sbatch ADCNN/pipelines/slurm/make_datasets.slurm
-#   N_TRAIN=4300 DATA_ROOT=/path/DATA_DIFFIM sbatch ADCNN/pipelines/slurm/make_datasets.slurm
+#   N_TRAIN=4300 DATA_ROOT=/path SETS="train" sbatch ADCNN/pipelines/slurm/make_datasets.slurm
 set -euo pipefail
 
 REPO="${ADCNN_REPO:-/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN}"
@@ -41,57 +41,30 @@ REPO="${ADCNN_REPO:-/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CN
 # ---- deterministic knobs (override via env) -------------------------------------------------
 DATA_ROOT="${DATA_ROOT:-$REPO/DATA_DIFFIM}"
 WHERE="${WHERE:-instrument='LSSTCam' AND day_obs>=20250801 AND day_obs<=20250921 AND band in ('u','g','r','i','z','y')}"
-N_TRAIN="${N_TRAIN:-1500}"        # stage-1 segmentation training panels
-N_TRAIN2="${N_TRAIN2:-500}"       # stage-2 cutout-CNN training panels (dedicated FP-filter set)
-N_TEST_SEL="${N_TEST_SEL:-340}"   # ~90% land in test (test-only split) -> ~300 test panels
-SIGMA="${SIGMA:-5}"               # test stack-detection threshold (test_5sigma = canonical eval set)
-SEED_TRAIN="${SEED_TRAIN:-123}"   # fixed seeds -> reproducible panel selection + injections
-SEED_TRAIN2="${SEED_TRAIN2:-4242}"
-SEED_TEST="${SEED_TEST:-905}"
+SETS="${SETS:-train train2 test}"     # which groups to build now
+SEED="${SEED:-2026}"
+N_TRAIN="${N_TRAIN:-1500}"
+N_VAL="${N_VAL:-150}"
+N_TRAIN2="${N_TRAIN2:-500}"
+N_VAL2="${N_VAL2:-100}"
+N_TEST="${N_TEST:-300}"
+SIGMA="${SIGMA:-5}"                    # stack-detection sigma (train family + val)
+TEST_SIGMA="${TEST_SIGMA:-$SIGMA}"     # test depth (rebuild test at another sigma with SETS=test)
 PARALLEL="${PARALLEL:-${SLURM_CPUS_PER_TASK:-32}}"
-
-# common injection recipe — identical across the three sets; only seed / size / role differ.
-COMMON=(--repo dp2_prep --skymap lsst_cells_v2 --realistic-trail --skip-prevalidation
-        --mag-mode snr --mag-min 2 --mag-max 8
-        --trail-length-min 6 --trail-length-max 60 --beta-min 0 --beta-max 180
-        --number 20 --parallel "$PARALLEL" --where "$WHERE")
 
 export PYTHONHASHSEED=0
 source /cvmfs/sw.lsst.eu/almalinux-x86_64/lsst_distrib/w_2026_09/loadLSST.sh
 setup lsst_distrib
 cd "$REPO"
-mkdir -p "$DATA_ROOT"
 
-run_set() {  # $1 = output h5 to test for existence; rest = the make_sim_data command
-  local out_h5="$1"; shift
-  if [[ -s "$out_h5" && "${FORCE:-0}" != "1" ]]; then
-    echo ">>> skip (exists): $out_h5  (FORCE=1 to rebuild)"; return
-  fi
-  "$@"
-}
+python3 -u -m ADCNN.pipelines.make_sim_data \
+  --save-path "$DATA_ROOT" --where "$WHERE" --seed "$SEED" \
+  --sets $SETS \
+  --n-train "$N_TRAIN" --n-val "$N_VAL" --n-train2 "$N_TRAIN2" --n-val2 "$N_VAL2" --n-test "$N_TEST" \
+  --stack-detection-threshold "$SIGMA" --test-sigma "$TEST_SIGMA" \
+  --realistic-trail --mag-mode snr --mag-min 2 --mag-max 8 \
+  --trail-length-min 6 --trail-length-max 60 --beta-min 0 --beta-max 180 --number 20 \
+  --parallel "$PARALLEL" \
+  ${REPARTITION:+--repartition} ${SKIP_PREVAL:+--skip-prevalidation}
 
-echo "=== [1/3] TEST   seed=$SEED_TEST sigma=$SIGMA -> $DATA_ROOT/test ==="
-run_set "$DATA_ROOT/test/test.h5" \
-  python3 -u -m ADCNN.pipelines.make_sim_data "${COMMON[@]}" \
-    --save-path "$DATA_ROOT/test" --seed "$SEED_TEST" \
-    --random-subset "$N_TEST_SEL" --test-only --train-test-split 0.1 \
-    --stack-detection-threshold "$SIGMA"
-
-echo "=== [2/3] TRAIN2 seed=$SEED_TRAIN2 (excl test) -> $DATA_ROOT/train2 ==="
-run_set "$DATA_ROOT/train2/train.h5" \
-  python3 -u -m ADCNN.pipelines.make_sim_data "${COMMON[@]}" \
-    --save-path "$DATA_ROOT/train2" --seed "$SEED_TRAIN2" \
-    --random-subset "$N_TRAIN2" --train-test-split 0 \
-    --exclude-pairs-csv "$DATA_ROOT/test/test.csv"
-
-echo "=== [3/3] TRAIN  seed=$SEED_TRAIN (excl test+train2) -> $DATA_ROOT/train ==="
-run_set "$DATA_ROOT/train/train.h5" \
-  python3 -u -m ADCNN.pipelines.make_sim_data "${COMMON[@]}" \
-    --save-path "$DATA_ROOT/train" --seed "$SEED_TRAIN" \
-    --random-subset "$N_TRAIN" --train-test-split 0 \
-    --exclude-pairs-csv "$DATA_ROOT/test/test.csv" "$DATA_ROOT/train2/train.csv"
-
-echo "=== DATASETS DONE ==="
-echo "  train : $DATA_ROOT/train/train.{h5,csv}    (stage-1 segmentation)"
-echo "  train2: $DATA_ROOT/train2/train.{h5,csv}   (stage-2 cutout CNN)"
-echo "  test  : $DATA_ROOT/test/test.{h5,csv}      (held-out eval)"
+echo "=== DATASETS DONE -> $DATA_ROOT/{train,val,train2,val2,test}.{h5,csv} + split.json ==="

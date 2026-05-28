@@ -17,13 +17,15 @@ Defaults reproduce reg2 out of the box on the 4 realistic shards:
 
     python -m ADCNN.pipelines.train_end_to_end --run-name seg_repro
 
-For the train / train2 / test layout produced by ADCNN/pipelines/slurm/make_datasets.slurm
-(stage 1 on TRAIN, stage-2 CNN on the dedicated TRAIN2 set, TEST held out for eval):
+For the datasets produced by ADCNN/pipelines/slurm/make_datasets.slurm — stage 1 trains on
+TRAIN and selects on VAL; stage 2 trains the CNN on TRAIN2 and sets its threshold on VAL2;
+TEST is held out for eval:
 
     python -m ADCNN.pipelines.train_end_to_end --run-name seg_repro \
-        --data-sources TRAIN/train.h5:TRAIN/train.csv \
-        --val-h5 TRAIN2/train.h5 --val-csv TRAIN2/train.csv \
-        --cnn-train-h5 TRAIN2/train.h5 --cnn-train-csv TRAIN2/train.csv
+        --data-sources DATA_DIFFIM/train.h5:DATA_DIFFIM/train.csv \
+        --val-h5  DATA_DIFFIM/val.h5  --val-csv  DATA_DIFFIM/val.csv \
+        --cnn-train-h5 DATA_DIFFIM/train2.h5 --cnn-train-csv DATA_DIFFIM/train2.csv \
+        --val2-h5 DATA_DIFFIM/val2.h5 --val2-csv DATA_DIFFIM/val2.csv
 
 Override --data-sources / --val-* to train on other data, --epochs for a quick smoke, or
 --skip-nn / --skip-cnn to run a single stage. The NN stage needs a GPU + the asteroid_cnn env.
@@ -142,6 +144,11 @@ def main():
                          "model's held-out val panels. Must be disjoint from the stage-1 train set "
                          "(the make-datasets script guarantees this) so the CNN cutouts are leakage-free.")
     ap.add_argument("--cnn-train-csv", default=None, help="catalog for --cnn-train-h5")
+    ap.add_argument("--val2-h5", default=None,
+                    help="held-out val2 set for the stage-2 CNN operating threshold + AUC. When "
+                         "given (with --cnn-train-h5), the CNN trains on ALL of train2 and the "
+                         "threshold is set on val2; otherwise a slice of train2 is held out for it.")
+    ap.add_argument("--val2-csv", default=None, help="catalog for --val2-h5")
     ap.add_argument("--out-root", default=str(REPO / "experiments/diffim_runs"))
     ap.add_argument("--models-dir", default=str(REPO / "models"))
     ap.add_argument("--epochs", type=int, default=None, help="override the recipe epochs (e.g. smoke run)")
@@ -185,9 +192,16 @@ def main():
             if not a.cnn_train_csv:
                 raise SystemExit("--cnn-train-h5 requires --cnn-train-csv")
             cnn_ids = sorted(pd.read_csv(a.cnn_train_csv)["image_id"].unique())
+            thr_kw = {}
+            if a.val2_h5:
+                if not a.val2_csv:
+                    raise SystemExit("--val2-h5 requires --val2-csv")
+                thr_kw = dict(thr_h5=a.val2_h5, thr_csv=a.val2_csv,
+                              thr_panel_ids=sorted(pd.read_csv(a.val2_csv)["image_id"].unique()))
+                print(f"[stage2-cnn] threshold on val2 = {a.val2_h5}", flush=True)
             print(f"[stage2-cnn] training on all {len(cnn_ids)} panels of {a.cnn_train_h5}", flush=True)
             train_cnn_from_val(scripted, a.cnn_train_h5, a.cnn_train_csv, cnn_ids, cnn_out,
-                               epochs=recipe.cnn_epochs, fp_cap=recipe.cnn_fp_cap)
+                               epochs=recipe.cnn_epochs, fp_cap=recipe.cnn_fp_cap, **thr_kw)
         else:
             # Default: the EXACT panels stage 1 held out (split.json) so the FP-filter CNN is never
             # built on panels the segmentation model trained on.

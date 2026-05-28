@@ -1,9 +1,21 @@
-"""Build a SIMULATED (injected-trail) difference-image dataset.
+"""Build the SIMULATED (injected-trail) difference-image datasets.
 
-Writes an HDF5 (images / masks / real_labels) plus a per-injection CSV, with
-drawn-line truth and crossmatch-and-recover pre/post logic. The saved *image* is
-the difference image produced by subtracting the matching template_coadd from the
-injected PVI.
+ONE deterministic entry point produces every set used by the two-stage detector:
+    train  (+ val)   stage-1 segmentation training  (val -> model selection)
+    train2 (+ val2)  stage-2 cutout-CNN training     (val2 -> FP-filter threshold)
+    test             held-out evaluation
+A single panel universe is selected for the --where region, partitioned ONCE into these
+five mutually-disjoint sets (seeded shuffle -> contiguous slices), and cached in
+``<save-path>/split.json``. Each requested set (``--sets train train2 test``) is then injected
+with the SAME validated per-panel core. Determinism: a fixed ``--seed`` fixes the panel
+selection, the partition, AND each panel's injections (seeded by seed,visit,detector), so every
+rerun selects the same panels and injects identical trails. A panel that fails to subtract is
+simply dropped (failures are repeatable). ``split.json`` is reused across runs so partial builds
+(e.g. ``--sets test``) stay consistent with a full build.
+
+Each set writes ``<save-path>/<set>.h5`` (images / masks / real_labels) + ``<set>.csv``
+(per-injection truth). The saved *image* is the difference image produced by subtracting the
+matching template_coadd from the injected PVI.
 
 Flow per (visit, detector):
     1. fetch PVI + single_visit_star_footprints (kernel candidates) + same-band
@@ -18,7 +30,7 @@ Flow per (visit, detector):
        (same kernel-candidate set => same kernel solve) -> injected diffim
     7. DetectAndMeasure on the injected diffim -> "post_injection_Src"
     8. drawn-line truth mask, crossmatch pre/post, stack_hits_by_footprints,
-       footprints_to_label_mask -> identical to direct-image flow
+       footprints_to_label_mask -> per-injection truth + stack-detection labels
     9. write injected diffim to HDF5 (1 channel float32) + masks + real_labels
 
 The template fetch requires the stage3 collection to be in the chain along
@@ -669,7 +681,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
 def worker(args):
     (counters, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length,
      magnitude, beta, source_type, global_seed, mag_mode, psf_template,
-     detection_threshold, measueTrails, skymap, stage3_collection, target) = args
+     detection_threshold, measueTrails, skymap, stage3_collection) = args
     seed = (int(global_seed) * 1_000_003 + int(dataId["visit"]) * 1_003 + int(dataId["detector"])) & 0xFFFFFFFF
     try:
         res = one_detector_injection(
@@ -681,14 +693,12 @@ def worker(args):
         if res[0] is False:
             return ("err", res[1], res[2], res[3])
         _, img, mask, real_labels, catalog = res
-        # Write index is assigned HERE, under the lock, only on success -> successful
-        # panels land contiguously (0..n-1) with NO gaps even when some refs fail.
-        # The h5 is truncated to the final count after all tasks (run_parallel_injection).
+        # Write index assigned under the lock, only on success -> successful panels land
+        # contiguously (0..n-1) with NO gaps; the h5 is truncated to the final count after the
+        # pool drains. A panel that fails to subtract is simply dropped (its failure is repeatable,
+        # so the set of panels + their injections stays deterministic across reruns).
         with lock:
-            if target and int(counters[h5path]) >= target:
-                return ("full", -1)   # target reached; drop this (in-flight) panel
-            idx = int(counters[h5path])
-            counters[h5path] = idx + 1
+            idx = int(counters[h5path]); counters[h5path] = idx + 1
             with h5py.File(h5path, "a") as f:
                 f["images"][idx] = img
                 f["masks"][idx] = mask
@@ -899,129 +909,88 @@ def select_good_refs_random_check(
     return good
 
 
-def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitude, beta, where,
-                           skymap, stage3_collection, parallel=4, random_subset=0,
-                           train_test_split=0, seed=123, chunks=None, test_only=False,
-                           mag_mode="psf_mag", psf_template="image",
-                           stack_detection_threshold=5.0, measueTrails=False,
-                           exclude_keys=None, check_refs=True, target_train_panels=0):
-    butler = Butler(repo, collections=coll)
-    h5train_path = os.path.join(save_path, "train.h5")
-    h5test_path = os.path.join(save_path, "test.h5")
+# ======================================================================================
+# Dataset orchestration: select a panel universe ONCE, partition it into disjoint named
+# sets, and inject each requested set with the SAME validated per-panel core (`worker` ->
+# `one_detector_injection`). Deterministic: a fixed --seed fixes the universe selection, the
+# partition, AND each panel's injections (seeded by seed,visit,detector), so reruns reproduce
+# byte-identical datasets. The partition is cached in split.json so partial builds (e.g. only
+# the test set) stay consistent with a full build.
+# ======================================================================================
 
-    refs = select_good_refs_random_check(
-        repo=repo,
-        collections=coll,
-        where=where,
-        skymap=skymap,
-        stage3_collection=stage3_collection,
-        instrument="LSSTCam",
-        k=int(random_subset) if int(random_subset) > 0 else 200,
-        seed=seed,
-        pool_size=5000,
-        max_checks=200000,
-        exclude_keys=exclude_keys,
-        check_refs=check_refs,
-        verbose=True,
-    )
-    print("Selected datasets:", len(refs))
+# train and train2 each carry a held-out val set for evaluation:
+#   val  -> stage-1 segmentation-model selection ;  val2 -> stage-2 CNN threshold.
+# The fixed order makes the partition a deterministic sequence of contiguous slices.
+_SET_ORDER = ("train", "val", "train2", "val2", "test")
+_GROUPS = {"train": ("train", "val"), "train2": ("train2", "val2"), "test": ("test",)}
 
-    global total_tasks
-    total_tasks = len(refs)
-    rng_split = np.random.default_rng(seed + 1)
-    test_index = rng_split.choice(np.arange(len(refs)), int((1 - train_test_split) * len(refs)),
-                                  replace=False) if 0 < train_test_split < 1 else []
-    if test_only:
-        total_tasks = len(test_index)
-    dims = butler.get("preliminary_visit_image.dimensions", dataId=refs[0].dataId)
-    if chunks is not None:
-        chunks = (1, min(int(chunks), dims.y), min(int(chunks), dims.x))
-    # Datasets are pre-sized to the (generous) ref count but created RESIZABLE
-    # (maxshape) so we can truncate to the actual number of SUCCESSFUL panels after
-    # generation -> no empty/all-zero slots even when some refs fail to subtract.
-    if not test_only:
-        with h5py.File(h5train_path, "w") as f:
-            mx = (None, dims.y, dims.x)
-            f.create_dataset("images", shape=(len(refs) - len(test_index), dims.y, dims.x), maxshape=mx, dtype="float32", chunks=chunks)
-            f.create_dataset("masks", shape=(len(refs) - len(test_index), dims.y, dims.x), maxshape=mx, dtype="bool", chunks=chunks)
-            f.create_dataset("real_labels", shape=(len(refs) - len(test_index), dims.y, dims.x), maxshape=mx, dtype="uint16", chunks=chunks)
-    if len(test_index) > 0:
-        with h5py.File(h5test_path, "w") as f:
-            mx = (None, dims.y, dims.x)
-            kw = dict(chunks=chunks, compression="gzip", compression_opts=4, shuffle=True)
-            f.create_dataset("images", shape=(len(test_index), dims.y, dims.x), maxshape=mx, dtype="float32", **kw)
-            f.create_dataset("masks", shape=(len(test_index), dims.y, dims.x), maxshape=mx, dtype="bool", **kw)
-            f.create_dataset("real_labels", shape=(len(test_index), dims.y, dims.x), maxshape=mx, dtype="uint16", **kw)
+
+def _partition(keys, sizes, seed):
+    """Deterministic, disjoint partition of the (visit,detector) `keys` into the named sets:
+    one seeded shuffle, then contiguous slices -> no panel can land in two sets."""
+    rng = np.random.default_rng(int(seed))
+    shuffled = [keys[i] for i in rng.permutation(len(keys))]
+    parts, i = {}, 0
+    for name in _SET_ORDER:
+        n = int(sizes.get(name, 0))
+        parts[name] = shuffled[i:i + n]
+        i += n
+    return parts
+
+
+def _build_set(dataids, *, name, repo, coll, dims, save_path, number, trail_length, magnitude,
+               beta, mag_mode, psf_template, stack_detection_threshold, measueTrails, seed,
+               skymap, stage3_collection, parallel, chunks):
+    """Inject + difference + truth-label every panel in `dataids` into <save_path>/<name>.{h5,csv},
+    reusing the validated per-panel `worker`/`one_detector_injection` unchanged. The h5 is created
+    RESIZABLE and truncated to the count actually built, so a panel that fails to subtract leaves
+    NO empty slot (its failure is repeatable, so the panel set + injections stay deterministic)."""
+    h5_path = os.path.join(save_path, f"{name}.h5")
+    csv_path = os.path.join(save_path, f"{name}.csv")
+    if os.path.exists(csv_path):
+        os.remove(csv_path)
+    ch = (1, min(int(chunks), dims.y), min(int(chunks), dims.x)) if chunks else None
+    with h5py.File(h5_path, "w") as f:
+        mx = (None, dims.y, dims.x)
+        for nm, dt in (("images", "float32"), ("masks", "bool"), ("real_labels", "uint16")):
+            f.create_dataset(nm, shape=(len(dataids), dims.y, dims.x), maxshape=mx, dtype=dt, chunks=ch)
     manager = Manager()
     lock = manager.Lock()
-    # shared write cursors per h5 file: each success grabs the next index under the lock.
     counters = manager.dict()
-    counters[h5train_path] = 0
-    counters[h5test_path] = 0
-    tasks = []
-    for i, ref in enumerate(refs):
-        if i in test_index:
-            h5path = h5test_path
-            csvpath = os.path.join(save_path, "test.csv")
-            tasks.append([counters, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
-                          "preliminary_visit_image", seed, mag_mode, psf_template, stack_detection_threshold, measueTrails,
-                          skymap, stage3_collection, 0])
-        elif not test_only:
-            h5path = h5train_path
-            csvpath = os.path.join(save_path, "train.csv")
-            tasks.append([counters, ref.dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length, magnitude, beta,
-                          "preliminary_visit_image", seed, mag_mode, psf_template, stack_detection_threshold, measueTrails,
-                          skymap, stage3_collection, int(target_train_panels)])
+    counters[h5_path] = 0
+    tasks = [[counters, did, repo, coll, dims, lock, h5_path, csv_path, number, trail_length,
+              magnitude, beta, "preliminary_visit_image", seed, mag_mode, psf_template,
+              stack_detection_threshold, measueTrails, skymap, stage3_collection]
+             for did in dataids]
+    print(f"[build:{name}] {len(tasks)} panels -> {h5_path}", flush=True)
+    err = 0
     if parallel > 1:
-        completed = 0
-        total_tasks = len(tasks)
-
         with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as ex:
             futs = [ex.submit(worker, t) for t in tasks]
-
-            for fut in concurrent.futures.as_completed(futs):
-                completed += 1
-                # Catch BaseException here so a worker that raised something
-                # like NoWorkFound (BaseException-only subclass) before our
-                # try/except in worker() can run can't kill the whole job.
+            for done, fut in enumerate(concurrent.futures.as_completed(futs), 1):
                 try:
                     out = fut.result()
-                except BaseException as e:
-                    print(f"[{completed}/{total_tasks}] WORKER CRASH: {type(e).__name__}: {e}", flush=True)
+                except BaseException as e:  # NoWorkFound etc. subclass BaseException, not Exception
+                    err += 1
+                    print(f"[{name} {done}/{len(tasks)}] WORKER CRASH: {type(e).__name__}: {e}", flush=True)
                     print(traceback.format_exc(), flush=True)
                     continue
-
-                if out[0] == "ok":
-                    print(f"[{completed}/{total_tasks}] done (train={counters[h5train_path]})", flush=True)
-                elif out[0] == "full":
-                    pass
-                else:
-                    _, idx, dataId, tb = out
-                    print(f"[{completed}/{total_tasks}] ERROR: idx={idx} dataId={dataId}", flush=True)
-                    print(tb, flush=True)
-
-                # stop early once the train target is reached: cancel pending tasks so
-                # we don't waste subtractions past the requested size.
-                if target_train_panels and int(counters[h5train_path]) >= int(target_train_panels):
-                    print(f"[target] reached {counters[h5train_path]} train panels; cancelling rest", flush=True)
-                    for f2 in futs:
-                        f2.cancel()
-                    break
+                if out[0] != "ok":
+                    err += 1
+                if done % 25 == 0 or done == len(tasks):
+                    print(f"[{name} {done}/{len(tasks)}] built={int(counters[h5_path])} err={err}", flush=True)
     else:
-        for task in tasks:
-            worker(task)
+        for t in tasks:
+            worker(t)
 
-    # Truncate each h5 to the number of panels actually written (no empty tail slots
-    # from failed refs). image_id values in the CSVs already match these 0..n-1 rows.
-    for hp in ([h5train_path] if not test_only else []) + ([h5test_path] if len(test_index) > 0 else []):
-        if not os.path.exists(hp):
-            continue
-        n = int(counters[hp])
-        with h5py.File(hp, "a") as f:
-            for ds in ("images", "masks", "real_labels"):
-                if ds in f and f[ds].shape[0] != n:
-                    f[ds].resize(n, axis=0)
-        print(f"[truncate] {hp}: kept {n} successful panels (no empty slots)", flush=True)
+    # Truncate to the number actually built -> no empty tail slots from panels that failed.
+    n = int(counters[h5_path])
+    with h5py.File(h5_path, "a") as f:
+        for ds in ("images", "masks", "real_labels"):
+            if f[ds].shape[0] != n:
+                f[ds].resize(n, axis=0)
+    print(f"[build:{name}] DONE built={n}/{len(dataids)} err={err} -> {h5_path} (+ {csv_path})", flush=True)
+    return n
 
 
 # ======================================================================================
@@ -1029,32 +998,39 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
 # ======================================================================================
 
 def main():
-    ap = argparse.ArgumentParser("Build a SIMULATED (injected) DIFFIM dataset")
+    ap = argparse.ArgumentParser(
+        description="Build the SIMULATED (injected-trail) diffim datasets — train(+val), "
+                    "train2(+val2), test — from ONE deterministic panel partition; each set is "
+                    "injected with the same validated core. See module docstring.",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    # --- Butler / region (needs stage3=template_coadd + stage2=PVI/sources) ---
     ap.add_argument("--repo", type=str, default="dp2_prep")
-    # NOTE: needs both stage3 (template_coadd) and stage2 (PVI / sources).
-    ap.add_argument(
-        "--collections", nargs="+",
-        default=[
-            "LSSTCam/runs/DRP/DP2/v30_0_6_rc1/DM-53881/stage3",
-            "LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage2",
-        ],
-        help="Butler collection chain. Must include the stage3 collection "
-             "carrying template_coadd and the stage2 collection carrying "
-             "preliminary_visit_image / single_visit_star_footprints.",
-    )
-    ap.add_argument(
-        "--stage3-collection",
-        default="LSSTCam/runs/DRP/DP2/v30_0_6_rc1/DM-53881/stage3",
-        help="Subset of --collections used to query template_coadd "
-             "(passed through to GetTemplateTask).",
-    )
+    ap.add_argument("--collections", nargs="+",
+                    default=["LSSTCam/runs/DRP/DP2/v30_0_6_rc1/DM-53881/stage3",
+                             "LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage2"],
+                    help="Butler chain: the stage3 collection (template_coadd) + the stage2 "
+                         "collection (preliminary_visit_image / single_visit_star_footprints).")
+    ap.add_argument("--stage3-collection", default="LSSTCam/runs/DRP/DP2/v30_0_6_rc1/DM-53881/stage3",
+                    help="subset of --collections used to query template_coadd")
     ap.add_argument("--skymap", default="lsst_cells_v2")
-    ap.add_argument("--save-path", default="../DATA/")
     ap.add_argument("--where",
                     default="instrument='LSSTCam' AND day_obs>=20250801 AND day_obs<=20250921 AND band in ('u','g','r','i','z','y') ")
-    ap.add_argument("--parallel", type=int, default=4)
-    ap.add_argument("--random-subset", type=int, default=10)
-    ap.add_argument("--train-test-split", type=float, default=0.1)
+    # --- output + which sets to build ---
+    ap.add_argument("--save-path", default="../DATA/",
+                    help="root dir; writes <set>.h5/<set>.csv per set + split.json")
+    ap.add_argument("--sets", nargs="+", choices=list(_GROUPS), default=list(_GROUPS),
+                    help="which groups to BUILD now: train -> {train,val}; train2 -> {train2,val2}; "
+                         "test -> {test}. The partition always covers all five sets (cached in "
+                         "split.json), so building only a subset stays consistent with a full build.")
+    ap.add_argument("--n-train", type=int, default=1500, help="stage-1 segmentation training panels")
+    ap.add_argument("--n-val", type=int, default=150, help="held-out val for stage-1 model selection")
+    ap.add_argument("--n-train2", type=int, default=500, help="stage-2 cutout-CNN training panels")
+    ap.add_argument("--n-val2", type=int, default=100, help="held-out val2 for the stage-2 CNN threshold")
+    ap.add_argument("--n-test", type=int, default=300, help="held-out evaluation panels")
+    ap.add_argument("--repartition", action="store_true",
+                    help="re-select the panel universe + rewrite split.json. Otherwise an existing "
+                         "split.json is reused (so partial/repeat builds are consistent + deterministic).")
+    # --- injection core knobs (UNCHANGED semantics + defaults) ---
     ap.add_argument("--trail-length-min", type=float, default=6)
     ap.add_argument("--trail-length-max", type=float, default=60)
     ap.add_argument("--mag-min", type=float, default=22.5)
@@ -1064,99 +1040,97 @@ def main():
     ap.add_argument("--beta-min", type=float, default=0)
     ap.add_argument("--beta-max", type=float, default=180)
     ap.add_argument("--number", type=int, default=20)
-    ap.add_argument("--stack-detection-threshold", type=float, default=5.0)
-    ap.add_argument("--measueTrails", action="store_true", default=False)
-    ap.add_argument("--seed", type=int, default=123)
-    ap.add_argument("--chunks", type=int, default=None)
-    ap.add_argument("--test-only", action="store_true", default=False)
-    ap.add_argument("--target-train-panels", type=int, default=0,
-                    help="Stop once this many SUCCESSFUL train panels are written (0 = "
-                         "no cap). Combine with an oversampled --random-subset to hit an "
-                         "exact dataset size despite skipped refs, without overshooting disk.")
-    ap.add_argument("--skip-prevalidation", action="store_true", default=False,
-                    help="Skip the slow per-pair template/source pre-validation. "
-                         "Generation skips failed pairs anyway (writes no CSV rows), and "
-                         "CSV-driven training excludes the resulting empty h5 slots -- so "
-                         "this is empty-tensor-safe and much faster to start. Oversample "
-                         "--random-subset slightly to offset ~5-15%% skipped pairs.")
-    ap.add_argument("--exclude-pairs-csv", nargs="*", default=None,
-                    help="CSV file(s) with visit,detector columns whose pairs must "
-                         "NOT be selected for injection (leakage guard against test "
-                         "sets). e.g. the test_5sigma and test_real catalogs.")
+    ap.add_argument("--stack-detection-threshold", type=float, default=5.0,
+                    help="stack DIA detection sigma for the stack_detection label (train family + val)")
+    ap.add_argument("--test-sigma", type=float, default=None,
+                    help="stack-detection sigma for the TEST set only (default = --stack-detection-threshold). "
+                         "Rebuild test at another depth with `--sets test --test-sigma N` (same panels).")
     ap.add_argument("--realistic-trail", action="store_true", default=False,
-                    help="Render trails with the realistic (light-curve/tapered/"
-                         "curved) renderer instead of the uniform galsim.Box. "
-                         "Leakage-free: physical priors only.")
-    ap.add_argument("--split-json", default=None,
-                    help="unified train/train2/test/val split from ADCNN.pipelines.make_split. With "
-                         "--split-key, build ONLY that set's panels by excluding every panel of the "
-                         "OTHER sets -> the three datasets are disjoint by construction.")
-    ap.add_argument("--split-key", default=None, choices=["train", "train2", "test", "val"],
-                    help="which set of --split-json to build")
+                    help="render trails with the realistic (light-curve/tapered/curved) renderer "
+                         "instead of the uniform galsim.Box (leakage-free: physical priors only)")
+    ap.add_argument("--measueTrails", action="store_true", default=False)
+    # --- determinism / scale ---
+    ap.add_argument("--seed", type=int, default=2026,
+                    help="ONE seed: panel universe selection + partition + per-panel injections")
+    ap.add_argument("--parallel", type=int, default=4)
+    ap.add_argument("--chunks", type=int, default=None)
+    ap.add_argument("--skip-prevalidation", action="store_true", default=False,
+                    help="skip the slow per-panel template/source pre-validation when selecting the "
+                         "universe (faster; unbuildable panels are simply skipped at build time)")
+    ap.add_argument("--exclude-pairs-csv", nargs="*", default=None,
+                    help="CSV(s) with visit,detector columns to keep OUT of the universe (leakage "
+                         "guard against EXTERNAL sets, e.g. the real-asteroid test_real catalog)")
     args = ap.parse_args()
 
+    import json
     if args.realistic_trail:
         os.environ["ADCNN_REALISTIC_TRAIL"] = "1"
         print("[main] realistic trail renderer ENABLED", flush=True)
-
+    logging.getLogger("lsst").setLevel(logging.ERROR)
     ensure_dir(args.save_path)
-    logger = logging.getLogger("lsst")
-    logger.setLevel(logging.ERROR)
-
-    # leakage guard: never inject into a (visit,detector) that is in a test set.
-    exclude_keys = None
-    if args.exclude_pairs_csv:
-        ek = set()
-        for p in args.exclude_pairs_csv:
-            df = pd.read_csv(p)
-            ek |= {(int(v), int(d)) for v, d in zip(df["visit"], df["detector"])}
-        exclude_keys = ek
-        print(f"[main] excluding {len(exclude_keys)} (visit,detector) pairs from "
-              f"{len(args.exclude_pairs_csv)} csv(s)", flush=True)
-
-    # unified split: build ONLY this key's panels by excluding every panel of the OTHER sets, so
-    # train / train2 / test (/ val) are mutually disjoint by construction (ADCNN.pipelines.make_split).
-    if args.split_json:
-        if not args.split_key:
-            raise SystemExit("--split-json requires --split-key")
-        import json
-        split = json.loads(open(args.split_json).read())
-        other = set()
-        for k, pairs in split.items():
-            if k == args.split_key or not isinstance(pairs, list):
-                continue
-            other |= {(int(v), int(d)) for v, d in pairs}
-        exclude_keys = (exclude_keys or set()) | other
-        print(f"[main] split '{args.split_key}': excluding {len(other)} panels of the other sets",
-              flush=True)
-
     coll = args.collections if len(args.collections) > 1 else args.collections[0]
+    sizes = {"train": args.n_train, "val": args.n_val, "train2": args.n_train2,
+             "val2": args.n_val2, "test": args.n_test}
+    split_path = os.path.join(args.save_path, "split.json")
 
-    run_parallel_injection(
-        repo=args.repo,
-        coll=coll,
-        save_path=args.save_path,
-        number=args.number,
-        trail_length=[args.trail_length_min, args.trail_length_max],
-        magnitude=[args.mag_min, args.mag_max],
-        mag_mode=args.mag_mode,
-        beta=[args.beta_min, args.beta_max],
-        parallel=args.parallel,
-        where=args.where,
-        skymap=args.skymap,
-        stage3_collection=args.stage3_collection,
-        random_subset=args.random_subset,
-        train_test_split=args.train_test_split,
-        chunks=args.chunks,
-        test_only=args.test_only,
-        seed=args.seed,
-        psf_template=args.psf_template,
-        stack_detection_threshold=args.stack_detection_threshold,
-        measueTrails=args.measueTrails,
-        exclude_keys=exclude_keys,
-        check_refs=not args.skip_prevalidation,
-        target_train_panels=args.target_train_panels,
-    )
+    # --- 1. panel partition (deterministic; cached in split.json) ---
+    if os.path.exists(split_path) and not args.repartition:
+        meta = json.loads(open(split_path).read())
+        parts = {k: [(int(v), int(d)) for v, d in meta["sets"][k]] for k in _SET_ORDER}
+        print(f"[split] reusing {split_path}: "
+              + ", ".join(f"{k}={len(parts[k])}" for k in _SET_ORDER), flush=True)
+    else:
+        exclude_keys = set()
+        for p in (args.exclude_pairs_csv or []):
+            df = pd.read_csv(p)
+            exclude_keys |= {(int(v), int(d)) for v, d in zip(df["visit"], df["detector"])}
+        if exclude_keys:
+            print(f"[split] excluding {len(exclude_keys)} external (visit,detector) pairs", flush=True)
+        n_universe = sum(sizes.values())
+        refs = select_good_refs_random_check(
+            repo=args.repo, collections=coll, where=args.where, skymap=args.skymap,
+            stage3_collection=args.stage3_collection, instrument="LSSTCam",
+            k=n_universe, seed=args.seed, exclude_keys=exclude_keys,
+            check_refs=not args.skip_prevalidation, verbose=True)
+        keys = [_key_from_dataId(r.dataId) for r in refs]
+        if len(keys) < n_universe:
+            print(f"[split] WARNING: universe has {len(keys)} < requested {n_universe} panels; "
+                  "sets will be short — widen --where or lower --n-*.", flush=True)
+        parts = _partition(keys, sizes, args.seed)
+        meta = {"seed": args.seed, "where": args.where,
+                "sizes": {k: len(parts[k]) for k in _SET_ORDER},
+                "sets": {k: [[int(v), int(d)] for (v, d) in parts[k]] for k in _SET_ORDER}}
+        with open(split_path, "w") as f:
+            json.dump(meta, f, indent=2)
+        print(f"[split] wrote {split_path}: "
+              + ", ".join(f"{k}={len(parts[k])}" for k in _SET_ORDER), flush=True)
+
+    # --- 2. build the requested sets with the validated injection core ---
+    build = [s for g in args.sets for s in _GROUPS[g]]
+    all_keys = [k for s in _SET_ORDER for k in parts[s]]
+    if not all_keys:
+        raise SystemExit("[main] empty partition; nothing to build")
+    butler = Butler(args.repo, collections=coll)
+    v0, d0 = all_keys[0]
+    dims = butler.get("preliminary_visit_image.dimensions",
+                      dataId={"instrument": "LSSTCam", "visit": int(v0), "detector": int(d0)})
+    test_sigma = args.test_sigma if args.test_sigma is not None else args.stack_detection_threshold
+    common = dict(repo=args.repo, coll=coll, dims=dims, save_path=args.save_path,
+                  number=args.number, trail_length=[args.trail_length_min, args.trail_length_max],
+                  magnitude=[args.mag_min, args.mag_max], beta=[args.beta_min, args.beta_max],
+                  mag_mode=args.mag_mode, psf_template=args.psf_template,
+                  measueTrails=args.measueTrails, seed=args.seed, skymap=args.skymap,
+                  stage3_collection=args.stage3_collection, parallel=args.parallel, chunks=args.chunks)
+    for name in _SET_ORDER:
+        if name not in build:
+            continue
+        if not parts[name]:
+            print(f"[build:{name}] no panels in partition; skipping", flush=True)
+            continue
+        thr = test_sigma if name == "test" else args.stack_detection_threshold
+        dataids = [{"instrument": "LSSTCam", "visit": int(v), "detector": int(d)} for (v, d) in parts[name]]
+        _build_set(dataids, name=name, stack_detection_threshold=thr, **common)
+    print("DATASETS DONE", flush=True)
 
 
 if __name__ == "__main__":
