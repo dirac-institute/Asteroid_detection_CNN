@@ -52,7 +52,7 @@ def load_cnn(path: str, device: str = "cpu"):
     """Load the focal cutout CNN (width-40 state_dict) in eval mode on `device`."""
     import torch
     net = build_net().to(device)
-    net.load_state_dict(torch.load(str(path), map_location=device))
+    net.load_state_dict(torch.load(str(path), map_location=device, weights_only=True))
     net.eval()
     return net
 
@@ -76,7 +76,11 @@ def make_cutouts(cand_df, img, prob, agg, *, k: int = CUTOUT_K) -> np.ndarray:
     img = np.asarray(img, np.float32)
     prob = np.asarray(prob, np.float32)
     agg = np.asarray(agg, np.float32)
-    sig = float(np.median(np.abs(img - np.median(img))) * 1.4826) or 1.0
+    # MAD-sigma over FINITE pixels only: real DP2 diffims carry NaN/masked pixels, and a NaN here
+    # would poison every cutout (NaN is truthy, so the old `... or 1.0` did not guard it).
+    finite = img[np.isfinite(img)]
+    sig = float(np.median(np.abs(finite - np.median(finite))) * 1.4826) if finite.size else 1.0
+    sig = sig or 1.0
     if not len(cand_df):
         return np.zeros((0, 3, k, k), np.float32)
     X = np.stack([
@@ -84,7 +88,8 @@ def make_cutouts(cand_df, img, prob, agg, *, k: int = CUTOUT_K) -> np.ndarray:
                   _cutout(prob, r.x_centroid, r.y_centroid, k),
                   _cutout(agg, r.x_centroid, r.y_centroid, k)])
         for _, r in cand_df.iterrows()]).astype(np.float32)
-    return np.clip(X, -20, 20)
+    # scrub NaN/inf (masked pixels) to finite before the model sees them; no-op on clean sim data
+    return np.clip(np.nan_to_num(X, nan=0.0, posinf=20.0, neginf=-20.0), -20, 20)
 
 
 def apply_cnn(cand_df, cnn, img, prob, agg, *, thr: float | None = None,

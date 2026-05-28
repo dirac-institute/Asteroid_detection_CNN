@@ -109,7 +109,9 @@ from lsst.source.injection.inject_exposure import ExposureInjectTask
 # pair 198/850 to a NoWorkFound("Insufficient Template Coverage. (8.2% < 10%)")
 # until this was added.
 _SKIP_EXCEPTIONS = (
-    Exception,
+    # ONLY the LSST-stack control-flow exceptions that legitimately mean "skip this pair" (e.g. a
+    # template-coverage shortfall). Do NOT add bare Exception here: that turns a genuine bug into a
+    # silently-skipped pair and yields an empty/short dataset with no failure signal.
     NoWorkFound,
     UnprocessableDataError,
     UpstreamFailureNoWorkFound,

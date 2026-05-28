@@ -88,10 +88,11 @@ def stage_finalize(a, rd, outdir):
     t0 = time.time()
     mn.finalize_link_refine(rd, BIN, maxrms=MAXRMS)
     n_rec = n_false = n_gated = 0
-    if (rd / "lr.csv").exists() and (rd / "lr_rms.csv").stat().st_size > 0:
+    lrr = rd / "lr_rms.csv"
+    if (rd / "lr.csv").exists() and lrr.exists() and lrr.stat().st_size > 0:   # 0-link runs: file may be absent
         lr = pd.read_csv(rd / "lr.csv"); lr.columns = [c.lstrip("#") for c in lr.columns]
-        rms = pd.read_csv(rd / "lr_rms.csv"); rms.columns = [c.lstrip("#") for c in rms.columns]
-        good = set(rms[(rms.posRMS < POSRMS_GATE) & (rms.obsnights >= NIGHT_GATE)].clusternum)
+        rms = pd.read_csv(lrr); rms.columns = [c.lstrip("#") for c in rms.columns]
+        good = set(rms[rms.obsnights >= NIGHT_GATE].clusternum)   # same loose gate as the trash-MC (obsnights only)
         rec = set()
         for cl, trk in lr.groupby("clusternum"):
             if cl not in good:
@@ -109,10 +110,12 @@ def stage_finalize(a, rd, outdir):
                 n_false += 1
         n_rec = len(rec)
     N_INJ = meta["n_injected"]
+    n_true = n_gated - n_false   # gated tracks matching an injected NEO (track-level; n_rec = distinct objects)
     res = dict(fp_per_panel=meta["fpp"], n_injected=N_INJ, n_dets=meta["n_dets"],
                n_tracklets=meta["n_tracklets"], n_gated_tracks=n_gated, n_recovered=n_rec,
-               completeness=round(n_rec / max(N_INJ, 1), 3), n_false=n_false,
-               purity=round(n_rec / max(n_rec + n_false, 1), 3),
+               completeness=round(n_rec / max(N_INJ, 1), 3),   # distinct NEOs recovered / injected (object-level)
+               n_true_tracks=n_true, n_false=n_false,
+               purity=round(n_true / max(n_gated, 1), 3),       # real tracks / all gated tracks (track-level)
                runtime_s=round(meta.get("prep_s", 0) + time.time() - t0, 1))
     pd.DataFrame([res]).to_csv(outdir / f"result_{meta['fpp']:05d}.csv", index=False)
     print(f"fpp={meta['fpp']} | inj {N_INJ} | gated {n_gated} | recovered {n_rec} (compl {res['completeness']}) | "

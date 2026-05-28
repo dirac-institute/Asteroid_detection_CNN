@@ -122,7 +122,7 @@ def _attach_routing_keys(cat: pd.DataFrame, panels_csv) -> pd.DataFrame:
     """Left-join visit/detector/band from `panels_csv` (for the downstream HelioLinC WCS step)."""
     if not panels_csv:
         return cat
-    pan = pd.read_csv(panels_csv)
+    pan = pd.read_csv(panels_csv).drop_duplicates("image_id")  # dup image_id would multiply rows
     keep = [c for c in _ROUTING_KEYS if c in pan.columns]
     return cat.merge(pan[keep], on="image_id", how="left") if len(keep) > 1 else cat
 

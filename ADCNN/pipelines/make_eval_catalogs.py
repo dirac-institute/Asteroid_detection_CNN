@@ -39,7 +39,9 @@ def main():
     ap.add_argument("--cnn", default=str(REPO / "models/cnn_postproc.pt"))
     ap.add_argument("--out", default=str(REPO / "Evaluation/catalogs"))
     ap.add_argument("--cnn-thr", type=float, default=CNN_DEFAULT_THR, help="CNN operating point (pre-chosen)")
-    ap.add_argument("--gate-pmax", type=float, default=0.10, help="cheap candidate gate (val-validated, 0 TP loss)")
+    ap.add_argument("--gate-pmax", type=float, default=0.10,
+                    help="cheap candidate gate: skip feature extraction where peak NN prob < this. "
+                         "0.10 was validated TP-safe on val; raising it can drop genuine faint trails.")
     ap.add_argument("--tile-batch", type=int, default=64)
     ap.add_argument("--tol-px", type=float, default=20.0, help="trail-overlap match tolerance (fixed, pre-chosen)")
     ap.add_argument("--n-gpus", type=int, default=0, help="0 = all visible GPUs")
@@ -55,6 +57,9 @@ def main():
         if not h5.exists():
             print(f"[skip] {name}: no {h5}", flush=True)
             continue
+        import h5py
+        with h5py.File(h5, "r") as _f:        # true panel count for the fp_per_panel denominator
+            n_panels = int(_f["images"].shape[0])
         panels = d / "panels.csv"
         t0 = time.time()
         cfg = InferenceConfig(cnn_thr=a.cnn_thr, gate_pmax=a.gate_pmax, tile_batch=a.tile_batch)
@@ -68,7 +73,7 @@ def main():
 
         truth_csv = d / "test.csv"
         if truth_csv.exists():
-            c, _ = evaluate_catalog(cat, truth_csv, tol_px=a.tol_px)
+            c, _ = evaluate_catalog(cat, truth_csv, tol_px=a.tol_px, n_panels=n_panels)
             print(f"[{name}] {len(cat)} det -> {out_csv.name} | TP={c['TP']} FP={c['FP']} FN={c['FN']} "
                   f"recall={c['recall']:.3f} FP/panel={c['fp_per_panel']:.1f} | "
                   f"{dt:.0f}s ({dt/max(c['n_panels'],1):.2f}s/panel)", flush=True)

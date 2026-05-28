@@ -27,7 +27,8 @@ DEFAULT_KNOWN = REPO / "experiments/heliolinc/run_truth/truth_dets.csv"
 
 
 def _sky_sep_arcsec(ra1, dec1, ra2, dec2):
-    return np.hypot((ra1 - ra2) * np.cos(np.radians(dec2)), dec1 - dec2) * 3600.0
+    dra = ((ra1 - ra2 + 180.0) % 360.0) - 180.0   # wrap to [-180,180] so RA 0/360 seam doesn't blow up
+    return np.hypot(dra * np.cos(np.radians(dec2)), dec1 - dec2) * 3600.0
 
 
 def label_track(track: pd.DataFrame, known: pd.DataFrame, tol_arcsec: float, tol_day: float):

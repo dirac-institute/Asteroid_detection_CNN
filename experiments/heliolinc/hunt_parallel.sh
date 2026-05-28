@@ -49,6 +49,9 @@ for f in grid_chunk_*; do
 done
 echo "launched ${#pids[@]} heliolinc shards; waiting..."
 fail=0; for p in "${pids[@]}"; do wait "$p" || fail=$((fail+1)); done
+# A failed shard means part of the hypothesis grid was never searched -> link_refine would report a
+# partial result as if complete, silently losing any object whose grid point was in the dead shard.
+if [ "$fail" -gt 0 ]; then echo "ABORT: $fail/${#pids[@]} heliolinc shards failed -> partial grid, refusing to link"; exit 1; fi
 echo "shards done (failures=$fail); clusters across shards: $(cat hl_clusters_*.csv 2>/dev/null | grep -vc '^#ptct' || echo 0)"
 
 # 4) link_refine over ALL shard outputs (merges) -> lr.csv
@@ -57,7 +60,7 @@ for s in $(ls hl_summary_*.csv | sed 's/hl_summary_//;s/.csv//'); do
   [ -s "hl_clusters_${s}.csv" ] && echo "hl_clusters_${s}.csv hl_summary_${s}.csv" >> lflist.txt
 done
 echo "link_refine over $(wc -l < lflist.txt) shard files"
-"$BIN/link_refine" -pairdet pairdets.csv -lflist lflist.txt -maxrms 100000 -outfile lr.csv -outrms lr_rms.csv
+"$BIN/link_refine" -pairdet pairdets.csv -lflist lflist.txt -maxrms "${MAXRMS:-100000}" -outfile lr.csv -outrms lr_rms.csv
 echo "refined tracks: $(($(wc -l < lr_rms.csv) - 1))"
 
 # 5) crossmatch -> CONFIRMED + NEW

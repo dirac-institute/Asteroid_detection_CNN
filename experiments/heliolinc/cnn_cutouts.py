@@ -51,7 +51,7 @@ with h5py.File(a.h5,"r") as f:
             for i,((_,r),y_) in enumerate(zip(cand.iterrows(),lab)):
                 if i not in keep: continue
                 xx,yy=r.x_centroid,r.y_centroid
-                buf["X"].append(np.stack([cut(img,xx,yy)/s,cut(prob,xx,yy),cut(agg,xx,yy)]))
+                buf["X"].append(np.clip(np.nan_to_num(np.stack([cut(img,xx,yy)/s,cut(prob,xx,yy),cut(agg,xx,yy)])), -20, 20))  # match inference make_cutouts
                 buf["y"].append(int(y_)); buf["panel"].append(pid); buf["cid"].append(int(r.candidate_id))
                 buf["feat"].append(feat[i]); buf["xy"].append((xx,yy))
             print(f"  panel {pid}: {len(cand)} cand, {int((lab==1).sum())} TP",flush=True)

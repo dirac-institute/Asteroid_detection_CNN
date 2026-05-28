@@ -117,7 +117,6 @@ def synth_trails_from_ephemeris(known, exptime_s=30.0):
         if len(g) < 2:
             continue
         t = g.mjd.to_numpy(); ra = g.ra.to_numpy(); dec = g.dec.to_numpy()
-        cosd = np.cos(np.radians(dec))
         # local rate via central finite difference on the ephemeris (deg/day)
         dradt = np.gradient(ra, t); ddecdt = np.gradient(dec, t)
         for i in range(len(g)):

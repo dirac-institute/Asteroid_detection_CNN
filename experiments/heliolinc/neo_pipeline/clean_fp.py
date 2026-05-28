@@ -53,7 +53,10 @@ def main():
     # --- diaSource stream: real/bogus reliability cut (TP-safe FP cleaner), trailed ---
     if a.dia and Path(a.dia).exists():
         dia = pd.read_csv(a.dia); m0 = len(dia)
-        keep = (dia.reliability >= a.dia_reliability_min)
+        if "reliability" in dia:
+            keep = (dia.reliability >= a.dia_reliability_min)
+        else:                                        # no reliability column -> keep all (don't crash)
+            keep = pd.Series(True, index=dia.index)
         if "isNegative" in dia:
             keep &= ~dia.isNegative.astype(bool)
         if "trailLength" in dia:
@@ -70,7 +73,7 @@ def main():
     out = pd.concat(parts, ignore_index=True, sort=False)
     keep_cols = [c for c in COLS if c in out.columns]
     out = out[keep_cols]
-    nnight = out["mjd"].astype(int).nunique() if len(out) else 1
+    nnight = int(np.floor(out["mjd"] - 0.5).nunique()) if len(out) else 1   # floor-to-night, not trunc
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     out.to_csv(a.out, index=False)
     print(f"[clean] merged -> {len(out)} detections ({len(out)//max(nnight,1)}/night) "

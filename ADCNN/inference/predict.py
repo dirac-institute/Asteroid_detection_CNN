@@ -18,7 +18,9 @@ from ADCNN.data.preprocessing import build_3channel, diffim_mad_sigma
 def _tile_starts(N, t, sstep):
     """Sliding-window start offsets tiling [0, N) with `t`-wide windows at stride
     `sstep`, always including the flush-right final tile (N - t)."""
-    out = list(range(0, max(N - t, 0) + 1, sstep))
+    if N <= t:          # panel smaller than a tile: one start at 0 (avoids a negative N-t start)
+        return [0]
+    out = list(range(0, N - t + 1, sstep))
     if out[-1] != N - t:
         out.append(N - t)
     return out
@@ -69,7 +71,7 @@ def predict_panel_overlap_3ch(
             return
         # Each entry is already (3, T, T); stack to (B, 3, T, T)
         xb = torch.from_numpy(np.stack(batch_xs)).to(device, non_blocking=True)
-        with torch.amp.autocast("cuda", enabled=(device.type == "cuda")):
+        with torch.no_grad(), torch.amp.autocast("cuda", enabled=(device.type == "cuda")):
             seg_logits, _, _, _, _ = model(xb)
         probs = torch.sigmoid(seg_logits).cpu().numpy().astype(np.float32)
         for (y0, x0), p in zip(batch_locs, probs[:, 0]):

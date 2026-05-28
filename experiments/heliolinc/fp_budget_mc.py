@@ -48,18 +48,19 @@ def stage_prep(a, rd):
     det = pd.read_csv(SRC / "adcnn_dets_labeled.csv")
     fp = det[det.objid.isna()].copy()
     fp["panel"] = fp.visit.astype(str) + "_" + fp.detector.astype(str)
-    pan = fp.groupby("panel").agg(ra_lo=("ra", "min"), ra_hi=("ra", "max"), dec_lo=("dec", "min"),
-                                  dec_hi=("dec", "max"), mjd=("mjd", "first"))
+    pan = fp.groupby("panel").agg(ra_c=("ra", "mean"), dec_c=("dec", "mean"), mjd=("mjd", "first"))
     NPAN = len(pan)
     cd = np.cos(np.radians(fp.dec.values))
     v_rate = np.hypot((fp.ra1 - fp.ra0).values * cd, (fp.dec1 - fp.dec0).values) / EXPT
     v_dir = np.degrees(np.arctan2((fp.dec1 - fp.dec0).values, (fp.ra1 - fp.ra0).values * cd))
     rng = np.random.default_rng(a.seed + a.fpp)
-    rows = []
+    CCD = 0.22   # LSST detector size (deg): sample a FIXED footprint so trash density is well-defined
+    rows = []                                          # (the old FP min/max box biased density per area)
     for p, r in pan.iterrows():
         n = a.fpp
-        ra = rng.uniform(r.ra_lo, r.ra_hi, n) if r.ra_hi > r.ra_lo else np.full(n, r.ra_lo)
-        dec = rng.uniform(r.dec_lo, r.dec_hi, n) if r.dec_hi > r.dec_lo else np.full(n, r.dec_lo)
+        cc = max(float(np.cos(np.radians(r.dec_c))), 1e-6)
+        ra = r.ra_c + rng.uniform(-CCD / 2, CCD / 2, n) / cc
+        dec = r.dec_c + rng.uniform(-CCD / 2, CCD / 2, n)
         j = rng.integers(0, len(v_rate), n)
         om, ph = v_rate[j], np.radians(v_dir[j])
         half = 0.5 * om * EXPT

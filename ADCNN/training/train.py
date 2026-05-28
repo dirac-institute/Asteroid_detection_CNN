@@ -83,7 +83,7 @@ def validate(model, loader, device, *, lambda_orient: float):
         if neg_mask.any():
             ng = pp[neg_mask]
             if ng.size > 100_000:
-                idx = np.random.choice(ng.size, size=100_000, replace=False)
+                idx = np.random.default_rng(0).choice(ng.size, size=100_000, replace=False)
                 ng = ng[idx]
             neg_p.append(ng)
 
@@ -92,7 +92,7 @@ def validate(model, loader, device, *, lambda_orient: float):
     if pos_p and neg_p:
         ps = np.concatenate(pos_p)
         ns = np.concatenate(neg_p)
-        ns_sub = ns if ns.size <= 1_000_000 else np.random.choice(ns, size=1_000_000, replace=False)
+        ns_sub = ns if ns.size <= 1_000_000 else np.random.default_rng(0).choice(ns, size=1_000_000, replace=False)
         try:
             y_true = np.concatenate([np.ones_like(ps), np.zeros_like(ns_sub)])
             y_score = np.concatenate([ps, ns_sub])
@@ -205,6 +205,8 @@ def main():
         vp = sorted(vcsv["image_id"].unique())[: args.n_val_panels]
         train_panels, val_panels = None, vp  # multi-shard: no single flat train-panel list
         log(f"val: {len(vp)} held-out panels from {args.data_h5.split('/')[-2]}")
+        (run_dir / "split.json").write_text(json.dumps({   # authoritative val ids for the stage-2 CNN
+            "train_panels": None, "val_panels": [int(p) for p in vp]}, indent=2))
         val_ds = DiffimRandomCropDataset3ch(
             args.data_h5, vcsv, panel_ids=vp, tile=args.tile,
             n_pos_anchors_per_epoch=500, n_neg_anchors_per_epoch=200,
@@ -316,7 +318,7 @@ def main():
     history: list[dict] = []
     for epoch in range(1, args.epochs + 1):
         train_ds.set_epoch(epoch)
-        val_ds.set_epoch(epoch)
+        val_ds.set_epoch(0)   # pin val crops across epochs -> stable, comparable model selection
         model.train()
         t0 = time.time()
         epoch_loss = 0.0

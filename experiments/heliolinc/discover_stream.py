@@ -63,7 +63,11 @@ def _prefetch(paths, workers):
             futs[i] = ex.submit(read_fits_panel, paths[i])
         submitted = len(futs)
         while nxt < len(paths):
-            res = futs.pop(nxt).result()
+            try:
+                res = futs.pop(nxt).result()
+            except Exception as e:    # a corrupt/unreadable FITS must not kill the whole GPU shard
+                print(f"[prefetch] skip panel {nxt} ({paths[nxt]}): {type(e).__name__}: {e}", flush=True)
+                res = None
             if submitted < len(paths):  # keep the pipeline full
                 futs[submitted] = ex.submit(read_fits_panel, paths[submitted]); submitted += 1
             yield nxt, res
@@ -123,7 +127,8 @@ def run_shard(gpu_id, rows, v7_ckpt, cnn_model, thr, prefetch, out_csv, n_worker
                 # mag is NOT set here: the GPU streaming detector has no PhotoCalib. The calibrated AB
                 # magnitude (+ SNR) is MEASURED downstream in veres_measure_catalog (which loads the
                 # difference_image.photoCalib). NaN = not-yet-measured, never a placeholder value.
-                mjd=mjd, ra=sky[:, 0], dec=sky[:, 1], mag=np.nan, band=str(r["band"])[:1] or "r",
+                mjd=mjd, ra=sky[:, 0], dec=sky[:, 1], mag=np.nan,
+                band=(str(r["band"])[:1] if str(r["band"]).lower() not in ("nan", "") else "r"),
                 obscode=OBSCODE, visit=int(r["visit"]), detector=int(r["detector"]),
                 x=xy[:, 0], y=xy[:, 1], score=cand["score"].to_numpy(),
                 length=cand["length"].to_numpy(), len_db=L_db, mf_snr=cand["mf_snr"].to_numpy(),
@@ -138,7 +143,11 @@ def run_shard(gpu_id, rows, v7_ckpt, cnn_model, thr, prefetch, out_csv, n_worker
     ctx = mp.get_context("spawn")
     with ProcessPoolExecutor(max_workers=max(2, n_workers), mp_context=ctx,
                              initializer=_worker_init, initargs=(cnn_model, config)) as pool:
-        for i, (img, wcs, mjd) in _prefetch(paths, prefetch):
+        for i, data in _prefetch(paths, prefetch):
+            if data is None:                       # bad FITS (logged above): mark done, keep going
+                rr = rows[i]; donef.write(f'{int(rr["visit"])},{int(rr["detector"])}\n'); donef.flush()
+                continue
+            img, wcs, mjd = data
             rl = np.zeros(img.shape, dtype=np.uint16)
             prob, sin, cos, agg = predict_panel_overlap_3ch_full(model, img, rl, device=dev)
             pending.append((pool.submit(_worker, (i, prob, img, sin, cos, agg, rl)), rows[i], wcs, mjd))
@@ -165,8 +174,6 @@ def main():
     ap.add_argument("--prefetch", type=int, default=6, help="FITS reads in flight per GPU (bounds memory)")
     ap.add_argument("--n-gpus", type=int, default=0, help="0 = all visible")
     ap.add_argument("--out", default=str(REPO / "experiments/heliolinc/run_disco/adcnn_dets.csv"))
-    ap.add_argument("--dump-features", default=None,
-                    help="also write EVERY candidate's 72 features + ra/dec/mjd here (parquet, for RF retraining)")
     ap.add_argument("--limit", type=int, default=0, help="first N panels only (smoke test)")
     a = ap.parse_args()
 
@@ -188,7 +195,7 @@ def main():
     tmp = Path(a.out).parent
     tmp.mkdir(parents=True, exist_ok=True)
     shard_csvs = [str(tmp / f"_shard{g}.csv") for g in range(n_gpus)]
-    feat_pqs = [str(tmp / f"_feat{g}.parquet") if a.dump_features else None for g in range(n_gpus)]
+    feat_pqs = [None for _ in range(n_gpus)]   # legacy run_shard arg; feature-dump not used in CNN path
 
     if n_gpus == 1:
         run_shard(0, shards[0], a.v7, cnn_model, thr, a.prefetch, shard_csvs[0], n_workers, feat_pqs[0])
@@ -208,13 +215,6 @@ def main():
     cat.insert(0, "detid", range(len(cat)))
     cat.to_csv(a.out, index=False)
     (Path(a.out).parent / "colformat.txt").write_text(COLFORMAT)
-    if a.dump_features:
-        feats = pd.concat([pd.read_parquet(f) for f in feat_pqs if f and Path(f).exists()], ignore_index=True)
-        feats.to_parquet(a.dump_features, index=False)
-        print(f"[discover] dumped {len(feats)} candidate feature rows -> {a.dump_features}", flush=True)
-        for f in feat_pqs:
-            if f:
-                Path(f).unlink(missing_ok=True)
     for c in shard_csvs:
         Path(c).unlink(missing_ok=True)
         Path(c + ".done").unlink(missing_ok=True)   # resume sidecars (only here, after success)

@@ -25,8 +25,6 @@ def _eq_to_ecl_dir(ra_deg, dec_deg):
     v_eq = np.array([np.cos(d)*np.cos(r), np.cos(d)*np.sin(r), np.sin(d)])
     return Rx.T @ v_eq        # equatorial -> ecliptic unit vector
 
-def _accel(r):
-    return -GM * r / np.linalg.norm(r)**3
 
 def _deriv(s):
     r = s[:3]; return np.concatenate([s[3:], -GM*r/np.dot(r, r)**1.5])

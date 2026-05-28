@@ -22,7 +22,10 @@ from ADCNN.evaluation.geometry import label_components
 try:
     from ADCNN.utils.helpers import draw_one_line
 except ImportError:
-    # Fallback if draw_one_line not available
+    import warnings as _warnings
+    _warnings.warn("draw_one_line unavailable (cv2 missing): object-wise eval would degrade every "
+                   "trail to a single pixel and inflate FN. Install cv2 for correct results.",
+                   RuntimeWarning)
     def draw_one_line(mask, origin, angle_deg, length, true_value=1, line_thickness=3):
         raise NotImplementedError("draw_one_line requires cv2")
 
@@ -116,8 +119,8 @@ def _evaluate_single_image(args):
                 true_value=1,
                 line_thickness=half_psf,
             ).astype(bool)
-        except:
-            # Fallback to simple mask if draw_one_line fails
+        except Exception:
+            # Fallback to simple mask if draw_one_line fails (don't swallow KeyboardInterrupt etc.)
             mask_roi = np.zeros((roi_h, roi_w), dtype=bool)
             cy, cx = int(y - y0), int(x - x0)
             if 0 <= cy < roi_h and 0 <= cx < roi_w:
@@ -307,6 +310,9 @@ def combined_objectwise_confusion_separate(
     # ---------------------------
     # 4) Stack FP counted separately from stack mask
     # ---------------------------
+    # NOTE: this is a PANEL-level count (panels with any stack detection), not per-object, so it is
+    # not directly comparable to the per-object nn_fp. The authoritative FP accounting is the
+    # catalog-based path (ADCNN.evaluation.catalog_match); this objectwise routine is legacy.
     stack_fp = 0 if stack_mask is None else int(stack_mask.max(axis=(1, 2)).sum())
 
     # ---------------------------

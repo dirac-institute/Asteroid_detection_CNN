@@ -69,7 +69,10 @@ def _fit_panel(args):
         photocalib = b.get("difference_image.photoCalib", dataId=_did)  # for calibrated AB magnitudes
         with fits.open(fits_path, memmap=False) as h:
             img = np.nan_to_num(h[1].data.astype(np.float32))
-            var = np.nan_to_num(h[3].data.astype(np.float32))
+            try:                                                     # select VARIANCE by name, not by
+                var = np.nan_to_num(h["VARIANCE"].data.astype(np.float32))   # fragile HDU index
+            except KeyError:
+                var = np.nan_to_num(h[3].data.astype(np.float32))
             wcs = WCS(h[1].header)
     except Exception as e:
         return [("ERR", f"v{visit} d{detector}: {type(e).__name__}: {e}")]
@@ -174,6 +177,8 @@ def main():
             done += 1
             if res and isinstance(res[0], tuple) and res[0][0] == "ERR":
                 errs += 1
+                if errs <= 20:                       # surface the first failures (don't swallow silently)
+                    print(f"  [veres ERR] {res[0][1]}", flush=True)
             else:
                 rows.extend(res)
             if done % 50 == 0 or done == ntot:
