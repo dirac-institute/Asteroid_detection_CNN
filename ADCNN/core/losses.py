@@ -1,4 +1,4 @@
-"""Training losses for the v7 diffim detector.
+"""Training losses for the segmentation model diffim detector.
 
 ``masked_aftl_loss`` — masked Asymmetric Focal Tversky (the primary segmentation loss,
 favouring recall on the thin-trail positives) plus a small unweighted BCE anchor.

@@ -1,6 +1,6 @@
 """Create ONE leakage-safe panel split — train / train2 / test / val — all at once.
 
-The three ADCNN datasets must never share a (visit, detector) panel: v7 trains on TRAIN, the stage-2
+The three ADCNN datasets must never share a (visit, detector) panel: segmentation model trains on TRAIN, the stage-2
 focal cutout CNN trains on TRAIN2, and everything is evaluated on TEST. The old per-dataset flow
 enforced this only partially — each set was built with ``--exclude-pairs-csv <test>``, so train and
 train2 were kept off the test panels but **not off each other** (their mutual disjointness rested only
@@ -86,7 +86,7 @@ def main():
     ap.add_argument("--train", type=int, default=-1, help="train panel count (-1 = the remainder)")
     ap.add_argument("--train2", type=int, default=500, help="stage-2 CNN train panel count")
     ap.add_argument("--test", type=int, default=300, help="test panel count")
-    ap.add_argument("--val", type=int, default=64, help="held-out val panel count (v7 selection + stage-2)")
+    ap.add_argument("--val", type=int, default=64, help="held-out val panel count (segmentation model selection + stage-2)")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
 

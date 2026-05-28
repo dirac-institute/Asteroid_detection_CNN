@@ -1,7 +1,7 @@
 """Stage-2 FALSE-POSITIVE filter — focal-loss cutout CNN.
 
-Stage 1 is the v7 NN (``predict`` + ``candidates``); stage 2 rejects false positives. For each
-v7 candidate this scores a 48x48 3-channel cutout ``[diffim/sigma, v7_prob, v7_agg]`` centred on
+Stage 1 is the segmentation model NN (``predict`` + ``candidates``); stage 2 rejects false positives. For each
+segmentation model candidate this scores a 48x48 3-channel cutout ``[diffim/sigma, seg_prob, seg_agg]`` centred on
 the candidate with a small conv net, then keeps detections whose score >= ``CNN_DEFAULT_THR``.
 
 Why a cutout CNN (and not the legacy 72-feature RandomForest): the CNN sees the raw local image
@@ -70,7 +70,7 @@ def _cutout(arr: np.ndarray, x: float, y: float, k: int = CUTOUT_K) -> np.ndarra
 
 
 def make_cutouts(cand_df, img, prob, agg, *, k: int = CUTOUT_K) -> np.ndarray:
-    """Build the (N, 3, k, k) cutout stack [diffim/sigma, v7_prob, v7_agg] for each candidate.
+    """Build the (N, 3, k, k) cutout stack [diffim/sigma, seg_prob, seg_agg] for each candidate.
     The diffim channel is normalised by the panel MAD-sigma and clipped to [-20, 20], exactly as
     in training — so a model trained by ``ADCNN.training.cnn_postproc`` scores them consistently."""
     img = np.asarray(img, np.float32)

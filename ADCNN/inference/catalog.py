@@ -3,7 +3,7 @@
 Runs the full two-stage detector over every panel of an h5 and emits ONE ROW PER KEPT
 DETECTION (CNN score >= ``config.cnn_thr``) as a CSV catalog:
 
-    v7 segmentation  ->  candidate components + trail measurement  ->  focal cutout-CNN score
+    segmentation model segmentation  ->  candidate components + trail measurement  ->  focal cutout-CNN score
 
 Each row carries the *measured* trail geometry (centroid x/y, orientation ``beta``, ``length``),
 brightness (``flux``), the raw NN peak and the stage-2 CNN ``score`` — everything an evaluator
@@ -15,10 +15,10 @@ WCS (``lsst_distrib`` env, no torch). This engine runs in the torch env and emit
 catalog plus routing keys (``image_id`` + ``visit``/``detector``/``band`` when a ``panels.csv`` is
 supplied).
 
-Performance: the GPU runs v7 inference (with parallel per-tile CPU prep) in the main process while
+Performance: the GPU runs segmentation model inference (with parallel per-tile CPU prep) in the main process while
 a pool of worker processes computes candidate features in parallel across panels (CPU-bound per
 panel, so it overlaps behind the GPU). The small width-40 cutout CNN scores on the GPU alongside
-v7. ``build_detection_catalog_multigpu`` shards panels across all GPUs. The output is independent
+segmentation model. ``build_detection_catalog_multigpu`` shards panels across all GPUs. The output is independent
 of worker/GPU count (rows sorted by ``image_id``).
 
     python -m ADCNN.inference.catalog --h5 DATA_DIFFIM/test_5sigma/test.h5 \
@@ -75,7 +75,7 @@ class InferenceConfig:
       cnn_thr  : CNN score operating point (keep detections with score >= this).
       gate_pmax: skip the expensive candidate features for candidates whose peak NN prob < this
                  (the CNN scores them ~0 anyway; 0 = no gate).
-      stride   : sliding-window stride for v7 inference.
+      stride   : sliding-window stride for segmentation model inference.
     Speed-only (do not change detections):
       tile_batch: tiles per GPU forward.
     """
@@ -88,7 +88,7 @@ class InferenceConfig:
 DEFAULT_CONFIG = InferenceConfig()
 PROGRESS_S = 20.0  # heartbeat interval (s) for the per-shard progress print
 
-# v7's segmentation/matched-filter over-extends trail ends ("ends bloom"): the raw mf_length is
+# segmentation model's segmentation/matched-filter over-extends trail ends ("ends bloom"): the raw mf_length is
 # biased, mf_length ≈ MF_LEN_SLOPE*L_true + MF_LEN_OFFSET (≈0.887*L + 33.4 px, fit on test_5sigma).
 # The emitted `length` INVERTS this to the physical trail length (median residual ~0px vs truth),
 # so eval parameter-recovery is unbiased and HelioLinC gets the true length. Single source of
@@ -99,7 +99,7 @@ MF_LEN_SLOPE = 0.887
 
 def _panel_to_catalog(pid: int, prob, img, sin, cos, agg, rl, cnn,
                       config: InferenceConfig) -> Optional[pd.DataFrame]:
-    """Stage 2 for one panel: v7 candidates -> cutout-CNN score -> keep score>=cnn_thr -> public
+    """Stage 2 for one panel: segmentation model candidates -> cutout-CNN score -> keep score>=cnn_thr -> public
     schema. Returns the per-panel catalog slice, or None if no detection survives."""
     from ADCNN.inference.features import compute_v2_features
     from ADCNN.inference.cnn_postproc import apply_cnn
@@ -149,7 +149,7 @@ def _load_filter(cnn_pt: str, config: InferenceConfig):
 def _worker_init(cnn_pt: str, config: InferenceConfig) -> None:
     """Isolate each feature worker: pin BLAS to one thread (we parallelise across panels, so
     per-worker thread pools would only oversubscribe) and load one CNN. The cutout CNN scores
-    on the GPU, so the worker keeps the shard's CUDA_VISIBLE_DEVICES (shared with v7)."""
+    on the GPU, so the worker keeps the shard's CUDA_VISIBLE_DEVICES (shared with segmentation model)."""
     for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
         os.environ[var] = "1"
     global _CNN, _CONFIG
@@ -164,7 +164,7 @@ def _worker(args):
 def _iter_panel_outputs(model, h5_path, panel_ids, device, config: InferenceConfig,
                         prep_workers) -> Iterator[tuple]:
     """Yield ``(pid, prob, img, sin, cos, agg, rl)`` for each panel: read the diffim + DIA
-    mask and run v7 sliding-window inference (GPU, with parallel CPU prep)."""
+    mask and run segmentation model sliding-window inference (GPU, with parallel CPU prep)."""
     from ADCNN.inference.predict import predict_panel_overlap_3ch_full
     with h5py.File(h5_path, "r") as f:
         ids = range(int(f["images"].shape[0])) if panel_ids is None else panel_ids
@@ -177,13 +177,13 @@ def _iter_panel_outputs(model, h5_path, panel_ids, device, config: InferenceConf
             yield int(pid), prob, img, sin, cos, agg, rl
 
 
-def build_detection_catalog(h5_path, v7_ckpt, cnn_pt, *, config: InferenceConfig = DEFAULT_CONFIG,
+def build_detection_catalog(h5_path, seg_ckpt, cnn_pt, *, config: InferenceConfig = DEFAULT_CONFIG,
                             panels_csv=None, panel_ids: Optional[Iterable[int]] = None,
                             device: str = "cuda", n_workers: Optional[int] = None,
                             prep_workers: Optional[int] = None) -> pd.DataFrame:
     """Run the two-stage detector over `h5_path`; return one row per kept detection.
 
-    v7 inference (GPU, main process) is pipelined with a pool of `n_workers` CPU processes
+    segmentation model inference (GPU, main process) is pipelined with a pool of `n_workers` CPU processes
     computing candidate features + the cutout CNN in parallel across panels (`n_workers<=1` runs
     them inline). The result is independent of `n_workers`. `panels_csv` attaches
     visit/detector/band for the HelioLinC WCS step. `prep_workers` sets the per-tile CPU prep
@@ -205,11 +205,11 @@ def build_detection_catalog(h5_path, v7_ckpt, cnn_pt, *, config: InferenceConfig
     else:
         with h5py.File(h5_path, "r") as f:
             total = int(f["images"].shape[0])
-    model = torch.jit.load(str(v7_ckpt), map_location=dev).eval()
+    model = torch.jit.load(str(seg_ckpt), map_location=dev).eval()
     panels = _iter_panel_outputs(model, h5_path, panel_ids, dev, config, prep_workers)
     parts: list[pd.DataFrame] = []
 
-    # progress heartbeat: panels v7-processed / total + detections so far + rate + ETA, every PROGRESS_S
+    # progress heartbeat: panels segmentation model-processed / total + detections so far + rate + ETA, every PROGRESS_S
     tag = os.environ.get("CUDA_VISIBLE_DEVICES") or str(device)
     t0 = time.time(); last = [t0]; n = [0]
 
@@ -242,7 +242,7 @@ def build_detection_catalog(h5_path, v7_ckpt, cnn_pt, *, config: InferenceConfig
                                  initializer=_worker_init, initargs=(str(cnn_pt), config)) as pool:
             for out in panels:
                 pending.append(pool.submit(_worker, out))
-                n[0] += 1; tick()             # n = panels v7-processed (GPU is the bottleneck)
+                n[0] += 1; tick()             # n = panels segmentation model-processed (GPU is the bottleneck)
                 if len(pending) >= 2 * n_workers:   # backpressure: bound RAM + queue depth
                     drain()
             while pending:
@@ -252,15 +252,15 @@ def build_detection_catalog(h5_path, v7_ckpt, cnn_pt, *, config: InferenceConfig
     return _attach_routing_keys(_finalize(parts), panels_csv)
 
 
-def _gpu_shard_worker(gpu_id, h5_path, v7_ckpt, cnn_pt, shard, config, n_workers, q):
+def _gpu_shard_worker(gpu_id, h5_path, seg_ckpt, cnn_pt, shard, config, n_workers, q):
     """Run the engine on one panel shard pinned to GPU `gpu_id` (spawned process)."""
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-    cat = build_detection_catalog(h5_path, v7_ckpt, cnn_pt, config=config, panel_ids=shard,
+    cat = build_detection_catalog(h5_path, seg_ckpt, cnn_pt, config=config, panel_ids=shard,
                                   device="cuda", n_workers=n_workers, prep_workers=max(2, n_workers))
     q.put(cat)
 
 
-def build_detection_catalog_multigpu(h5_path, v7_ckpt, cnn_pt, *,
+def build_detection_catalog_multigpu(h5_path, seg_ckpt, cnn_pt, *,
                                      config: InferenceConfig = DEFAULT_CONFIG,
                                      panels_csv=None, panel_ids: Optional[Iterable[int]] = None,
                                      n_gpus: Optional[int] = None) -> pd.DataFrame:
@@ -272,7 +272,7 @@ def build_detection_catalog_multigpu(h5_path, v7_ckpt, cnn_pt, *,
     if n_gpus is None:
         n_gpus = max(1, torch.cuda.device_count())
     if n_gpus <= 1:
-        return build_detection_catalog(h5_path, v7_ckpt, cnn_pt, config=config,
+        return build_detection_catalog(h5_path, seg_ckpt, cnn_pt, config=config,
                                        panels_csv=panels_csv, panel_ids=panel_ids)
 
     if panel_ids is None:
@@ -290,7 +290,7 @@ def build_detection_catalog_multigpu(h5_path, v7_ckpt, cnn_pt, *,
     ctx = mp.get_context("spawn")
     q = ctx.Queue()
     procs = [ctx.Process(target=_gpu_shard_worker,
-                         args=(g, str(h5_path), str(v7_ckpt), str(cnn_pt), shards[g], config, per, q))
+                         args=(g, str(h5_path), str(seg_ckpt), str(cnn_pt), shards[g], config, per, q))
              for g in range(n_gpus) if shards[g]]
     for p in procs:
         p.start()
@@ -306,7 +306,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--h5", required=True, help="diffim panel h5 (images + real_labels)")
     ap.add_argument("--panels", help="optional panels.csv -> attach visit/detector/band")
-    ap.add_argument("--v7", default=str(REPO / "models/v7_diffim_scripted.pt"))
+    ap.add_argument("--seg-model", default=str(REPO / "models/segmentation_model.pt"))
     ap.add_argument("--cnn", default=str(REPO / "models/cnn_postproc.pt"), help="stage-2 cutout CNN")
     ap.add_argument("--out", required=True)
     ap.add_argument("--cnn-thr", type=float, default=CNN_DEFAULT_THR, help="CNN operating point (pre-chosen)")
@@ -332,10 +332,10 @@ def main():
     config = InferenceConfig(cnn_thr=a.cnn_thr, gate_pmax=a.gate_pmax,
                              stride=a.stride, tile_batch=a.tile_batch)
     if a.n_gpus and a.n_gpus > 1:
-        cat = build_detection_catalog_multigpu(a.h5, a.v7, a.cnn, config=config,
+        cat = build_detection_catalog_multigpu(a.h5, a.seg_model, a.cnn, config=config,
                                                panels_csv=a.panels, panel_ids=panel_ids, n_gpus=a.n_gpus)
     else:
-        cat = build_detection_catalog(a.h5, a.v7, a.cnn, config=config, panels_csv=a.panels,
+        cat = build_detection_catalog(a.h5, a.seg_model, a.cnn, config=config, panels_csv=a.panels,
                                       panel_ids=panel_ids, device=a.device, n_workers=(a.n_workers or None))
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     cat.to_csv(a.out, index=False)

@@ -1,4 +1,4 @@
-"""ENTRY POINT (thin CLI) — run the trained v7 + cutout CNN on diffim panels.
+"""ENTRY POINT (thin CLI) — run the trained segmentation model + cutout CNN on diffim panels.
 
 The actual end-to-end inference engine lives in ``ADCNN.inference.catalog`` — this module
 is a convenience CLI that calls it with the deployed models in ``models/`` and writes the
@@ -17,17 +17,17 @@ from ADCNN.inference.cnn_postproc import CNN_DEFAULT_THR
 REPO = Path(__file__).resolve().parents[2]
 
 
-def run(v7_ckpt, cnn_pt, h5_path, panel_ids, cnn_thr, device, panels_csv=None):
+def run(seg_ckpt, cnn_pt, h5_path, panel_ids, cnn_thr, device, panels_csv=None):
     """Return the detection catalog (one row per kept detection). Thin wrapper around
     ``ADCNN.inference.catalog.build_detection_catalog`` — kept for back-compat."""
-    return build_detection_catalog(h5_path, v7_ckpt, cnn_pt,
+    return build_detection_catalog(h5_path, seg_ckpt, cnn_pt,
                                    config=InferenceConfig(cnn_thr=cnn_thr),
                                    panels_csv=panels_csv, device=device, panel_ids=panel_ids)
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--v7", default=str(REPO / "models/v7_diffim_scripted.pt"))
+    ap.add_argument("--seg-model", default=str(REPO / "models/segmentation_model.pt"))
     ap.add_argument("--cnn", default=str(REPO / "models/cnn_postproc.pt"))
     ap.add_argument("--h5", required=True, help="diffim panel h5 (images + real_labels)")
     ap.add_argument("--panels", help="optional panels.csv -> attach visit/detector/band")
@@ -37,7 +37,7 @@ def main():
     ap.add_argument("--device", default="cuda")
     a = ap.parse_args()
     pids = range(a.limit) if a.limit else None
-    df = run(a.v7, a.cnn, a.h5, pids, a.cnn_thr, a.device, panels_csv=a.panels)
+    df = run(a.seg_model, a.cnn, a.h5, pids, a.cnn_thr, a.device, panels_csv=a.panels)
     df.to_csv(a.out, index=False)
     print(f"[inference] {len(df)} detections (CNN score>={a.cnn_thr}) -> {a.out}", flush=True)
 

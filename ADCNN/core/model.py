@@ -1,4 +1,4 @@
-"""UNet-ResSE backbone — the feature extractor under the v7 diffim detector.
+"""UNet-ResSE backbone — the feature extractor under the segmentation model diffim detector.
 
 A residual squeeze-and-excite U-Net. ``UNetResSEOrientHough`` (in ``detector.py``)
 wraps this backbone with ``out_ch=3`` (segmentation logit + orientation sin2β/cos2β)
@@ -80,7 +80,7 @@ class Up(nn.Module):
 class UNetResSE(nn.Module):
     """Residual squeeze-excite U-Net backbone (5 levels).
 
-    In v7/reg2: ``in_ch=3`` (signed diffim, local-std, DIA mask), ``out_ch=3``
+    In segmentation model/reg2: ``in_ch=3`` (signed diffim, local-std, DIA mask), ``out_ch=3``
     (seg logit + orientation sin2β/cos2β), ``widths=(24,48,96,192,384)``. Spatial
     dropout is applied at the bottleneck and pre-head; ``p_drop=0`` → Identity
     (byte-identical to the un-regularised net).

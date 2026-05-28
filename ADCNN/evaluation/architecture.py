@@ -129,7 +129,7 @@ def _save(fig, savepath):
 # --------------------------------------------------------------------------------------------------
 # model loading + tracing  (everything below reads the real architecture)
 # --------------------------------------------------------------------------------------------------
-def load_seg_model(path="models/v7_diffim_scripted.pt"):
+def load_seg_model(path="models/segmentation_model.pt"):
     """Reconstruct the segmentation nn.Module from the scripted checkpoint so we can hook it.
     Widths/depth/in_ch are inferred from the state_dict tensor shapes (no literals)."""
     import torch
@@ -467,8 +467,8 @@ def plot_filter_cnn(spec, thr=0.63, savepath=None):
         return (a - a.min()) / (np.ptp(a) + 1e-9)
     # each input channel drawn SEPARATELY and labelled (the 3 maps stacked into the cutout)
     chan_specs = [("diffim / σ", _streak_thumb(k, 35, 0.55, noise=1.0), "gray"),
-                  ("v7 seg prob", _nrm(_streak_thumb(k, 35, 0.55, sigma=2.6, noise=0.12)), "viridis"),
-                  ("v7 Hough agg", _streak_thumb(k, 35, 0.55, sigma=1.0, noise=0.0, amp=9.0), "magma")]
+                  ("segmentation model seg prob", _nrm(_streak_thumb(k, 35, 0.55, sigma=2.6, noise=0.12)), "viridis"),
+                  ("segmentation model Hough agg", _streak_thumb(k, 35, 0.55, sigma=1.0, noise=0.0, amp=9.0), "magma")]
     for j, (nm, img, cmap) in enumerate(chan_specs[:spec["in_ch"]]):
         yf = 0.72 - j * 0.27
         sub = ax.inset_axes([0.015, yf, 0.072, 0.22])
@@ -564,7 +564,7 @@ def plot_system(seg_spec=None, cnn_spec=None, savepath=None):
 # --------------------------------------------------------------------------------------------------
 # public entry point — called from the Evaluation notebook
 # --------------------------------------------------------------------------------------------------
-def make_architecture_figures(seg_path="models/v7_diffim_scripted.pt",
+def make_architecture_figures(seg_path="models/segmentation_model.pt",
                               cnn_path="models/cnn_postproc.pt",
                               outdir="Evaluation/figures", show=True, save=True):
     """Build all architecture figures from the deployed weights. Returns {name: Figure}.
