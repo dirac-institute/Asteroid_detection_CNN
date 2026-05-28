@@ -22,7 +22,7 @@ done
 source /cvmfs/sw.lsst.eu/almalinux-x86_64/lsst_distrib/w_2026_09/loadLSST.sh
 setup lsst_distrib
 
-cd /sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/ADCNN/data/dataset_creation
+cd /sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN
 
 OUT="/sdf/home/m/mrakovci/rubin-user/Projects/Asteroid_detection_CNN/DATA_DIFFIM"
 REPO="dp2_prep"
@@ -38,7 +38,10 @@ if [[ -z "$TEST_ONLY_FLAG" ]]; then
   rm -f "$OUT/train.h5" "$OUT/train.csv"
 fi
 
-srun python3 -u simulate_inject_diffim.py \
+# NOTE: add `--exclude-pairs-csv "$OUT/test_5sigma/test.csv" "$OUT/test_real/test.csv"`
+# (or the unified --split-json/--split-key flow) to keep training off the held-out test
+# panels. --realistic-trail matches the deployed segmentation-model training data.
+srun python3 -u -m ADCNN.pipelines.make_sim_data \
   --repo "$REPO" \
   --collections "$STAGE3" "$STAGE2" \
   --stage3-collection "$STAGE3" \
@@ -47,6 +50,7 @@ srun python3 -u simulate_inject_diffim.py \
   --parallel "${SLURM_CPUS_PER_TASK:-8}" \
   --train-test-split 0.94117 \
   --random-subset 850 \
+  --realistic-trail \
   --trail-length-min 6 --trail-length-max 60 \
   --mag-min 2 --mag-max 8 \
   --mag-mode snr \

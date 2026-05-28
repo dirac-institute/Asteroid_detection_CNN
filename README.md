@@ -45,13 +45,14 @@ histograms. No training and no threshold tuning happen at evaluation time.
 ## Package layout
 - `ADCNN/core/`       — `model.py` (UNetResSE backbone), `detector.py` (segmentation model), `losses.py` (AFTL + orientation)
 - `ADCNN/data/`       — `dataset.py`, `preprocessing.py` (3-channel build / MAD-sigma / orientation maps);
-                        `dataset_creation/` (`simulate`, `build_real`, `butler_tasks`, `photometry`, `realistic_trail`, `ephemerides`)
-- `ADCNN/training/`   — `train.py` (segmentation model trainer), `ema.py`
+                        `dataset_creation/` (`simulate`, `build_real`, `butler_tasks`, `photometry`, `realistic_trail`)
+- `ADCNN/training/`   — `train.py` (segmentation model trainer), `cnn_postproc.py` (stage-2 cutout-CNN trainer), `ema.py`
 - `ADCNN/inference/`  — `predict.py` (sliding-window segmentation model), `candidates.py`, `matched_filter.py`,
-                        `features.py` (72-col RF feature extraction), `rf_postproc.py` (RF train/apply/IO),
-                        `rf_train.py` (leakage-safe RF entry point), `export.py`
-- `ADCNN/evaluation/` — `detection.py`/`metrics.py` (object/pixel metrics), `geometry.py` (mask/component
-                        primitives), `plots.py` (notebook viz), `real_eval.py`, `threshold_scan.py`, `fp_analysis.py`
+                        `features.py` (candidate feature extraction), `cnn_postproc.py` (stage-2 FP-filter CNN apply),
+                        `catalog.py` (images→catalog engine), `export.py`
+- `ADCNN/evaluation/` — `detection.py` (object/pixel metrics), `geometry.py` (mask/component primitives),
+                        `catalog_match.py` (trail-overlap matching), `plots.py` (notebook viz),
+                        `architecture.py` (paper architecture figures)
 - `models/`           — deployed weights (above)
 - `Evaluation/`       — `Evaluation.ipynb` (synthetic) + `Evaluation_Real.ipynb` (real), evaluating `models/`
 - `experiments/heliolinc/` — HelioLinC linking suite + the ADCNN→HelioLinC bridge + `PIPELINE_DESIGN.md`

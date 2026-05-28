@@ -1,10 +1,9 @@
-"""Diffim-based variant of simulate_inject.py.
+"""Build a SIMULATED (injected-trail) difference-image dataset.
 
-Same outputs (HDF5 with images / masks / real_labels + a per-injection CSV),
-same drawn-line truth, same crossmatch-and-recover pre/post logic. The only
-substantive change is the *image*: instead of saving the injected calexp,
-we save the difference image produced by subtracting the matching
-template_coadd from the injected PVI.
+Writes an HDF5 (images / masks / real_labels) plus a per-injection CSV, with
+drawn-line truth and crossmatch-and-recover pre/post logic. The saved *image* is
+the difference image produced by subtracting the matching template_coadd from the
+injected PVI.
 
 Flow per (visit, detector):
     1. fetch PVI + single_visit_star_footprints (kernel candidates) + same-band
@@ -137,7 +136,7 @@ counter_lock = Lock()
 
 
 # ======================================================================================
-# Injection (identical semantics to simulate_inject.py)
+# Injection
 # ======================================================================================
 
 def inject(pvi_clone, injection_catalog):
@@ -167,7 +166,7 @@ def inject(pvi_clone, injection_catalog):
 
 
 def estimate_m5_local_from_psf_var(calexp, x, y, snr=5.0):
-    """Local m5 at (x,y); identical to simulate_inject.py."""
+    """Local m5 at (x,y)."""
     bbox = calexp.getBBox()
     point = geom.Point2D(float(x), float(y))
 
@@ -200,9 +199,8 @@ def estimate_m5_local_from_psf_var(calexp, x, y, snr=5.0):
 def generate_one_line(n_inject, trail_length, mag, beta, ref, dimensions, seed,
                      calexp, mag_mode="psf_mag", psf_template="image",
                      forbidden_mask=None):
-    """Identical to simulate_inject.py.generate_one_line — the science
-    exposure used for PSF/photometry calls is the PVI here (which is the
-    same kind of object as the calexp it replaced).
+    """Generate the per-detector injection catalog. The science exposure used
+    for PSF/photometry calls is the PVI.
 
     Note: SNR/m5 estimates use the science-frame variance, so columns like
     SNR_estimation and m5_local are PVI-frame, NOT diffim-frame. The diffim
@@ -541,7 +539,7 @@ def format_dataId(dataId):
 
 
 # ======================================================================================
-# Per-detector diffim injection (the meat — replaces simulate_inject.one_detector_injection)
+# Per-detector diffim injection (the meat)
 # ======================================================================================
 
 def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimensions,
@@ -665,7 +663,7 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
 
 
 # ======================================================================================
-# Worker / pool — same shape as simulate_inject.py
+# Worker / pool
 # ======================================================================================
 
 def worker(args):
@@ -711,19 +709,6 @@ def worker(args):
 
 def _key_from_dataId(d):
     return (int(d["visit"]), int(d["detector"]))
-
-
-def reservoir_sample(iterable, k: int, seed: int = 123):
-    rng = random.Random(int(seed))
-    sample = []
-    for i, item in enumerate(iterable, 1):
-        if i <= k:
-            sample.append(item)
-        else:
-            j = rng.randrange(i)
-            if j < k:
-                sample[j] = item
-    return sample
 
 
 # ======================================================================================
@@ -1037,13 +1022,6 @@ def run_parallel_injection(repo, coll, save_path, number, trail_length, magnitud
                 if ds in f and f[ds].shape[0] != n:
                     f[ds].resize(n, axis=0)
         print(f"[truncate] {hp}: kept {n} successful panels (no empty slots)", flush=True)
-
-
-def rng_for_task(seed: int, dataId: dict) -> np.random.Generator:
-    s = (int(seed) * 1_000_003
-         + int(dataId["visit"]) * 1_003
-         + int(dataId["detector"])) & 0xFFFFFFFF
-    return np.random.default_rng(s)
 
 
 # ======================================================================================
