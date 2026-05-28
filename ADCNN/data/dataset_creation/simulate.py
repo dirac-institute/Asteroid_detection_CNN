@@ -739,6 +739,7 @@ def select_good_refs_random_check(
     max_checks: int = 200000,
     check_refs: bool = True,
     exclude_keys: set | None = None,
+    min_ecliptic_lat: float = 0.0,
     verbose: bool = False,
 ) -> List:
     """Like the direct-image variant but with one extra validation step:
@@ -764,6 +765,30 @@ def select_good_refs_random_check(
     for ref in all_pvi_iter:
         key = _key_from_dataId(ref.dataId)
         refs_by_key.setdefault(key, ref)
+
+    # Ecliptic-latitude cut: keep only panels whose VISIT boresight is far from the ecliptic, so
+    # the diffim background carries no real moving objects (the dense main belt sits within ~±20°).
+    # Combined with `exclude_keys` (the real-asteroid catalog) this gives a contamination-clean
+    # synthetic set AND keeps the real test panels disjoint for later evaluation.
+    if min_ecliptic_lat and float(min_ecliptic_lat) > 0:
+        from astropy.coordinates import SkyCoord
+        import astropy.units as u
+        from lsst.sphgeom import LonLat
+        vlonlat = {}
+        for r in b.registry.queryDimensionRecords("visit", instrument=instrument, where=where):
+            c = LonLat(r.region.getBoundingCircle().getCenter())
+            vlonlat[int(r.id)] = (c.getLon().asDegrees(), c.getLat().asDegrees())
+        if vlonlat:
+            vids = list(vlonlat)
+            ras = np.array([vlonlat[v][0] for v in vids])
+            decs = np.array([vlonlat[v][1] for v in vids])
+            eclat = SkyCoord(ras * u.deg, decs * u.deg, frame="icrs").barycentrictrueecliptic.lat.deg
+            allowed = {vids[i] for i in range(len(vids)) if abs(float(eclat[i])) > float(min_ecliptic_lat)}
+            n_before = len(refs_by_key)
+            refs_by_key = {kk: vv for kk, vv in refs_by_key.items() if kk[0] in allowed}
+            if verbose:
+                print(f"Ecliptic cut |lat|>{min_ecliptic_lat} deg: kept {len(refs_by_key)}/{n_before} panels "
+                      f"({len(allowed)}/{len(vids)} visits are off-ecliptic)", flush=True)
 
     if exclude_keys:
         n_before = len(refs_by_key)
@@ -1058,8 +1083,11 @@ def main():
                     help="skip the slow per-panel template/source pre-validation when selecting the "
                          "universe (faster; unbuildable panels are simply skipped at build time)")
     ap.add_argument("--exclude-pairs-csv", nargs="*", default=None,
-                    help="CSV(s) with visit,detector columns to keep OUT of the universe (leakage "
-                         "guard against EXTERNAL sets, e.g. the real-asteroid test_real catalog)")
+                    help="CSV(s) with visit/FieldID + detector columns to keep OUT of the universe "
+                         "(leakage guard against EXTERNAL sets, e.g. the real-asteroid catalog)")
+    ap.add_argument("--min-ecliptic-lat", type=float, default=0.0,
+                    help="select only panels whose visit is > this |ecliptic latitude| (deg) from the "
+                         "ecliptic, to avoid real-asteroid (esp. main-belt) contamination. 0 = no cut.")
     args = ap.parse_args()
 
     import json
@@ -1083,21 +1111,27 @@ def main():
         exclude_keys = set()
         for p in (args.exclude_pairs_csv or []):
             df = pd.read_csv(p)
-            exclude_keys |= {(int(v), int(d)) for v, d in zip(df["visit"], df["detector"])}
+            vcol = "visit" if "visit" in df.columns else "FieldID"   # real-mover catalogs use FieldID
+            sub = df[[vcol, "detector"]].dropna()
+            exclude_keys |= {(int(v), int(d)) for v, d in zip(sub[vcol], sub["detector"])}
         if exclude_keys:
-            print(f"[split] excluding {len(exclude_keys)} external (visit,detector) pairs", flush=True)
+            print(f"[split] excluding {len(exclude_keys)} (visit,detector) panels from "
+                  f"{len(args.exclude_pairs_csv)} catalog(s) (real-asteroid leakage guard)", flush=True)
         n_universe = sum(sizes.values())
         refs = select_good_refs_random_check(
             repo=args.repo, collections=coll, where=args.where, skymap=args.skymap,
             stage3_collection=args.stage3_collection, instrument="LSSTCam",
             k=n_universe, seed=args.seed, exclude_keys=exclude_keys,
+            min_ecliptic_lat=args.min_ecliptic_lat,
             check_refs=not args.skip_prevalidation, verbose=True)
         keys = [_key_from_dataId(r.dataId) for r in refs]
         if len(keys) < n_universe:
             print(f"[split] WARNING: universe has {len(keys)} < requested {n_universe} panels; "
-                  "sets will be short — widen --where or lower --n-*.", flush=True)
+                  "sets will be short — widen --where, lower --n-*, or lower --min-ecliptic-lat.", flush=True)
         parts = _partition(keys, sizes, args.seed)
         meta = {"seed": args.seed, "where": args.where,
+                "min_ecliptic_lat": args.min_ecliptic_lat,
+                "exclude_pairs_csv": args.exclude_pairs_csv or [],
                 "sizes": {k: len(parts[k]) for k in _SET_ORDER},
                 "sets": {k: [[int(v), int(d)] for (v, d) in parts[k]] for k in _SET_ORDER}}
         with open(split_path, "w") as f:

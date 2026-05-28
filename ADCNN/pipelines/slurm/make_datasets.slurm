@@ -51,6 +51,9 @@ N_TEST="${N_TEST:-300}"
 SIGMA="${SIGMA:-5}"                    # stack-detection sigma (train family + val)
 TEST_SIGMA="${TEST_SIGMA:-$SIGMA}"     # test depth (rebuild test at another sigma with SETS=test)
 PARALLEL="${PARALLEL:-${SLURM_CPUS_PER_TASK:-32}}"
+# --- contamination guards (avoid real asteroids; keep the real test set disjoint) ---
+MIN_ECLIPTIC_LAT="${MIN_ECLIPTIC_LAT:-20}"   # only inject into fields >20 deg off the ecliptic (no main-belt)
+EXCLUDE_CSV="${EXCLUDE_CSV:-$REPO/DATA/sv_fast_movers_for_karlo_fast_with_pixels_rerun.csv}"  # real (visit,detector) to exclude
 
 export PYTHONHASHSEED=0
 source /cvmfs/sw.lsst.eu/almalinux-x86_64/lsst_distrib/w_2026_09/loadLSST.sh
@@ -62,6 +65,8 @@ python3 -u -m ADCNN.pipelines.make_sim_data \
   --sets $SETS \
   --n-train "$N_TRAIN" --n-val "$N_VAL" --n-train2 "$N_TRAIN2" --n-val2 "$N_VAL2" --n-test "$N_TEST" \
   --stack-detection-threshold "$SIGMA" --test-sigma "$TEST_SIGMA" \
+  --min-ecliptic-lat "$MIN_ECLIPTIC_LAT" \
+  --exclude-pairs-csv "$EXCLUDE_CSV" \
   --realistic-trail --mag-mode snr --mag-min 2 --mag-max 8 \
   --trail-length-min 6 --trail-length-max 60 --beta-min 0 --beta-max 180 --number 20 \
   --parallel "$PARALLEL" \
