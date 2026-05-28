@@ -17,6 +17,14 @@ Defaults reproduce reg2 out of the box on the 4 realistic shards:
 
     python -m ADCNN.pipelines.train_end_to_end --run-name seg_repro
 
+For the train / train2 / test layout produced by ADCNN/pipelines/slurm/make_datasets.slurm
+(stage 1 on TRAIN, stage-2 CNN on the dedicated TRAIN2 set, TEST held out for eval):
+
+    python -m ADCNN.pipelines.train_end_to_end --run-name seg_repro \
+        --data-sources TRAIN/train.h5:TRAIN/train.csv \
+        --val-h5 TRAIN2/train.h5 --val-csv TRAIN2/train.csv \
+        --cnn-train-h5 TRAIN2/train.h5 --cnn-train-csv TRAIN2/train.csv
+
 Override --data-sources / --val-* to train on other data, --epochs for a quick smoke, or
 --skip-nn / --skip-cnn to run a single stage. The NN stage needs a GPU + the asteroid_cnn env.
 Outputs: ``experiments/diffim_runs/<run>/ckpts/`` + ``<models-dir>/<run>_{segmentation_scripted.pt,cnn_postproc.pt}``.
@@ -128,6 +136,12 @@ def main():
                     help="'h5:csv' training shards (default = the reg2 realistic shards)")
     ap.add_argument("--val-h5", default=DEFAULT_VAL_H5, help="h5 holding the held-out val panels")
     ap.add_argument("--val-csv", default=DEFAULT_VAL_CSV, help="catalog for the val panels")
+    ap.add_argument("--cnn-train-h5", default=None,
+                    help="Dedicated stage-2 training set (e.g. the train2 dataset). When given, the "
+                         "focal cutout-CNN is trained on ALL of its panels instead of the segmentation "
+                         "model's held-out val panels. Must be disjoint from the stage-1 train set "
+                         "(the make-datasets script guarantees this) so the CNN cutouts are leakage-free.")
+    ap.add_argument("--cnn-train-csv", default=None, help="catalog for --cnn-train-h5")
     ap.add_argument("--out-root", default=str(REPO / "experiments/diffim_runs"))
     ap.add_argument("--models-dir", default=str(REPO / "models"))
     ap.add_argument("--epochs", type=int, default=None, help="override the recipe epochs (e.g. smoke run)")
@@ -159,20 +173,31 @@ def main():
     elif a.dry_run:
         return
 
-    # --- Stage 2: cutout CNN (focal FP filter, on the trained segmentation model's held-out val candidates) ---
+    # --- Stage 2: cutout CNN (focal FP filter) ---
     if not a.skip_cnn:
         import json
         from ADCNN.training.cnn_postproc import train_cnn_from_val
-        # Use the EXACT panels stage 1 held out (split.json) so the FP-filter CNN is never built on
-        # panels segmentation model trained on. Fall back to the deterministic multi-source selection only if absent.
-        split = run_dir / "split.json"
-        if split.exists():
-            val_ids = json.loads(split.read_text())["val_panels"]
-        else:
-            val_ids = sorted(pd.read_csv(a.val_csv)["image_id"].unique())[: recipe.n_val_panels]
         cnn_out = Path(a.models_dir) / f"{a.run_name}_cnn_postproc.pt"
-        train_cnn_from_val(scripted, a.val_h5, a.val_csv, val_ids, cnn_out,
-                           epochs=recipe.cnn_epochs, fp_cap=recipe.cnn_fp_cap)
+        if a.cnn_train_h5:
+            # Dedicated stage-2 set (the train2 dataset): train the FP-filter CNN on ALL of its
+            # panels. The segmentation model never trained on these panels (disjoint by construction),
+            # so its cutouts here are leakage-free.
+            if not a.cnn_train_csv:
+                raise SystemExit("--cnn-train-h5 requires --cnn-train-csv")
+            cnn_ids = sorted(pd.read_csv(a.cnn_train_csv)["image_id"].unique())
+            print(f"[stage2-cnn] training on all {len(cnn_ids)} panels of {a.cnn_train_h5}", flush=True)
+            train_cnn_from_val(scripted, a.cnn_train_h5, a.cnn_train_csv, cnn_ids, cnn_out,
+                               epochs=recipe.cnn_epochs, fp_cap=recipe.cnn_fp_cap)
+        else:
+            # Default: the EXACT panels stage 1 held out (split.json) so the FP-filter CNN is never
+            # built on panels the segmentation model trained on.
+            split = run_dir / "split.json"
+            if split.exists():
+                val_ids = json.loads(split.read_text())["val_panels"]
+            else:
+                val_ids = sorted(pd.read_csv(a.val_csv)["image_id"].unique())[: recipe.n_val_panels]
+            train_cnn_from_val(scripted, a.val_h5, a.val_csv, val_ids, cnn_out,
+                               epochs=recipe.cnn_epochs, fp_cap=recipe.cnn_fp_cap)
         print(f"[stage2-cnn] done -> {cnn_out}", flush=True)
     print("END-TO-END TRAINING DONE", flush=True)
 

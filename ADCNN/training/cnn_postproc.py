@@ -171,6 +171,8 @@ def train_cnn(X, y, panel=None, *, width: int = NET_WIDTH, epochs: int = EPOCHS,
     X = np.clip(np.asarray(X, np.float32), -20, 20)
     y = np.asarray(y, np.float32)
     dev = torch.device(device if torch.cuda.is_available() else "cpu")
+    torch.manual_seed(int(seed))  # deterministic weight init + minibatch shuffle (reproducible reruns)
+    np.random.seed(int(seed))
 
     # panel-disjoint train / holdout split (fallback to a row split if no panel ids)
     rng = np.random.default_rng(seed)
