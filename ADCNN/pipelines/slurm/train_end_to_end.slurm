@@ -30,7 +30,7 @@
 # Run AFTER make_datasets.slurm. Single A100 (training is single-GPU). Usage:
 #   sbatch ADCNN/pipelines/slurm/train_end_to_end.slurm
 #   RUN_NAME=seg_v2 DATA_ROOT=/path sbatch ADCNN/pipelines/slurm/train_end_to_end.slurm
-set -euo pipefail
+set -eo pipefail
 
 REPO="${ADCNN_REPO:-/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN}"
 DATA_ROOT="${DATA_ROOT:-$REPO/DATA_DIFFIM}"

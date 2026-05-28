@@ -34,7 +34,7 @@
 #
 #   sbatch ADCNN/pipelines/slurm/make_datasets.slurm
 #   N_TRAIN=4300 DATA_ROOT=/path SETS="train" sbatch ADCNN/pipelines/slurm/make_datasets.slurm
-set -euo pipefail
+set -eo pipefail
 
 REPO="${ADCNN_REPO:-/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN}"
 
