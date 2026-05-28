@@ -11,8 +11,19 @@ SNR 2-8 (``--mag-mode snr --mag-min 2 --mag-max 8``), beta 0-180 deg, 20 injecti
 ALWAYS exclude the held-out test pairs so the model never trains on a test (visit,detector):
 ``--exclude-pairs-csv DATA_DIFFIM/test_5sigma/test.csv DATA_DIFFIM/test_real/test.csv``.
 
-The three datasets differ only in size / split / seed (use a DIFFERENT --seed per set so they
-draw disjoint injections):
+RECOMMENDED (leakage-safe) — define ONE disjoint panel split up front so train / train2 / test never
+share a (visit,detector) panel (the legacy flow below only keeps train/train2 off TEST, not off each
+other). See ``ADCNN.pipelines.make_split``:
+
+    python -m ADCNN.pipelines.make_split --refs refs.csv --out DATA_DIFFIM/split.json \\
+        --train -1 --train2 500 --test 300 --val 64 --seed 0
+    python -m ADCNN.pipelines.make_sim_data --split-json DATA_DIFFIM/split.json --split-key train  ... # v7
+    python -m ADCNN.pipelines.make_sim_data --split-json DATA_DIFFIM/split.json --split-key train2 ... # stage-2 CNN
+    python -m ADCNN.pipelines.make_sim_data --split-json DATA_DIFFIM/split.json --split-key test --test-only --stack-detection-threshold 5 ...
+
+LEGACY per-set recipes (different --seed + --exclude-pairs-csv against the test sets) — the three
+datasets differ only in size / split / seed (use a DIFFERENT --seed per set so they draw disjoint
+injections):
 
   TRAIN — stage-1 v7 training data (the deployed reg2 shards):
     python -m ADCNN.pipelines.make_sim_data \\
