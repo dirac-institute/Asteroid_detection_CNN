@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
-from typing import Callable, Tuple
+from typing import Tuple
 
 import h5py
 import math
@@ -19,49 +18,14 @@ except Exception:  # pragma: no cover
     torch = None
 
 
-def set_seed(seed: int, deterministic: bool = False) -> None:
-    """
-    Set RNG seeds for Python/NumPy/(PyTorch) and optionally enable deterministic kernels.
-
-    Note: true determinism in CUDA can still be affected by:
-      - non-deterministic ops (warn_only=True avoids hard crashes)
-      - differing GPU models/drivers
-      - non-deterministic data pipeline if workers not seeded
-    """
-    random.seed(int(seed))
-    np.random.seed(int(seed))
-
-    if torch is not None:
-        torch.manual_seed(int(seed))
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(int(seed))
-
-        if deterministic:
-            torch.backends.cudnn.deterministic = True
-            torch.backends.cudnn.benchmark = False
-            # warn_only=True prevents runtime errors for ops without deterministic variants
-            torch.use_deterministic_algorithms(True, warn_only=True)
-
-
 def worker_init_fn(worker_id: int, base_seed: int = 1337) -> None:
-    """
-    DataLoader worker seeding hook. Use via:
-        worker_init_fn=make_worker_init_fn(cfg.train.seed)
-
-    Prefer make_worker_init_fn() so the base_seed is captured once.
-    """
+    """DataLoader worker seeding hook: seeds Python/NumPy/(PyTorch) per worker as
+    base_seed + worker_id, so each worker draws a distinct, reproducible stream."""
     seed = int(base_seed) + int(worker_id)
     random.seed(seed)
     np.random.seed(seed)
     if torch is not None:
         torch.manual_seed(seed)
-
-
-def make_worker_init_fn(base_seed: int) -> Callable[[int], None]:
-    """Return a DataLoader worker_init_fn that closes over base_seed."""
-    def _fn(worker_id: int) -> None:
-        worker_init_fn(worker_id, base_seed=int(base_seed))
-    return _fn
 
 
 def split_indices(h5_path: str, val_frac: float = 0.1, seed: int = 1337) -> Tuple[np.ndarray, np.ndarray]:
@@ -139,8 +103,8 @@ def draw_one_line(
 
 def to_panel_dict(arr):
     """Normalise an ``(N, H, W)`` array (or ``{panel_id: (H, W)}`` mapping) to a
-    ``{int panel_id: ndarray}`` dict. Shared by the RF feature extraction and the
-    parameter-recovery evaluation so both index panels identically."""
+    ``{int panel_id: ndarray}`` dict. Shared by the stage-2 cutout-CNN feature extraction
+    and the parameter-recovery evaluation so both index panels identically."""
     if isinstance(arr, dict):
         return {int(k): np.asarray(v) for k, v in arr.items()}
     return {int(pid): np.asarray(arr[pid]) for pid in range(len(arr))}
@@ -150,7 +114,7 @@ def trail_bbox(x, y, beta_deg, length, H, W, pad=0):
     """Axis-aligned bounding box ``(x0, x1, y0, y1)`` of a trail centred at ``(x, y)``
     with image-convention orientation ``beta_deg`` (0=+x) and full ``length``, padded by
     ``pad`` and clipped to ``[0, W] x [0, H]``. Shared ROI helper for object-confusion,
-    parameter-recovery, and RF candidate labelling."""
+    parameter-recovery, and stage-2 candidate labelling."""
     beta_rad = math.radians(beta_deg)
     dx = abs(math.cos(beta_rad)) * length
     dy = abs(math.sin(beta_rad)) * length

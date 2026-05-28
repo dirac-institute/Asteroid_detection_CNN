@@ -3,7 +3,6 @@ Object-level detection evaluation.
 
 Provides functions for:
 - Object-wise confusion matrices (TP/FP/FN at detection level)
-- Pixel-wise confusion matrices
 - Detection marking in catalogs
 """
 
@@ -12,10 +11,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 import concurrent.futures as cf
-from scipy import ndimage as ndi
-import matplotlib.pyplot as plt
 
-from ADCNN.utils.angle_utils import deg2rad
 from ADCNN.utils.helpers import trail_bbox
 from ADCNN.evaluation.geometry import label_components
 
@@ -229,7 +225,7 @@ def objectwise_confusion(
 
 
 # =============================================================================
-# Pixel-wise Evaluation
+# Combined NN + stack object-level evaluation
 # =============================================================================
 
 def _get_stack_detected_column(cat: pd.DataFrame) -> pd.Series:
