@@ -1109,6 +1109,12 @@ def main():
                     help="Render trails with the realistic (light-curve/tapered/"
                          "curved) renderer instead of the uniform galsim.Box. "
                          "Leakage-free: physical priors only.")
+    ap.add_argument("--split-json", default=None,
+                    help="unified train/train2/test/val split from ADCNN.pipelines.make_split. With "
+                         "--split-key, build ONLY that set's panels by excluding every panel of the "
+                         "OTHER sets -> the three datasets are disjoint by construction.")
+    ap.add_argument("--split-key", default=None, choices=["train", "train2", "test", "val"],
+                    help="which set of --split-json to build")
     args = ap.parse_args()
 
     if args.realistic_trail:
@@ -1129,6 +1135,22 @@ def main():
         exclude_keys = ek
         print(f"[main] excluding {len(exclude_keys)} (visit,detector) pairs from "
               f"{len(args.exclude_pairs_csv)} csv(s)", flush=True)
+
+    # unified split: build ONLY this key's panels by excluding every panel of the OTHER sets, so
+    # train / train2 / test (/ val) are mutually disjoint by construction (ADCNN.pipelines.make_split).
+    if args.split_json:
+        if not args.split_key:
+            raise SystemExit("--split-json requires --split-key")
+        import json
+        split = json.loads(open(args.split_json).read())
+        other = set()
+        for k, pairs in split.items():
+            if k == args.split_key or not isinstance(pairs, list):
+                continue
+            other |= {(int(v), int(d)) for v, d in pairs}
+        exclude_keys = (exclude_keys or set()) | other
+        print(f"[main] split '{args.split_key}': excluding {len(other)} panels of the other sets",
+              flush=True)
 
     coll = args.collections if len(args.collections) > 1 else args.collections[0]
 
