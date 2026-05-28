@@ -17,7 +17,7 @@ other). See ``ADCNN.pipelines.make_split``:
 
     python -m ADCNN.pipelines.make_split --refs refs.csv --out DATA_DIFFIM/split.json \\
         --train -1 --train2 500 --test 300 --val 64 --seed 0
-    python -m ADCNN.pipelines.make_sim_data --split-json DATA_DIFFIM/split.json --split-key train  ... # v7
+    python -m ADCNN.pipelines.make_sim_data --split-json DATA_DIFFIM/split.json --split-key train  ... # segmentation model
     python -m ADCNN.pipelines.make_sim_data --split-json DATA_DIFFIM/split.json --split-key train2 ... # stage-2 CNN
     python -m ADCNN.pipelines.make_sim_data --split-json DATA_DIFFIM/split.json --split-key test --test-only --stack-detection-threshold 5 ...
 
@@ -25,7 +25,7 @@ LEGACY per-set recipes (different --seed + --exclude-pairs-csv against the test 
 datasets differ only in size / split / seed (use a DIFFERENT --seed per set so they draw disjoint
 injections):
 
-  TRAIN — stage-1 v7 training data (the deployed reg2 shards):
+  TRAIN — stage-1 segmentation model training data (the deployed reg2 shards):
     python -m ADCNN.pipelines.make_sim_data \\
         --save-path DATA_DIFFIM_realistic --random-subset 4300 --seed 123 \\
         --realistic-trail --skip-prevalidation \\
@@ -38,7 +38,7 @@ injections):
         --realistic-trail --skip-prevalidation \\
         --mag-mode snr --mag-min 2 --mag-max 8 \\
         --exclude-pairs-csv DATA_DIFFIM/test_5sigma/test.csv DATA_DIFFIM/test_real/test.csv
-    # then cache cutouts: ADCNN.training.cnn_postproc.build_cutout_dataset(v7, train2/train.h5,
+    # then cache cutouts: ADCNN.training.cnn_postproc.build_cutout_dataset(segmentation model, train2/train.h5,
     #   train2/train.csv, <cut_dir>) and train on them.
 
   TEST — held-out evaluation sets at a given stack-detection sigma (--test-only writes test.h5):

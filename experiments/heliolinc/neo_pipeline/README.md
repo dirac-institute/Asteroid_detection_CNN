@@ -7,7 +7,7 @@ position + on-sky velocity), so linking needs only one detection per night inste
 ```
   butler diffims
         │  STAGE 1  detect      (GPU, asteroid_cnn)   discover_stream.py        — multi-GPU stream
-        ▼          ADCNN v7 + RF -> sky detections + de-biased trail endpoints
+        ▼          ADCNN segmentation model + RF -> sky detections + de-biased trail endpoints
   adcnn_dets.csv
         │  STAGE 2  measure     (CPU, lsst_distrib)   veres_measure_catalog.py  — parallel over panels
         ▼          precise per-panel-PSF Veres trailed fit -> accurate sky endpoints

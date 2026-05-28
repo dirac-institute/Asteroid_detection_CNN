@@ -19,7 +19,7 @@ DAY_END=${DAY_END:-20250720}       # day_obs <  (exclusive)
 MIN_RATE=${MIN_RATE:-0.5}          # NEO-rate cut (deg/day) for the truth/target set
 
 # ---- models --------------------------------------------------------------
-V7=${V7:-$REPO/models/v7_diffim_scripted.pt}
+SEG_MODEL=${SEG_MODEL:-$REPO/models/segmentation_model.pt}
 
 # ---- stage: NEO hypothesis grid -----------------------------------------
 GRID_SRC=${GRID_SRC:-$HL/run_disco/heliohypo_all.txt}   # full grid to filter

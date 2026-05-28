@@ -4,7 +4,7 @@ Loads the two DEPLOYED RandomForests:
   - new  = models/rf_postproc.pkl              (retrained on footprint-PCA orientation features)
   - old  = models/rf_postproc_nnhead_backup.pkl (the previous RF, NN-head orientation)
 and scores each on test_5sigma/4/3 with ITS OWN feature convention (the new RF on pca features,
-the old RF on nnhead features — recomputed from the same single v7 pass). Reports recall vs
+the old RF on nnhead features — recomputed from the same single segmentation model pass). Reports recall vs
 FP/panel via the trail-overlap matcher at the deployed operating points. gate_pmax=0.10 (deployed
 eval gate) -> fast on a single GPU.
 
@@ -34,7 +34,7 @@ def main():
     from ADCNN.evaluation.catalog_match import evaluate_catalog
 
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--v7", default=str(REPO / "models/v7_diffim_scripted.pt"))
+    ap.add_argument("--seg-model", default=str(REPO / "models/segmentation_model.pt"))
     ap.add_argument("--rf-new", default=str(REPO / "models/rf_postproc.pkl"))
     ap.add_argument("--rf-old", default=str(REPO / "models/rf_postproc_nnhead_backup.pkl"))
     ap.add_argument("--eval-panels", type=int, default=0, help="0 = all")
@@ -44,7 +44,7 @@ def main():
     thrs = [float(t) for t in a.thrs.split(",")]
 
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = torch.jit.load(a.v7, map_location=dev).eval()
+    model = torch.jit.load(a.seg_model, map_location=dev).eval()
     rf_new, rf_old = load_rf(a.rf_new), load_rf(a.rf_old)
 
     print(f"{'set':12s} {'thr':>4s} | {'NEW recall':>11s} {'NEW fp/pan':>10s} | "

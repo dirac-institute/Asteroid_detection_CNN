@@ -1,5 +1,5 @@
-"""Develop the post-v7 FP filter on the dedicated train2 set (SNR 2-8, ~440 panels, disjoint from
-v7-train + all test/val sets). PANEL-DISJOINT internal split (80% train / 20% test). Trains CNN
+"""Develop the post-segmentation model FP filter on the dedicated train2 set (SNR 2-8, ~440 panels, disjoint from
+segmentation model-train + all test/val sets). PANEL-DISJOINT internal split (80% train / 20% test). Trains CNN
 (cutout) + RF (hand feats) on the train split, evaluates FP-removed at 95% recall (sub-5sigma
 preserved) on the held-out test split. Answers: with enough data, how well can we filter FP?"""
 import numpy as np, pandas as pd, torch, torch.nn as nn

@@ -1,6 +1,6 @@
-"""v7 inference primitive — sliding-window prediction over a full diffim panel.
+"""segmentation model inference primitive — sliding-window prediction over a full diffim panel.
 
-``predict_panel_overlap_3ch_full`` tiles a panel into 128px windows, runs the v7 model
+``predict_panel_overlap_3ch_full`` tiles a panel into 128px windows, runs the segmentation model model
 (seg + orientation + line-aggregator heads), and Hann-blends the overlapping tiles into
 full-panel maps (prob, sin2β, cos2β, aggregator). This is stage 1 of the detector and is
 used by run_inference, the RF feature/training code, and the real-data evaluation.

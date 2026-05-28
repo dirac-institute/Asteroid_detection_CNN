@@ -1,19 +1,19 @@
 """Train the stage-2 false-positive filter — the focal-loss cutout CNN.
 
-Pipeline stage 2: the v7 segmentation emits many candidate components per panel (asteroid trails
+Pipeline stage 2: the segmentation model segmentation emits many candidate components per panel (asteroid trails
 + residual/artefact false positives). The cutout CNN scores a 48x48x3 patch
-``[diffim/sigma, v7_prob, v7_agg]`` per candidate and rejects false positives while keeping
+``[diffim/sigma, seg_prob, seg_agg]`` per candidate and rejects false positives while keeping
 trails. It replaces the legacy 72-feature RandomForest.
 
-Training is leakage-safe: cutouts are built by running the trained v7 on held-out panels (never
+Training is leakage-safe: cutouts are built by running the trained segmentation model on held-out panels (never
 the test set), candidates are labelled by overlap with the injected truth
 (``label_candidates_by_injection_overlap``), and a focal-loss class-balanced CNN is fit.
 
 Two entry points:
-  - ``build_cutout_dataset`` : run v7 over a large h5 once and cache cutouts to chunked, resumable
+  - ``build_cutout_dataset`` : run segmentation model over a large h5 once and cache cutouts to chunked, resumable
     ``part_*.npz`` files (use for a dedicated training set, e.g. the SNR 2-8 ``train2`` set).
   - ``train_cnn_from_val``   : the production stage-2 hook (called by
-    ``ADCNN.pipelines.train_end_to_end``) — build cutouts in-memory on the freshly trained v7's
+    ``ADCNN.pipelines.train_end_to_end``) — build cutouts in-memory on the freshly trained segmentation model's
     held-out val panels, fit the CNN, save the state_dict.
 
 The network architecture lives in ``ADCNN.inference.cnn_postproc.build_net`` so training and
@@ -44,7 +44,7 @@ FP_CAP = 600               # max false-positive cutouts kept per panel (class ba
 # ---------------------------------------------------------------------------
 def panel_cutouts(model, img, rl, panel_cat, *, pid: int = 0, k: int = CUTOUT_K,
                   fp_cap: int = 0, device="cuda"):
-    """Run v7 on one panel, extract candidates, label them by injection overlap, and return the
+    """Run segmentation model on one panel, extract candidates, label them by injection overlap, and return the
     per-candidate cutout stack. `panel_cat` is the truth catalog rows for this panel with its
     image_id set to `pid`. Returns (X[N,3,k,k], y[N], xy[N,2], cids[N]); empty arrays if none."""
     from ADCNN.inference.predict import predict_panel_overlap_3ch_full
@@ -75,9 +75,9 @@ def panel_cutouts(model, img, rl, panel_cat, *, pid: int = 0, k: int = CUTOUT_K,
 # ---------------------------------------------------------------------------
 # Cached cutout dataset (large training set, resumable)
 # ---------------------------------------------------------------------------
-def build_cutout_dataset(v7_ckpt, h5_path, csv_path, out_dir, *, k: int = CUTOUT_K,
+def build_cutout_dataset(seg_ckpt, h5_path, csv_path, out_dir, *, k: int = CUTOUT_K,
                          fp_cap: int = FP_CAP, chunk: int = 40, device: str = "cuda"):
-    """Run v7 over every panel of `h5_path`, build labelled cutouts, and cache them to chunked
+    """Run segmentation model over every panel of `h5_path`, build labelled cutouts, and cache them to chunked
     ``part_XXXX.npz`` files under `out_dir` (resumable via ``done.txt`` — survives preemption).
     Use this to materialise a dedicated training set (e.g. the SNR 2-8 train2 set)."""
     import torch
@@ -85,7 +85,7 @@ def build_cutout_dataset(v7_ckpt, h5_path, csv_path, out_dir, *, k: int = CUTOUT
     done_file = out / "done.txt"
     done = set(int(x) for x in done_file.read_text().split()) if done_file.exists() else set()
     dev = torch.device(device if torch.cuda.is_available() else "cpu")
-    model = torch.jit.load(str(v7_ckpt), map_location=dev).eval()
+    model = torch.jit.load(str(seg_ckpt), map_location=dev).eval()
     cat = pd.read_csv(csv_path)
 
     buf = {kk: [] for kk in ("X", "y", "panel", "cid", "xy")}
@@ -243,9 +243,9 @@ def save_cnn(net, out_pt):
 # ---------------------------------------------------------------------------
 # Production stage-2 hook (called by train_end_to_end)
 # ---------------------------------------------------------------------------
-def train_cnn_from_val(v7_ckpt, val_h5, val_csv, val_panel_ids, out_pt, *,
+def train_cnn_from_val(seg_ckpt, val_h5, val_csv, val_panel_ids, out_pt, *,
                        fp_cap: int = FP_CAP, epochs: int = EPOCHS, device: str = "cuda"):
-    """Full stage-2 CNN training: load the TorchScript v7, build labelled cutouts on the held-out
+    """Full stage-2 CNN training: load the TorchScript segmentation model, build labelled cutouts on the held-out
     val panels (in-memory), fit the focal CNN, and save the state_dict to `out_pt`.
 
     Mirrors the leakage-safe contract of the old ``train_rf_from_val``: the val panels' truth
@@ -253,7 +253,7 @@ def train_cnn_from_val(v7_ckpt, val_h5, val_csv, val_panel_ids, out_pt, *,
     (so it works even when the val panels are a high-index slice of a shared shard h5)."""
     import torch
     dev = torch.device(device if torch.cuda.is_available() else "cpu")
-    model = torch.jit.load(str(v7_ckpt), map_location=dev).eval()
+    model = torch.jit.load(str(seg_ckpt), map_location=dev).eval()
 
     cat = pd.read_csv(val_csv)
     remap = {orig: i for i, orig in enumerate(val_panel_ids)}

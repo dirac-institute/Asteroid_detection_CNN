@@ -1,7 +1,7 @@
-"""Post-v7 cutout-CNN rejecter, LEAK-FREE. val2_snr gen crashed, so threshold on a PANEL-DISJOINT
-hold-out of val_filter_snr (the split.json val panels, SNR 2-8, part of train set; v7 only early-
+"""Post-segmentation model cutout-CNN rejecter, LEAK-FREE. val2_snr gen crashed, so threshold on a PANEL-DISJOINT
+hold-out of val_filter_snr (the split.json val panels, SNR 2-8, part of train set; segmentation model only early-
 stopped on them). TRAIN = 40 val_filter panels, THRESH = held-out 10, TEST = test_5sigma (untouched).
-Compares CNN (cutout [diffim/sigma, v7_prob, v7_agg] 48x48) vs RF (hand feats) at 95% recall, sub-5sigma."""
+Compares CNN (cutout [diffim/sigma, seg_prob, seg_agg] 48x48) vs RF (hand feats) at 95% recall, sub-5sigma."""
 import numpy as np, pandas as pd, torch, torch.nn as nn
 from pathlib import Path
 from sklearn.ensemble import RandomForestClassifier

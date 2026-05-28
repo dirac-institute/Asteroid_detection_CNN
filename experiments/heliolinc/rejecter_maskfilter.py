@@ -1,4 +1,4 @@
-"""Rejecter Stage A.5 (lsst env): mask-filter the v7 candidates BEFORE Veres, and VALIDATE the filter
+"""Rejecter Stage A.5 (lsst env): mask-filter the segmentation model candidates BEFORE Veres, and VALIDATE the filter
 on this val set (exact injection labels). For each candidate, sample the butler diffim mask plane at
 (x,y) + along the trail; flag instrumental-artifact bits (SPIKE/SAT/CR/... NOT the DETECTED 5-sigma
 bit, NOT INJECTED). Report per-bit and combined FP-removed / TP-kept / sub-5sigma-kept, then write the

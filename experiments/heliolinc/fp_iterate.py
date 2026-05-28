@@ -36,7 +36,7 @@ te=set(pans[:max(1,len(pans)//5)].tolist()); M_te=np.isin(pan,list(te)); M_tr=~M
 ntp=int((y[M_te]==1).sum()); n5=int((s5&M_te&(y==1)).sum())
 print(f"train2: {len(y)} cand {int(y.sum())} TP {int(s5.sum())} sub5 | TRAIN {M_tr.sum()} TEST {M_te.sum()} (TPte {ntp}, sub5te {n5})",flush=True)
 
-def coherence_feats(Xprob):  # from v7_prob cutout (channel 1): line-fit residual + elongation
+def coherence_feats(Xprob):  # from seg_prob cutout (channel 1): line-fit residual + elongation
     out=np.zeros((len(Xprob),5),np.float32)
     for i,p in enumerate(Xprob):
         ys,xs=np.nonzero(p>0.5); w=p[ys,xs]

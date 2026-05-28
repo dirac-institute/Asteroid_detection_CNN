@@ -14,7 +14,7 @@ MANIFEST=${MANIFEST:-$HL/NEO_small/manifest.csv}   # butler diffim FITS list (vi
 KNOWN=${KNOWN:-$HL/NEO_small/known.csv}            # known-object sightings for crossmatch (ObjID,mjd,ra,dec)
 
 # ---- models ----------------------------------------------------------------
-V7=${V7:-$REPO/models/v7_diffim_scripted.pt}
+SEG_MODEL=${SEG_MODEL:-$REPO/models/segmentation_model.pt}
 
 # ---- stage 1: detect (ADCNN, GPU) -----------------------------------------
 CNN_THR=${CNN_THR:-0.63}             # CNN operating point (FP-matched to the old RF); same as eval

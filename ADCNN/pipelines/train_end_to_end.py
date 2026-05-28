@@ -1,26 +1,26 @@
-"""ENTRY POINT — train the full two-stage detector end to end: v7 NN, then the cutout CNN.
+"""ENTRY POINT — train the full two-stage detector end to end: segmentation model NN, then the cutout CNN.
 
 This pipeline is the single authoritative source of the deployed **reg2** recipe: every
 training parameter decision lives in :class:`Reg2Recipe` below and is passed explicitly to
 the trainer, so the result does NOT depend on ``ADCNN.training.train``'s argparse defaults.
 The recipe was captured from the deployed model's run config
-(``experiments/diffim_runs/pilot_v7_reg2/config.json``).
+(``experiments/diffim_runs/pilot_seg_reg2/config.json``).
 
-Stage 1 (NN): trains v7 (UNetResSE + orientation + Hough aggregator) with the reg2 recipe on
+Stage 1 (NN): trains segmentation model (UNetResSE + orientation + Hough aggregator) with the reg2 recipe on
   the realistic-trail diffim shards (``--data-sources``), then exports the best checkpoint to
   TorchScript.
 Stage 2 (CNN): trains the focal-loss cutout CNN second-stage false-positive filter on cutouts
-  from the held-out VALIDATION panels of the freshly trained v7 (leakage-safe; never sees the
+  from the held-out VALIDATION panels of the freshly trained segmentation model (leakage-safe; never sees the
   test set). For a stronger filter, build a large dedicated cutout set with
   ``ADCNN.training.cnn_postproc.build_cutout_dataset`` and train on that instead.
 
 Defaults reproduce reg2 out of the box on the 4 realistic shards:
 
-    python -m ADCNN.pipelines.train_end_to_end --run-name v7_repro
+    python -m ADCNN.pipelines.train_end_to_end --run-name seg_repro
 
 Override --data-sources / --val-* to train on other data, --epochs for a quick smoke, or
 --skip-nn / --skip-cnn to run a single stage. The NN stage needs a GPU + the asteroid_cnn env.
-Outputs: ``experiments/diffim_runs/<run>/ckpts/`` + ``<models-dir>/<run>_{v7_scripted.pt,cnn_postproc.pt}``.
+Outputs: ``experiments/diffim_runs/<run>/ckpts/`` + ``<models-dir>/<run>_{segmentation_scripted.pt,cnn_postproc.pt}``.
 
 NOTE: the deployed reg2 used ``init_agg_alpha=0.073``; that trainer flag was removed in the
 consolidation, so the Hough aggregator's ``agg_alpha`` now initialises at 0.0 (model default).
@@ -76,7 +76,7 @@ class Reg2Recipe:
     stk_balance: float = 0.6
     anchor_jitter: int = 48
     tile: int = 128
-    # architecture (half-width v7 backbone + Hough head)
+    # architecture (half-width segmentation model backbone + Hough head)
     widths: tuple[int, ...] = (24, 48, 96, 192, 384)
     kernel_lens: tuple[int, ...] = (11, 21, 41)
     n_angles: int = 12
@@ -143,7 +143,7 @@ def main():
 
     run_dir = Path(a.out_root) / a.run_name
     best = run_dir / "ckpts" / "best.pt"
-    scripted = Path(a.models_dir) / f"{a.run_name}_v7_scripted.pt"
+    scripted = Path(a.models_dir) / f"{a.run_name}_segmentation_scripted.pt"
 
     # --- Stage 1: NN (reg2 recipe, passed explicitly) ---
     if not a.skip_nn:
@@ -156,16 +156,16 @@ def main():
         subprocess.run(cmd, check=True)
         subprocess.run([sys.executable, "-m", "ADCNN.inference.export",
                         "--ckpt", str(best), "--out", str(scripted), "--no-optimize"], check=True)
-        print(f"[stage1-nn] scripted v7 -> {scripted}", flush=True)
+        print(f"[stage1-nn] scripted segmentation model -> {scripted}", flush=True)
     elif a.dry_run:
         return
 
-    # --- Stage 2: cutout CNN (focal FP filter, on the trained v7's held-out val candidates) ---
+    # --- Stage 2: cutout CNN (focal FP filter, on the trained segmentation model's held-out val candidates) ---
     if not a.skip_cnn:
         import json
         from ADCNN.training.cnn_postproc import train_cnn_from_val
         # Use the EXACT panels stage 1 held out (split.json) so the FP-filter CNN is never built on
-        # panels v7 trained on. Fall back to the deterministic multi-source selection only if absent.
+        # panels segmentation model trained on. Fall back to the deterministic multi-source selection only if absent.
         split = run_dir / "split.json"
         if split.exists():
             val_ids = json.loads(split.read_text())["val_panels"]

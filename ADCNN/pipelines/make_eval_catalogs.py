@@ -2,7 +2,7 @@
 half of the catalog-based evaluation), then print trail-overlap metrics per set.
 
 For each test set it runs the optimized multi-GPU engine (``build_detection_catalog_multigpu``:
-v7 inference with parallel CPU prep, pipelined across all GPUs; candidate features + cutout CNN
+segmentation model inference with parallel CPU prep, pipelined across all GPUs; candidate features + cutout CNN
 in a process pool; ``gate_pmax`` cheap-gate) and writes ``<out>/<set>_detections.csv``. It then
 matches each catalog against the set's truth CSV (``evaluate_catalog``) and prints
 recall / FP-per-panel / wall-time. Inference only — no training, fixed CNN operating point.
@@ -35,7 +35,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--sets", nargs="*", default=DEFAULT_SETS, help="test-set dirs under DATA_DIFFIM/")
     ap.add_argument("--data-root", default=str(REPO / "DATA_DIFFIM"))
-    ap.add_argument("--v7", default=str(REPO / "models/v7_diffim_scripted.pt"))
+    ap.add_argument("--seg-model", default=str(REPO / "models/segmentation_model.pt"))
     ap.add_argument("--cnn", default=str(REPO / "models/cnn_postproc.pt"))
     ap.add_argument("--out", default=str(REPO / "Evaluation/catalogs"))
     ap.add_argument("--cnn-thr", type=float, default=CNN_DEFAULT_THR, help="CNN operating point (pre-chosen)")
@@ -64,7 +64,7 @@ def main():
         t0 = time.time()
         cfg = InferenceConfig(cnn_thr=a.cnn_thr, gate_pmax=a.gate_pmax, tile_batch=a.tile_batch)
         cat = build_detection_catalog_multigpu(
-            str(h5), a.v7, a.cnn, config=cfg, n_gpus=n_gpus,
+            str(h5), a.seg_model, a.cnn, config=cfg, n_gpus=n_gpus,
             panels_csv=str(panels) if panels.exists() else None,
         )
         out_csv = out / f"{name}_detections.csv"

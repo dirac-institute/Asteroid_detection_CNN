@@ -1,6 +1,6 @@
 """A/B experiment: does fixing the trail ORIENTATION before the RF improve the second stage?
 
-Single-variable comparison on identical data + pipeline. For every panel we run v7 ONCE and
+Single-variable comparison on identical data + pipeline. For every panel we run segmentation model ONCE and
 build the 72-feature candidate table twice:
   - "pca"    : orientation = footprint principal axis (the corrected extraction; ~8-10° MAD).
   - "nnhead" : orientation = NN sin2β/cos2β-head angle (the original; r≈0 vs truth).
@@ -12,7 +12,7 @@ stage 2 = train_rf_from_val, neg5). We train one RandomForest per variant, then 
 the synthetic test sets (recall vs FP/panel via the trail-overlap matcher).
 
 Panels (train + all test sets) are sharded round-robin across the visible GPUs — each GPU runs
-v7 + feature extraction on its shard in its own process; the main process gathers the small
+segmentation model + feature extraction on its shard in its own process; the main process gathers the small
 candidate tables, fits the two RFs, and evaluates. Streaming per panel -> bounded memory.
 
     python experiments/heliolinc/rf_orient_compare.py --n-gpus 4
@@ -41,8 +41,8 @@ EVAL_COLS = None  # set per worker after importing RF_FEATURES_V2
 
 
 def _both_variants(model, predict, compute, add_orient, mad_sigma, img, rl, device):
-    """Run v7 once; return (cand_pca, cand_nnhead, prob). nnhead = pca with the orientation
-    columns recomputed via the NN-head angle (single v7 pass, single feature pass)."""
+    """Run segmentation model once; return (cand_pca, cand_nnhead, prob). nnhead = pca with the orientation
+    columns recomputed via the NN-head angle (single segmentation model pass, single feature pass)."""
     p, s, c, a = predict(model, img, rl, device=device)
     prob = p.astype(np.float32)[None]
     # gate_pmax=0.10 matches the deployed eval (make_eval_catalogs) — cheaply drops sub-threshold
@@ -59,7 +59,7 @@ def _both_variants(model, predict, compute, add_orient, mad_sigma, img, rl, devi
     return cand, cand_nn, prob
 
 
-def _gpu_worker(gpu_id, work, v7_ckpt, q):
+def _gpu_worker(gpu_id, work, seg_ckpt, q):
     """Process this shard's panels on one GPU. `work` = list of (kind, h5, csv, pid) where kind
     is 'train' or a test-set name. Returns (train_Xp, train_Xn, train_y, eval_rows)."""
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
@@ -71,7 +71,7 @@ def _gpu_worker(gpu_id, work, v7_ckpt, q):
     from ADCNN.inference.rf_postproc import label_candidates_by_injection_overlap
 
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = torch.jit.load(v7_ckpt, map_location=dev).eval()
+    model = torch.jit.load(seg_ckpt, map_location=dev).eval()
     feats = list(RF_FEATURES_V2)
 
     def pool(cand, labels):
@@ -137,7 +137,7 @@ def main():
     import torch
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--v7", default=str(REPO / "models/v7_diffim_scripted.pt"))
+    ap.add_argument("--seg-model", default=str(REPO / "models/segmentation_model.pt"))
     ap.add_argument("--n-val-panels", type=int, default=N_VAL_PANELS)
     ap.add_argument("--eval-panels", type=int, default=0, help="0 = all test panels")
     ap.add_argument("--neg-ratio", type=int, default=5, help="deployed reg2 = neg5")
@@ -159,7 +159,7 @@ def main():
 
     ctx = torch.multiprocessing.get_context("spawn")
     q = ctx.Queue()
-    procs = [ctx.Process(target=_gpu_worker, args=(g, shards[g], a.v7, q))
+    procs = [ctx.Process(target=_gpu_worker, args=(g, shards[g], a.seg_model, q))
              for g in range(n_gpus) if shards[g]]
     for p in procs:
         p.start()

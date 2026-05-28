@@ -1,6 +1,6 @@
 """Diffim preprocessing primitives — shared by the dataset, training, and inference.
 
-The v7 detector consumes a 3-channel tile (``build_3channel``):
+The segmentation model detector consumes a 3-channel tile (``build_3channel``):
   ch0 = signed diffim / MAD-sigma, clipped to ±5
   ch1 = log1p-compressed local std of ch0 (noise/edge/saturation context)
   ch2 = DIA/artefact mask (real_labels > 0)

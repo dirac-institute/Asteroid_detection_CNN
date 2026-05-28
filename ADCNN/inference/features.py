@@ -1,6 +1,6 @@
 """Stage-2 candidate extraction + measurement for the diffim detector.
 
-``compute_v2_features`` runs the v7 candidate extractor and measures each candidate: it returns
+``compute_v2_features`` runs the segmentation model candidate extractor and measures each candidate: it returns
 the centroid, the matched-filter trail geometry (``mf_length`` / ``mf_beta`` / ``mf_snr`` /
 ``mf_flux``) the detection catalog emits, plus the full ``FEATURES_V2`` vector spanning long
 matched-filter response (``_add_long_mf``), blob morphology (``_add_morphology``), panel context

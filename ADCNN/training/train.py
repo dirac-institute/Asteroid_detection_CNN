@@ -1,4 +1,4 @@
-"""Diffim NN training entry point — trains the v7 (UNetResSEOrientHough) detector.
+"""Diffim NN training entry point — trains the segmentation model (UNetResSEOrientHough) detector.
 
 Training shape (defaults match the deployed "reg2" model):
   - 3-channel input: signed MAD-normalised diffim, log1p local-std, real_labels binary
@@ -8,7 +8,7 @@ Training shape (defaults match the deployed "reg2" model):
   - loss: masked Asymmetric Focal Tversky + small BCE anchor + masked orientation MSE
   - EMA over weights (exclude agg_alpha via --ema-exclude agg_alpha)
 
-The reg2 recipe that produced models/v7_diffim_scripted.pt: lambda_orient=0 +
+The reg2 recipe that produced models/segmentation_model.pt: lambda_orient=0 +
 --dropout 0.15 + --wd 1e-4 + --intensity-aug + --augment, half-width backbone
 (--widths 24 48 96 192 384), trained on the realistic-trail diffim set via
 --data-sources. The canonical launch is ADCNN/pipelines/train_end_to_end.py.

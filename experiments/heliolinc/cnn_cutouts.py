@@ -1,5 +1,5 @@
-"""Build a cutout dataset for the post-v7 CNN rejecter. For each panel: run v7 (prob+agg), find
-candidates, label by injection overlap, save multi-channel cutout [diffim/sigma, v7_prob, v7_agg].
+"""Build a cutout dataset for the post-segmentation model CNN rejecter. For each panel: run segmentation model (prob+agg), find
+candidates, label by injection overlap, save multi-channel cutout [diffim/sigma, seg_prob, seg_agg].
 CHUNKED + RESUMABLE: writes one part-npz per CHUNK panels into <out_dir>/, tracks done panels in
 done.txt, skips them on restart -> survives ampere preemption (use --requeue). Usage:
   python cnn_cutouts.py <h5> <csv> <out_dir> [--k 48] [--fp-cap 600] [--chunk 40]"""
@@ -15,8 +15,8 @@ ap.add_argument("--k",type=int,default=48); ap.add_argument("--fp-cap",type=int,
 a=ap.parse_args(); K=a.k; H=K//2
 OUT=Path(a.out); OUT.mkdir(parents=True,exist_ok=True); DONE=OUT/"done.txt"
 done=set(int(x) for x in DONE.read_text().split()) if DONE.exists() else set()
-V7=REPO/"models/v7_diffim_scripted.pt"; dev=torch.device("cuda")
-model=torch.jit.load(str(V7),map_location=dev).eval(); cat=pd.read_csv(a.csv)
+SEG_MODEL=REPO/"models/segmentation_model.pt"; dev=torch.device("cuda")
+model=torch.jit.load(str(SEG_MODEL),map_location=dev).eval(); cat=pd.read_csv(a.csv)
 def cut(arr,x,y):
     Hh,Ww=arr.shape; x,y=int(round(x)),int(round(y)); o=np.zeros((K,K),np.float32)
     x0,x1,y0,y1=max(0,x-H),min(Ww,x+H),max(0,y-H),min(Hh,y+H)

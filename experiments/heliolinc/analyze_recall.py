@@ -1,7 +1,7 @@
 """Unbiased detection-capability analysis on the SYNTHETIC test sets (uniform trail-length & SNR).
 
 The real-data recall (test_real) is selection-biased: it is built from *catalogued* fast movers,
-which skew short and bright, and v7 was designed for elongated trails. The synthetic test sets
+which skew short and bright, and segmentation model was designed for elongated trails. The synthetic test sets
 sample trail_length (6-60 px) and detection-SNR (2-8) uniformly, so recall measured there is the
 fair measure of what the detector can do across the parameter space.
 

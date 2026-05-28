@@ -1,5 +1,5 @@
 """Rejecter build Stage B (lsst env): add Veres trailed-source-fit features per candidate, parallel
-over panels. Veres is fit on the test.h5 INJECTED image (where v7's candidate x,y live), using the
+over panels. Veres is fit on the test.h5 INJECTED image (where segmentation model's candidate x,y live), using the
 butler PSF. Adds veres_x/y/len/theta/rchi/ok + offsets. Writes candB.parquet."""
 import sys, warnings, os, numpy as np, pandas as pd, h5py
 warnings.simplefilter("ignore")

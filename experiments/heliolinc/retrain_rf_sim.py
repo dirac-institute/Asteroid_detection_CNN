@@ -1,7 +1,7 @@
 """Attack diffim false positives using ONLY simulated data (synthetic trails on real diffim
 backgrounds) -- NO real-sky labels, to avoid the selection bias of the real (catalogued) objects.
 
-Same v7, same RandomForest, same 72 features, same 0.5 threshold. The only change vs the deployed
+Same segmentation model, same RandomForest, same 72 features, same 0.5 threshold. The only change vs the deployed
 neg5 RF: train on MANY more realistic-trail panels (the deployed RF saw only 64) so the RF sees
 far more unbiased negatives (the noise + subtraction residuals in the real backgrounds).
 
@@ -42,14 +42,14 @@ def pool(cand, labels):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--v7", default=str(REPO / "models/v7_diffim_scripted.pt"))
+    ap.add_argument("--seg-model", default=str(REPO / "models/segmentation_model.pt"))
     ap.add_argument("--panels-per-shard", type=int, default=300, help="how many panels per shard to use")
     ap.add_argument("--neg-ratio", type=int, default=12)
     ap.add_argument("--out", default=str(REPO / "models/rf_postproc_simhard.pkl"))
     a = ap.parse_args()
 
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = torch.jit.load(a.v7, map_location=dev).eval()
+    model = torch.jit.load(a.seg_model, map_location=dev).eval()
     Xs, ys = [], []
     for h5, csv in SHARDS:
         cat = pd.read_csv(csv)

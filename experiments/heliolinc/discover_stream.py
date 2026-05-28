@@ -5,7 +5,7 @@ no big files, bounded memory.
 Given the manifest of FITS paths (butler_manifest.py), the panels are sharded across the visible
 GPUs. Each GPU process prefetches FITS with a small thread pool (astropy reads image HDU 1 + WCS +
 MJD directly -- validated bit-identical to the lsst stack, WCS agree to 0.001") so disk I/O hides
-behind the GPU, then runs v7 -> focal-cutout CNN stage-2 filter on each panel and
+behind the GPU, then runs segmentation model -> focal-cutout CNN stage-2 filter on each panel and
 converts kept detections (x,y) -> (RA,Dec) via the panel's own WCS. Output: adcnn_dets.csv
 [detid, mjd, ra, dec, mag, band, obscode, visit, detector, x, y, score] + colformat.txt.
 """
@@ -74,10 +74,10 @@ def _prefetch(paths, workers):
             nxt += 1
 
 
-def run_shard(gpu_id, rows, v7_ckpt, cnn_model, thr, prefetch, out_csv, n_workers=8, feat_out=None):
-    """Stream FITS -> v7 (GPU) -> feature + stage-2 focal-cutout-CNN PROCESS POOL (CPU) -> sky catalog.
+def run_shard(gpu_id, rows, seg_ckpt, cnn_model, thr, prefetch, out_csv, n_workers=8, feat_out=None):
+    """Stream FITS -> segmentation model (GPU) -> feature + stage-2 focal-cutout-CNN PROCESS POOL (CPU) -> sky catalog.
     The stage-2 filter is the focal-cutout CNN (models/cnn_postproc.pt) -- the SAME engine + operating
-    point as make_eval_catalogs, so detection is identical across eval and discovery. The GPU runs v7
+    point as make_eval_catalogs, so detection is identical across eval and discovery. The GPU runs segmentation model
     continuously while `n_workers` CPU processes compute features + the CNN in parallel across panels.
     Detections + a .done log are written incrementally (preemption-safe / resumable)."""
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
@@ -88,7 +88,7 @@ def run_shard(gpu_id, rows, v7_ckpt, cnn_model, thr, prefetch, out_csv, n_worker
     from ADCNN.inference.predict import predict_panel_overlap_3ch_full
     from ADCNN.inference.catalog import _worker, _worker_init, InferenceConfig
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = torch.jit.load(v7_ckpt, map_location=dev).eval()
+    model = torch.jit.load(seg_ckpt, map_location=dev).eval()
     config = InferenceConfig(cnn_thr=thr, gate_pmax=0.10)
     # RESUME: skip (visit,detector) panels already processed (sidecar .done log) so a preempted +
     # requeued job continues instead of losing everything. Detections are appended per panel.
@@ -154,7 +154,7 @@ def run_shard(gpu_id, rows, v7_ckpt, cnn_model, thr, prefetch, out_csv, n_worker
             if len(pending) >= 2 * max(2, n_workers):   # backpressure: bound RAM + queue depth
                 drain()
             now = time.time()
-            if now - last >= 20.0:                       # progress heartbeat (panels v7-processed)
+            if now - last >= 20.0:                       # progress heartbeat (panels segmentation model-processed)
                 rate = (i + 1) / max(now - t0, 1e-6); eta = (total - i - 1) / rate if rate > 0 else 0.0
                 print(f"[gpu{gpu_id}] {i+1}/{total} panels | {n_det} det | {rate:.1f} pan/s | ETA {eta/60:.1f}m", flush=True)
                 last = now
@@ -168,7 +168,7 @@ def main():
     import torch
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--manifest", default=str(REPO / "experiments/heliolinc/run_disco/manifest.csv"))
-    ap.add_argument("--v7", default=str(REPO / "models/v7_diffim_scripted.pt"))
+    ap.add_argument("--seg-model", default=str(REPO / "models/segmentation_model.pt"))
     ap.add_argument("--cnn", default=str(REPO / "models/cnn_postproc.pt"), help="focal-cutout CNN model")
     ap.add_argument("--cnn-thr", type=float, default=None, help="CNN operating point (default cnn_postproc.CNN_DEFAULT_THR)")
     ap.add_argument("--prefetch", type=int, default=6, help="FITS reads in flight per GPU (bounds memory)")
@@ -198,11 +198,11 @@ def main():
     feat_pqs = [None for _ in range(n_gpus)]   # legacy run_shard arg; feature-dump not used in CNN path
 
     if n_gpus == 1:
-        run_shard(0, shards[0], a.v7, cnn_model, thr, a.prefetch, shard_csvs[0], n_workers, feat_pqs[0])
+        run_shard(0, shards[0], a.seg_model, cnn_model, thr, a.prefetch, shard_csvs[0], n_workers, feat_pqs[0])
     else:
         ctx = torch.multiprocessing.get_context("spawn")
         procs = [ctx.Process(target=run_shard,
-                             args=(g, shards[g], a.v7, cnn_model, thr, a.prefetch, shard_csvs[g], n_workers, feat_pqs[g]))
+                             args=(g, shards[g], a.seg_model, cnn_model, thr, a.prefetch, shard_csvs[g], n_workers, feat_pqs[g]))
                  for g in range(n_gpus) if shards[g]]
         for p in procs:
             p.start()

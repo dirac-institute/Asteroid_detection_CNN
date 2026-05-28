@@ -1,4 +1,4 @@
-"""v7 (reg2, deployed) model: UNet + orientation head + Hough-like line aggregator.
+"""segmentation model (reg2, deployed) model: UNet + orientation head + Hough-like line aggregator.
 
 The aggregator is the architectural ingredient v4 lacked: an explicit
 "vote along a thin oriented line" operator. v4 demonstrated that the raw

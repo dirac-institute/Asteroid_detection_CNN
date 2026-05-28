@@ -1,5 +1,5 @@
 """Regenerate the Evaluation detection catalogs using the focal-loss cutout CNN as stage-2 (instead
-of the RF). Same v7 candidates + same public schema; the 'score_rf' column now holds the CNN score and
+of the RF). Same seg_model candidates + same public schema; the 'score_rf' column now holds the CNN score and
 rows are kept at the CNN operating threshold. Output: Evaluation/catalogs/<set>_detections.csv (RF
 version backed up to <set>_detections_rf.csv). Usage: python cnn_make_catalog.py <set> [--thr 0.0695]"""
 import sys, argparse, shutil, numpy as np, pandas as pd, h5py, torch, torch.nn as nn
@@ -18,7 +18,7 @@ class Net(nn.Module):
         s.f=nn.Sequential(blk(c,w),blk(w,2*w),blk(2*w,4*w),nn.AdaptiveAvgPool2d(1)); s.h=nn.Sequential(nn.Flatten(),nn.Dropout(0.3),nn.Linear(4*w,1))
     def forward(s,x): return s.h(s.f(x)).squeeze(1)
 cnn=Net().to(dev); cnn.load_state_dict(torch.load(REPO/"experiments/heliolinc/rejecter_data/cnn_focal_final.pt",map_location=dev)); cnn.eval()
-v7=torch.jit.load(str(REPO/"models/v7_diffim_scripted.pt"),map_location=dev).eval()
+seg_model=torch.jit.load(str(REPO/"models/segmentation_model.pt"),map_location=dev).eval()
 def cut(arr,x,y):
     H2,W2=arr.shape; x,y=int(round(x)),int(round(y)); o=np.zeros((K,K),np.float32)
     x0,x1,y0,y1=max(0,x-Hh),min(W2,x+Hh),max(0,y-Hh),min(H2,y+Hh); c=arr[y0:y1,x0:x1]; o[:c.shape[0],:c.shape[1]]=c; return o
@@ -27,7 +27,7 @@ with h5py.File(DD/"test.h5","r") as f:
     npan=f["images"].shape[0]
     for pid in range(npan):
         img=f["images"][pid].astype(np.float32); rl=f["real_labels"][pid][:].astype(np.uint16)
-        prob,sn,cs,agg=predict_panel_overlap_3ch_full(v7,img,rl,device=dev); prob=prob.astype(np.float32); agg=np.asarray(agg,np.float32)
+        prob,sn,cs,agg=predict_panel_overlap_3ch_full(seg_model,img,rl,device=dev); prob=prob.astype(np.float32); agg=np.asarray(agg,np.float32)
         cand,_=compute_v2_features({pid:prob},{pid:img},{pid:sn},{pid:cs},{pid:agg},real_labels={pid:rl},verbose=False)
         if not len(cand): continue
         s=float(np.median(np.abs(img-np.median(img)))*1.4826) or 1.0

@@ -1,4 +1,4 @@
-"""FINAL test-set eval of the best post-v7 FP filter (focal-loss cutout CNN, w40, 30ep).
+"""FINAL test-set eval of the best post-segmentation model FP filter (focal-loss cutout CNN, w40, 30ep).
 TRAIN on train2 (cut_train2 parts, 90% panels), pick 95%-recall threshold on a 10% train2 holdout,
 then EVALUATE on the held-out test_5sigma (cut_train.npz). Reports FP-removed/recall/sub-5sigma.
 Saves cnn_focal_final.pt + a JSON summary. test_real untouched."""

@@ -1,4 +1,4 @@
-"""Rejecter build Stage A (torch env): run v7 over the test_5sigma panels, extract candidate
+"""Rejecter build Stage A (torch env): run segmentation model over the test_5sigma panels, extract candidate
 detections + FEATURES_V2 + injection labels (1=injected TP, 0=FP), plus panel-clumping/isolation
 context features. Writes candA.parquet for Stage B (Veres + mask features, lsst env).
 Panel-disjoint train/val is done later at training time (GroupKFold on panel_id) -- leak-free."""
@@ -10,7 +10,7 @@ from ADCNN.inference.features import FEATURES_V2
 
 H5=REPO/"DATA_DIFFIM/test_5sigma/test.h5"
 CSV=REPO/"DATA_DIFFIM/test_5sigma/test.csv"
-V7=REPO/"models/v7_diffim_scripted.pt"
+SEG_MODEL=REPO/"models/segmentation_model.pt"
 OUT=REPO/"experiments/heliolinc/rejecter_data"; OUT.mkdir(exist_ok=True)
 dev=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -18,10 +18,10 @@ cat=pd.read_csv(CSV)
 with h5py.File(H5,"r") as f: npan=f["images"].shape[0]
 panel_ids=list(range(npan))
 print(f"panels={npan} | injections={len(cat)}", flush=True)
-model=torch.jit.load(str(V7),map_location=dev).eval()
+model=torch.jit.load(str(SEG_MODEL),map_location=dev).eval()
 cand,labels=infer_candidate_features(model,str(H5),panel_ids,cat,dev)
 cand["label"]=labels
-cand.to_parquet(OUT/"candA_raw.parquet")   # checkpoint the v7 work before ctx
+cand.to_parquet(OUT/"candA_raw.parquet")   # checkpoint the segmentation model work before ctx
 print(f"candidates={len(cand)} | TP(injected)={int((labels==1).sum())} | FP={int((labels==0).sum())}", flush=True)
 
 # centroid is x_centroid/y_centroid; length/orient seeds = mf_length/mf_beta
