@@ -264,15 +264,18 @@ def plot_unet(spec, savepath=None):
         a = _iso_box(ax, XR, ylev(l), fw, hgt(s["h"]), dep(s["c"]), PALETTE["dec"])
         dec_a[l] = a; dims(a, s["c"], s["h"])
 
-    # ---- input channels ----
-    names_in = ["signed diffim", "local σ", "DIA mask"][:spec["in_ch"]] or [f"ch{i}" for i in range(spec["in_ch"])]
-    xin = XE - 2.7
-    for j in range(spec["in_ch"]):
-        off = (j - (spec["in_ch"] - 1) / 2) * 0.16
-        _iso_box(ax, xin + off, ylev(0) + off, 0.5, 0.98, 0.16, PALETTE["inp"], z=2 + j)
-    _label(ax, xin, ylev(0) + 1.18, "   ".join(names_in), size=8.0, color="#333")
-    _label(ax, xin, ylev(0) - 1.0, f"input\n{spec['in_ch']}×{spec['tile']}²", size=8.6)
-    _arrow(ax, (xin + 0.55, ylev(0)), enc_a[0]["l"], lw=1.9)
+    # ---- input channels: each of the 3 maps drawn SEPARATELY and labelled, then stacked into the input ----
+    names_in = ["signed diffim", "local σ", "DIA mask"][:spec["in_ch"]] or [f"channel {i}" for i in range(spec["in_ch"])]
+    shades_in = [1.0, 0.8, 1.2, 0.9, 1.1]
+    n_in = spec["in_ch"]
+    xin = XE - 3.5
+    for j, nm in enumerate(names_in):
+        yj = ylev(0) - (j - (n_in - 1) / 2) * 0.82
+        a = _iso_box(ax, xin, yj, 0.56, 0.5, 0.12, _shade(PALETTE["inp"], shades_in[j % len(shades_in)]))
+        _label(ax, xin - 0.47, yj, nm, size=8.4, ha="right", weight="bold", color="#333")
+        _arrow(ax, a["r"], enc_a[0]["l"], color=PALETTE["skip"], lw=1.35)
+    _label(ax, xin, ylev(0) - (n_in / 2) * 0.82 - 0.5, f"stacked → {n_in} × {spec['tile']}² input",
+           size=8.0, color="#333", weight="bold")
 
     # ---- operation arrows: down (encoder), up (decoder), skips ----
     for l in range(L - 2):
@@ -345,7 +348,7 @@ def plot_unet(spec, savepath=None):
            Line2D([0], [0], color=PALETTE["skip"], lw=1.8, ls="--", label="skip (concat)")]
     ax.legend(handles=leg, loc="lower left", ncol=2, frameon=False, fontsize=8.2,
               handlelength=1.6, bbox_to_anchor=(-0.01, 0.0))
-    ax.set_xlim(xin - 1.6, XR + 9.7)
+    ax.set_xlim(xin - 2.5, XR + 9.7)
     ax.set_ylim(ylev(L - 1) - 1.4, ylev(0) + 2.15)
     if savepath:
         fig.savefig(savepath, dpi=300); fig.savefig(str(savepath).replace(".png", ".pdf"))
@@ -449,21 +452,25 @@ def plot_hough(spec, savepath=None):
 # --------------------------------------------------------------------------------------------------
 def plot_filter_cnn(spec, thr=0.63, savepath=None):
     _setup_style()
-    fig, ax = plt.subplots(figsize=(13.5, 4.3))
+    fig, ax = plt.subplots(figsize=(15.0, 4.6))
     ax.axis("off"); ax.set_aspect("equal")
     k = spec["k"]
-    chans = ["diffim/σ", "v7 prob", "v7 agg"]
-    thumb = _streak_thumb(k, 35.0, 0.55)
-    for j in range(3):
-        sub = ax.inset_axes([0.012 + (2 - j) * 0.010, 0.40 + (2 - j) * 0.05, 0.085, 0.30])
-        sub.imshow(thumb if j == 0 else (thumb > 0.25).astype(float) * (0.6 + 0.4 * thumb),
-                   cmap="gray" if j == 0 else "viridis", interpolation="nearest")
-        sub.set_xticks([]); sub.set_yticks([])
+    def _nrm(a):
+        return (a - a.min()) / (np.ptp(a) + 1e-9)
+    # each input channel drawn SEPARATELY and labelled (the 3 maps stacked into the cutout)
+    chan_specs = [("diffim / σ", _streak_thumb(k, 35, 0.55, noise=1.0), "gray"),
+                  ("v7 seg prob", _nrm(_streak_thumb(k, 35, 0.55, sigma=2.6, noise=0.12)), "viridis"),
+                  ("v7 Hough agg", _streak_thumb(k, 35, 0.55, sigma=1.0, noise=0.0, amp=9.0), "magma")]
+    for j, (nm, img, cmap) in enumerate(chan_specs[:spec["in_ch"]]):
+        yf = 0.72 - j * 0.27
+        sub = ax.inset_axes([0.015, yf, 0.072, 0.22])
+        sub.imshow(img, cmap=cmap, interpolation="nearest"); sub.set_xticks([]); sub.set_yticks([])
         for sp in sub.spines.values():
             sp.set_edgecolor(PALETTE["edge"]); sp.set_linewidth(0.8)
-    _label(ax, 0.95, -1.05, f"cutout\n{spec['in_ch']}×{k}²", size=8.8)
-    _label(ax, 0.95, 1.6, "   ".join(chans), size=7.8, color="#333")
-    x = 2.3; prev = dict(r=(1.55, 0.2))
+        ax.text(0.095, yf + 0.11, nm, transform=ax.transAxes, fontsize=8.4, va="center", ha="left", weight="bold")
+    ax.text(0.05, 0.05, f"{spec['in_ch']} channels stacked → {spec['in_ch']} × {k}² cutout",
+            transform=ax.transAxes, fontsize=8.2, ha="left", weight="bold")
+    x = 3.5; prev = dict(r=(2.55, 0.2))
     maxc = max((s["c"] for s in spec["stages"][:-1]), default=160)
     for s in spec["stages"]:
         if any("Adaptive" in kk for kk in s["kinds"]):
@@ -498,17 +505,17 @@ def plot_filter_cnn(spec, thr=0.63, savepath=None):
 # --------------------------------------------------------------------------------------------------
 # figure: end-to-end system
 # --------------------------------------------------------------------------------------------------
-def _streak_thumb(n=48, angle=30.0, length=0.5, sigma=1.4, seed=0):
+def _streak_thumb(n=48, angle=30.0, length=0.5, sigma=1.4, seed=0, noise=1.0, amp=6.0):
     import math
     rng = np.random.default_rng(seed)
-    img = rng.normal(0, 1.0, (n, n)).astype(np.float32)
+    img = rng.normal(0, noise, (n, n)).astype(np.float32)
     yy, xx = np.mgrid[0:n, 0:n].astype(np.float32)
     cx = cy = n / 2.0
     dx, dy = math.cos(math.radians(angle)), math.sin(math.radians(angle))
     half = length * n / 2.0
     for t in np.linspace(-half, half, int(2 * half) + 1):
         px, py = cx + t * dx, cy + t * dy
-        img += 6.0 * np.exp(-(((xx - px) ** 2 + (yy - py) ** 2) / (2 * sigma ** 2)))
+        img += amp * np.exp(-(((xx - px) ** 2 + (yy - py) ** 2) / (2 * sigma ** 2)))
     return img
 
 
