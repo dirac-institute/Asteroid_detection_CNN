@@ -12,25 +12,24 @@
 #
 # ENTRY POINT (b) — train the two-stage detector end to end, deterministically.
 #
-#   stage 1: segmentation model (UNetResSEOrientHough, reg2 recipe) on TRAIN, model selection on
-#            TRAIN2 (held out from stage-1 training), then TorchScript export.
-#   stage 2: focal-loss cutout-CNN false-positive filter trained on ALL of the dedicated TRAIN2 set.
+#   stage 1: segmentation model (UNetResSEOrientHough, reg2 recipe) trained on TRAIN, model
+#            selection on the held-out VAL set, then TorchScript export.
+#   stage 2: focal-loss cutout-CNN FP filter trained on all of TRAIN2, operating threshold + AUC
+#            measured on the held-out VAL2 set.
 #   TEST is never touched here (held out for evaluation).
 #
-# Each dataset is used for exactly its purpose: TRAIN -> segmentation weights, TRAIN2 -> CNN filter
-# (and stage-1 best-epoch selection only — the segmentation model never TRAINS on train2, so the
-# stage-2 cutouts are leakage-free), TEST -> eval. The three are disjoint by construction (see
-# make_datasets.slurm).
+# Each set is used for exactly its purpose (all disjoint by construction — see make_datasets.slurm):
+# TRAIN -> segmentation weights, VAL -> stage-1 selection, TRAIN2 -> CNN filter, VAL2 -> CNN
+# threshold, TEST -> eval.
 #
 # DETERMINISM: the reg2 recipe pins seed=2026 (weight init, anchor sampling, D4 + intensity
-# augmentation, data order); the stage-2 train_cnn is seeded too (weight init + minibatch order +
-# FP subsampling). Reruns reproduce to GPU floating-point tolerance on the same GPU type — CUDA
-# reductions are deliberately NOT bit-forced (torch deterministic mode would diverge from the
-# validated reg2 numerics and may error on ops lacking deterministic kernels).
+# augmentation, data order); the stage-2 CNN trainer is seeded too (init + minibatch order + FP
+# subsampling). Reruns reproduce to GPU floating-point tolerance on the same GPU type — CUDA
+# reductions are deliberately NOT bit-forced (would diverge from the validated reg2 numerics).
 #
 # Run AFTER make_datasets.slurm. Single A100 (training is single-GPU). Usage:
 #   sbatch ADCNN/pipelines/slurm/train_end_to_end.slurm
-#   RUN_NAME=seg_v2 DATA_ROOT=/path/DATA_DIFFIM sbatch ADCNN/pipelines/slurm/train_end_to_end.slurm
+#   RUN_NAME=seg_v2 DATA_ROOT=/path sbatch ADCNN/pipelines/slurm/train_end_to_end.slurm
 set -euo pipefail
 
 REPO="${ADCNN_REPO:-/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN}"
@@ -45,15 +44,16 @@ source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
 cd "$REPO"
 
-for f in train/train.h5 train/train.csv train2/train.h5 train2/train.csv; do
+for f in train.h5 train.csv val.h5 val.csv train2.h5 train2.csv val2.h5 val2.csv; do
   [[ -s "$DATA_ROOT/$f" ]] || { echo "MISSING $DATA_ROOT/$f — run make_datasets.slurm first"; exit 1; }
 done
 
 python3 -u -m ADCNN.pipelines.train_end_to_end \
   --run-name "$RUN_NAME" \
-  --data-sources "$DATA_ROOT/train/train.h5:$DATA_ROOT/train/train.csv" \
-  --val-h5  "$DATA_ROOT/train2/train.h5" --val-csv  "$DATA_ROOT/train2/train.csv" \
-  --cnn-train-h5 "$DATA_ROOT/train2/train.h5" --cnn-train-csv "$DATA_ROOT/train2/train.csv" \
+  --data-sources "$DATA_ROOT/train.h5:$DATA_ROOT/train.csv" \
+  --val-h5  "$DATA_ROOT/val.h5"  --val-csv  "$DATA_ROOT/val.csv" \
+  --cnn-train-h5 "$DATA_ROOT/train2.h5" --cnn-train-csv "$DATA_ROOT/train2.csv" \
+  --val2-h5 "$DATA_ROOT/val2.h5" --val2-csv "$DATA_ROOT/val2.csv" \
   --out-root "$REPO/experiments/diffim_runs" --models-dir "$MODELS_DIR"
 
 echo "=== TRAINING DONE ==="

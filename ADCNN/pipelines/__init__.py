@@ -1,7 +1,7 @@
 """End-to-end entry points for the ADCNN diffim asteroid-trail pipeline.
 
-  make_split         partition the panel universe into disjoint train/train2/test/val (split.json)
-  make_sim_data      simulated (injected-trail) train/test diffim datasets from the Butler
+  make_sim_data      ALL simulated (injected-trail) sets — train/val, train2/val2, test — from
+                     one deterministic panel partition (Butler); levers to build only some
   make_real_data     real-asteroid test diffim dataset from the Butler
   train_end_to_end   train the segmentation model detector (reg2 recipe) then the focal cutout CNN 2nd stage
   run_inference      run segmentation model + cutout CNN on diffim panels -> scored candidate detections
