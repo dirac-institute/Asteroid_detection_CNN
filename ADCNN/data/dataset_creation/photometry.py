@@ -53,13 +53,6 @@ def psf_fwhm_arcsec_from_calexp(
     return float(fwhm_pix * pixel_scale)
 
 
-def start_to_midpoint(x0: float, y0: float, l_pix: float, theta_deg: float) -> tuple[float, float]:
-    th = math.radians(theta_deg)
-    xm = x0 + 0.5 * l_pix * math.cos(th)
-    ym = y0 + 0.5 * l_pix * math.sin(th)
-    return xm, ym
-
-
 # ======================================================================================
 # SNR conversion helpers
 # ======================================================================================
@@ -134,7 +127,6 @@ def mag_to_snr(
     studies but does not reproduce the exact local detector threshold.
     """
     F = float(calexp.getPhotoCalib().magnitudeToInstFlux(mag))
-    #xm, ym = start_to_midpoint(float(x), float(y), float(l_pix), float(theta_deg))
     if snr_definition == "measurement":
         sigmaF = psf_fit_flux_sigma(
             calexp=calexp,

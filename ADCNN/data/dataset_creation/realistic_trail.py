@@ -5,7 +5,7 @@ infinitely-thin, perfectly-straight `galsim.Box(L, 1e-6)` convolved with the PSF
 The sim-to-real diagnostic (experiments/explore_simreal_gap) showed this is too
 idealized: real trail-candidates have systematically lower line-coherence features
 (oriented-aggregator mean, matched-filter SNR, integrated logit, elongation) than
-these clean injections, so the stage-2 RF trained on them rejects real trails.
+these clean injections, so a stage-2 filter trained on them rejects real trails.
 
 This module renders a trail as a sum of PSF point-components along the path with:
   - a non-uniform LIGHT CURVE (rotational modulation) along the trail,
