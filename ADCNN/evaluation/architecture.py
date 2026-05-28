@@ -287,6 +287,13 @@ def plot_unet(spec, savepath=None):
         if l in dec_a:
             _arrow(ax, enc_a[l]["r"], dec_a[l]["l"], color=PALETTE["skip"], lw=1.7, ls=(0, (5, 3)))
 
+    # ---- callout: every encoder/decoder stage is built from Res-SE blocks ----
+    rcx, rcy = XE - 1.95, ylev(1)
+    _label(ax, rcx, rcy, "every encoder/decoder\nstage built from\nRes-SE block(s)",
+           size=8.0, color=PALETTE["enc"], weight="bold", box="#E7EFF8")
+    _arrow(ax, (rcx + 0.95, rcy + 0.05), enc_a[1]["l"], color=PALETTE["enc"], lw=1.4,
+           ls=(0, (4, 2)), style="-|>")
+
     # ---- OUTPUT HEAD: head 1×1 conv -> 3 raw ch -> seg branch + orientation branch ----
     hy = ylev(0)
     hd = _round_box(ax, XR + 1.6, hy, 1.05, 0.66, PALETTE["head"], alpha=0.93)
@@ -350,8 +357,9 @@ def plot_unet(spec, savepath=None):
 # --------------------------------------------------------------------------------------------------
 def plot_resse_block(spec, savepath=None):
     _setup_style()
-    fig, ax = plt.subplots(figsize=(9.5, 2.5))
+    fig, ax = plt.subplots(figsize=(9.5, 3.0))
     ax.axis("off"); ax.set_aspect("equal")
+    ax.set_title("Residual squeeze-excite block", fontsize=13, weight="bold", pad=12)
     b = spec["block"] or dict(norm="GroupNorm", act="SiLU", k=3, se=True)
     seq = [(f"{b['norm']}\n+ {b['act']}", PALETTE["enc"]),
            (f"Conv {b['k']}×{b['k']}", PALETTE["dec"]),
@@ -387,8 +395,9 @@ def plot_resse_block(spec, savepath=None):
 # --------------------------------------------------------------------------------------------------
 def plot_hough(spec, savepath=None):
     _setup_style()
-    fig, ax = plt.subplots(figsize=(10.5, 3.6))
+    fig, ax = plt.subplots(figsize=(10.5, 4.0))
     ax.axis("off")
+    ax.set_title("Hough line-aggregator", fontsize=13, weight="bold", pad=12)
     h = spec["hough"]
     if not h:
         _label(ax, 0.5, 0.5, "no Hough aggregator", size=11);
