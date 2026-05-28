@@ -54,5 +54,16 @@ DATA_DIFFIM_stream_buffer/
 DATA_DIFFIM_realistic_big2/
 experiments/heliolinc/heliolinc2/
 experiments/heliolinc/run_*/
-experiments/heliolinc/*.log
-adcnn_stageA_*.log
+# renamed Butler-derived discovery datasets (multi-GB, regenerable from the manifest)
+experiments/heliolinc/NEO_small/
+experiments/heliolinc/NEO_small_v2/
+experiments/heliolinc/NEO_large/
+# FP-budget Monte-Carlo outputs (multi-GB; findings recorded in memory fp-budget-derivation)
+experiments/heliolinc/fp_budget*/
+# abandoned rejecter experiment scratch (models/parquets/plots; see memory fp-rejecter-1b-result)
+experiments/heliolinc/rejecter_data/
+experiments/heliolinc/rb_*.csv
+# generated eval catalogs
+Evaluation/catalogs_thr0/
+# all run logs (anywhere)
+*.log
