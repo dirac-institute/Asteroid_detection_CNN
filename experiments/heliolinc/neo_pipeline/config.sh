@@ -43,7 +43,10 @@ CLEAN_LENDB_MIN=${CLEAN_LENDB_MIN:-6}        # VERES-measured trail length px (a
 DIASRC=${DIASRC:-$RUN/diasources.csv}        # stack diaSource catalog (reliability + trailLength)
 
 # ---- stage 4: link (grid-parallel HelioLinC) ------------------------------
-HELIODIST=${HELIODIST:-heliohypo_all.txt}   # hypothesis grid (relative to RUN); 109,983 pts
+# NEO-targeted grid: r 1.05-1.58 AU, 49,479 pts (~3x finer in the near-Earth band than heliohypo_all
+# and ~2x faster). This is the right grid for >1 deg/day hunting; use heliohypo_all only for a
+# general/mixed (incl. main-belt) recovery. See [[neo-pipeline-corrections]] HYPOTHESIS GRID.
+HELIODIST=${HELIODIST:-heliohypo_neo.txt}   # hypothesis grid (relative to RUN)
 NSHARD=${NSHARD:-96}                        # grid shards == parallel heliolinc processes
 MINNIGHTS=${MINNIGHTS:-2}                   # fast NEOs cross a single field in ~2 nights -> 2
 NPT=${NPT:-3}
