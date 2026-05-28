@@ -3,7 +3,7 @@ cutting the 68 FP/panel. For each RF (negative-subsample ratio) and threshold, c
   real TP recall   = frac of real truth-cands (72) scored >= thr
   real FP / panel  = (# empty-panel candidates scored >= thr) / 150
 Real TP features = real_feats_realistic.parquet; real FP features = empty_fp parquet.
-Both come from the realistic v7. Synthetic-only RF training; test_real only READ.
+Both come from the realistic seg_model. Synthetic-only RF training; test_real only READ.
 """
 from __future__ import annotations
 import sys, glob

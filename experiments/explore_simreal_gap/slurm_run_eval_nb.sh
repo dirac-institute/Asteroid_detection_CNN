@@ -16,7 +16,7 @@ REPO="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"
 cd "$REPO"; export PYTHONPATH="$REPO:${PYTHONPATH:-}"
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
-echo "=== run Evaluation.ipynb (realistic v7+neg5 RF) === $(date -Is)"
+echo "=== run Evaluation.ipynb (realistic seg_model+neg5 RF) === $(date -Is)"
 srun jupyter nbconvert --to notebook --execute --inplace Evaluation.ipynb \
   --ExecutePreprocessor.timeout=4000
 echo "EVAL NB DONE $(date -Is)"

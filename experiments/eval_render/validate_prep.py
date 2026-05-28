@@ -6,7 +6,7 @@ REPO=Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"); sys.
 import ADCNN.inference.predict as P
 P._TILE_BATCH=64
 dev=torch.device("cuda"); torch.backends.cudnn.benchmark=True
-m=torch.jit.load(str(REPO/"models/v7_diffim_scripted.pt"),map_location=dev).eval()
+m=torch.jit.load(str(REPO/"models/segmentation_model.pt"),map_location=dev).eval()
 with h5py.File(REPO/"DATA_DIFFIM/test_5sigma/test.h5","r") as f:
     img=f["images"][0][:].astype(np.float32); rl=f["real_labels"][0][:].astype(np.uint16)
 # bit-identical check: serial vs parallel prep

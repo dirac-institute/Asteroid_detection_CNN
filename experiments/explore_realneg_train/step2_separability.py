@@ -2,8 +2,8 @@
 vs SYNTHETIC true positives (the discrimination on-real-bg training targets).
 
 Inputs (read-only, on disk):
-  - experiments/diffim_runs/test_real/results/parts/emp_*.csv     (v7-raw real-empty cand, 72 feat + meta)
-  - experiments/diffim_runs/test_real/results/parts/empft_*.csv   (v7_ft real-empty cand)
+  - experiments/diffim_runs/test_real/results/parts/emp_*.csv     (seg_model-raw real-empty cand, 72 feat + meta)
+  - experiments/diffim_runs/test_real/results/parts/empft_*.csv   (seg_ft real-empty cand)
   - experiments/diffim_runs/test_real/results/syn5_ft.pkl         (synthetic cand; label_v2==1 = true trail)
   - experiments/diffim_runs/test_real/results/per_panel_fp.csv    (FP/panel)
 
@@ -49,9 +49,9 @@ syn_neg = syn[syn["label_v2"] == 0].copy()
 p("=" * 78)
 p("STEP 2  —  REAL empty-CCD FP  vs  SYNTHETIC true positives")
 p("=" * 78)
-p(f"real empty cand (emp_*, v7 raw)   : {len(emp):>7d} rows  "
+p(f"real empty cand (emp_*, seg_model raw)   : {len(emp):>7d} rows  "
   f"panels={emp['image_id'].nunique() if emp is not None else 0}")
-p(f"real empty cand (empft_*, v7_ft)  : {len(empft):>7d} rows  "
+p(f"real empty cand (empft_*, seg_ft)  : {len(empft):>7d} rows  "
   f"panels={empft['image_id'].nunique() if empft is not None else 0}")
 p(f"synthetic cand total              : {len(syn):>7d} rows")
 p(f"  synthetic TRUE  (label_v2==1)   : {len(syn_pos):>7d}")

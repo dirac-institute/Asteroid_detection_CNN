@@ -42,7 +42,7 @@ def timeit(model, half=False, warmup=True):
             maps.append(m)
     return t_tot/len(VAL_IDS), maps
 
-base=torch.jit.load(str(REPO/"models/v7_diffim_scripted.pt"),map_location=dev).eval()
+base=torch.jit.load(str(REPO/"models/segmentation_model.pt"),map_location=dev).eval()
 sb,mb=timeit(base); print(f"[baseline] {sb:.2f}s/panel",flush=True)
 def cmp(mv, mb):
     d=[np.abs(a.astype(np.float32)-b.astype(np.float32)) for a,b in zip(mv,mb)]
@@ -55,7 +55,7 @@ try:
     mx,me,fl,hi=cmp(mo,mb); print(f"[jit-opt]  {so:.2f}s/panel  speedup={sb/so:.2f}x | max|dprob|={mx:.2e} mean={me:.2e} thr-flips={fl} hi-flips={hi}",flush=True)
 except Exception as e: print("jit-opt FAILED:",repr(e),flush=True)
 try:
-    half=torch.jit.load(str(REPO/"models/v7_diffim_scripted.pt"),map_location=dev).eval().half(); sh,mh=timeit(half,half=True)
+    half=torch.jit.load(str(REPO/"models/segmentation_model.pt"),map_location=dev).eval().half(); sh,mh=timeit(half,half=True)
     mx,me,fl,hi=cmp(mh,mb); print(f"[fp16]     {sh:.2f}s/panel  speedup={sb/sh:.2f}x | max|dprob|={mx:.2e} mean={me:.2e} thr-flips={fl} hi-flips={hi}",flush=True)
 except Exception as e: print("fp16 FAILED:",repr(e),flush=True)
 print("LEAN EXPERIMENT DONE",flush=True)

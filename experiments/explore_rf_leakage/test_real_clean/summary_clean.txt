@@ -1,11 +1,11 @@
 ================================================================
-  test_real : v7 + V2 RF  vs  LSST stack @ 5sigma
+  test_real : segmentation model + V2 RF  vs  LSST stack @ 5sigma
 ================================================================
 panels: 2620  (asteroid=2470  empty=150)
 asteroid sightings: 2309   unique objects: 292
 
 -- PER-OBJECT recovery (detected in >=1 sighting) --
-  network (v7+V2) : 62/292  (21.2%)
+  network (segmentation model+V2) : 62/292  (21.2%)
   LSST stack      : 192/292  (65.8%)
   both            : 61
   NETWORK-ONLY    : 1   <-- recovered by us, missed by stack

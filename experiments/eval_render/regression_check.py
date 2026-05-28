@@ -9,7 +9,7 @@ from ADCNN.inference.catalog import build_detection_catalog, InferenceConfig
 def main():
     ids = [0, 1, 2, 3]
     new = build_detection_catalog(str(REPO/"DATA_DIFFIM/test_5sigma/test.h5"),
-                                  str(REPO/"models/v7_diffim_scripted.pt"),
+                                  str(REPO/"models/segmentation_model.pt"),
                                   str(REPO/"models/rf_postproc.pkl"),
                                   config=InferenceConfig(gate_pmax=0.10),
                                   panel_ids=ids, device="cuda", n_workers=4)

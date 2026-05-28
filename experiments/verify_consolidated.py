@@ -5,7 +5,7 @@ from ADCNN.inference.diffim_eval import predict_panel_overlap_3ch_full
 import ADCNN.evaluation.detection as evals
 REPO="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"
 dev=torch.device("cuda")
-m=torch.jit.load(f"{REPO}/models/v7_diffim_scripted.pt",map_location=dev).eval()  # consolidated models/ + ADCNN code
+m=torch.jit.load(f"{REPO}/models/segmentation_model.pt",map_location=dev).eval()  # consolidated models/ + ADCNN code
 cat=pd.read_csv(f"{REPO}/DATA_DIFFIM/test_5sigma/test.csv")
 with h5py.File(f"{REPO}/DATA_DIFFIM/test_5sigma/test.h5") as f:
     probs=[]; 
@@ -14,5 +14,5 @@ with h5py.File(f"{REPO}/DATA_DIFFIM/test_5sigma/test.h5") as f:
         probs.append(p.astype(np.float32))
 probs=np.stack(probs)
 tp,fp,fn,_=evals.objectwise_confusion(cat,(probs>=0.5).astype(np.uint8),0.5,use_threads=True,max_workers=8)
-print(f"VERIFY consolidated v7-only objectwise recall @0.5: {tp}/{tp+fn} = {100*tp/(tp+fn):.1f}%  (reg2 baseline 96.0%)",flush=True)
+print(f"VERIFY consolidated seg_model-only objectwise recall @0.5: {tp}/{tp+fn} = {100*tp/(tp+fn):.1f}%  (reg2 baseline 96.0%)",flush=True)
 print("VERIFY DONE",flush=True)

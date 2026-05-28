@@ -1,4 +1,4 @@
-"""Build an fp16 TensorRT engine for v7 and validate speed + detection-equivalence on the
+"""Build an fp16 TensorRT engine for seg_model and validate speed + detection-equivalence on the
 held-out shard_3 val panels (leak-free). Reports isolated GPU-forward speedup + prob-map
 deltas (max/mean |Δ|, candidate-threshold pixel flips). Keep TRT only if it doesn't move
 detections beyond the existing fp16 noise floor."""
@@ -42,7 +42,7 @@ def timeit(model, trt=False):
             torch.cuda.synchronize(); t0=time.time(); m=infer(model,img,rl,trt); torch.cuda.synchronize(); t+=time.time()-t0; maps.append(m)
     return t/len(VAL_IDS), maps
 
-base=torch.jit.load(str(REPO/"models/v7_diffim_scripted.pt"),map_location=dev).eval()
+base=torch.jit.load(str(REPO/"models/segmentation_model.pt"),map_location=dev).eval()
 sb,mb=timeit(base); print(f"[baseline] {sb:.2f}s/panel",flush=True)
 try:
     import torch_tensorrt
@@ -54,8 +54,8 @@ try:
     d=[np.abs(a-b) for a,b in zip(mt,mb)]; mx=max(x.max() for x in d); me=np.mean([x.mean() for x in d])
     fl=int(sum(((a>0.05)!=(b>0.05)).sum() for a,b in zip(mt,mb))); hi=int(sum(((a>0.5)!=(b>0.5)).sum() for a,b in zip(mt,mb)))
     print(f"[TRT-fp16] {st:.2f}s/panel  speedup={sb/st:.2f}x | max|dprob|={mx:.2e} mean={me:.2e} thr-flips={fl} hi-flips={hi}",flush=True)
-    torch.jit.save(trt, str(REPO/"models/v7_trt_fp16.ts"))
-    print("saved engine -> models/v7_trt_fp16.ts",flush=True)
+    torch.jit.save(trt, str(REPO/"models/seg_trt_fp16.ts"))
+    print("saved engine -> models/seg_trt_fp16.ts",flush=True)
 except Exception as e:
     print("TRT FAILED:\n"+traceback.format_exc(),flush=True)
 print("TRT EXPERIMENT DONE",flush=True)

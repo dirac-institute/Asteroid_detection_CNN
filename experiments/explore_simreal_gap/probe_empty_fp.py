@@ -1,5 +1,5 @@
 """Extract ALL candidate feature vectors on the real EMPTY diffim panels (the FP
-source) under the realistic v7, so the TP-vs-FP operating curve can be built
+source) under the realistic seg_model, so the TP-vs-FP operating curve can be built
 offline for ANY RF / threshold without more GPU. Pairs with the real TP truth-cand
 features (real_feats_realistic.parquet) to answer: can we hold the real TPs while
 cutting the 68 FP/panel? Read-only on test_real. Sharded.
@@ -14,7 +14,7 @@ sys.path.insert(0, str(REPO))
 from ADCNN.inference.diffim_eval import predict_panel_overlap_3ch_full
 from ADCNN.inference.diffim_postproc_v2 import compute_v2_features, RF_FEATURES_V2
 
-MODEL = REPO / "experiments/diffim_runs/pilot_v7_realistic/ckpts/v7_realistic_scripted.pt"
+MODEL = REPO / "experiments/diffim_runs/pilot_seg_realistic/ckpts/seg_realistic_scripted.pt"
 OUT = REPO / "DATA_DIFFIM/test_real"
 RES = Path("/sdf/scratch/users/m/mrakovci/realistic/empty_fp")
 FEATS = list(RF_FEATURES_V2)

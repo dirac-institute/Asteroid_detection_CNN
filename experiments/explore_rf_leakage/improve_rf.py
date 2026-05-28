@@ -28,9 +28,9 @@ from ADCNN.inference.diffim_postproc_v2 import (
 import ADCNN.evaluation.detection as evals
 
 DATA  = REPO / "DATA_DIFFIM"
-CK    = REPO / "experiments/diffim_runs/pilot_v7/ckpts"
-MODEL = CK / "v7_scripted.pt"
-SPLIT = REPO / "experiments/diffim_runs/pilot_v7/split.json"
+CK    = REPO / "experiments/diffim_runs/pilot_seg/ckpts"
+MODEL = CK / "segmentation_scripted.pt"
+SPLIT = REPO / "experiments/diffim_runs/pilot_seg/split.json"
 OUT   = Path("/sdf/scratch/users/m/mrakovci/rf_leakage")
 OUT.mkdir(parents=True, exist_ok=True)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")

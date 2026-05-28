@@ -1,7 +1,7 @@
 # Morning DECISION — 2026-05-20 (overnight 2026-05-19 ~22:00 → ~09:00 CEST)
 
 Bottom line — **no tracked-code change, no checkpoint promotion**. Production
-config stays exactly as it is. Promoted FT v7 (`v7_ft_hn/ckpts/last.pt` +
+config stays exactly as it is. Promoted FT segmentation model (`seg_ft_hn/ckpts/last.pt` +
 `rf_postproc_v2_ft.pkl`) at `DEFAULT_THR = 0.50` remains the deployed
 2nd-stage detector. Evidence below.
 
@@ -33,7 +33,7 @@ shipped without evidence.
 
 ---
 
-## 2. Reranker (`pilot_v7/ckpts/rf_postproc_v2_ft.pkl`) — full diagnostic
+## 2. Reranker (`pilot_seg/ckpts/rf_postproc_v2_ft.pkl`) — full diagnostic
 
 (from `/sdf/scratch/users/m/mrakovci/explore/reranker/RESULTS.md`)
 
@@ -70,7 +70,7 @@ feature would have to come from the CNN itself.
 
 (from `/sdf/scratch/users/m/mrakovci/explore/extraction/RESULTS.md`)
 
-v7 emits 812 raw cand/CCD on empty diffims. They are **not** cheap junk —
+segmentation model emits 812 raw cand/CCD on empty diffims. They are **not** cheap junk —
 the adaptive `t_low = μ + 6σ` capped at 0.5 already pins binarization high,
 so every raw candidate has `max_p ≳ 0.52`, median area 273 px, large and
 elongated. The "inflation" is the model producing trail-shaped blobs on
@@ -193,8 +193,8 @@ vs. loss-shape question, not instead of it.
 
 ## 8. What changes today: nothing
 
-- `experiments/diffim_runs/pilot_v7/ckpts/v7_scripted.pt` → unchanged.
-- `experiments/diffim_runs/pilot_v7/ckpts/rf_postproc_v2.pkl` → unchanged.
+- `experiments/diffim_runs/pilot_seg/ckpts/segmentation_scripted.pt` → unchanged.
+- `experiments/diffim_runs/pilot_seg/ckpts/rf_postproc_v2.pkl` → unchanged.
 - `DEFAULT_THR = 0.50` → unchanged.
 - No commit, no push, no tracked-code edit overnight.
 - `test_real` headline number unchanged: **NN-only +7 objects / +46
@@ -220,7 +220,7 @@ In priority order, all bounded:
 
 The convergent honest finding from 3 independent agents (extraction, calib,
 reranker) plus the design framing of the 4th (variant_matrix) is the same:
-**v7 + V2 RF have exhausted the post-CNN levers.** Any further FP
+**segmentation model + V2 RF have exhausted the post-CNN levers.** Any further FP
 suppression has to come from the CNN model itself — and the only justified
 way to attack the CNN is the precision-tilt fine-tune on real empty
 backgrounds with footprint-targeted gradient. That is the experiment the

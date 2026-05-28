@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=adc-v7-huge
+#SBATCH --job-name=adc-seg_model-huge
 #SBATCH --requeue
 #SBATCH --account=kipac:kipac
 #SBATCH --partition=ampere
@@ -9,16 +9,16 @@
 #SBATCH --cpus-per-task=24
 #SBATCH --mem=128G
 #SBATCH --time=06:00:00
-#SBATCH --output=/sdf/home/m/mrakovci/logs/ADCNN_v7_huge_%j.out
+#SBATCH --output=/sdf/home/m/mrakovci/logs/ADCNN_seg_huge_%j.out
 set -eo pipefail
 export RUBIN_EUPS_PATH="${RUBIN_EUPS_PATH:-}"
 REPO="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"
 D="$REPO/DATA_DIFFIM_realistic"
 cd "$REPO"; export PYTHONPATH="$REPO:${PYTHONPATH:-}"
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh; conda activate asteroid_cnn
-echo "=== v7 on sharded realistic (4 shards, multi-h5) + augment === $(date -Is)"
+echo "=== seg_model on sharded realistic (4 shards, multi-h5) + augment === $(date -Is)"
 srun python3 -u -m ADCNN.training.diffim_train \
-  --run-name pilot_v7_huge \
+  --run-name pilot_seg_huge \
   --data-sources \
     "$D/shard_0/train.h5:$D/shard_0/train.csv" \
     "$D/shard_1/train.h5:$D/shard_1/train.csv" \
@@ -31,4 +31,4 @@ srun python3 -u -m ADCNN.training.diffim_train \
   --aftl-bce-anchor 0.1 --lambda-orient 0.5 --kernel-lens 11 21 41 --n-angles 12 \
   --widths 24 48 96 192 384 --num-workers 8 --seed 2026 \
   --ema-decay 0.999 --ema-exclude agg_alpha --augment --device cuda
-echo "V7 HUGE DONE $(date -Is)"
+echo "SEG_MODEL HUGE DONE $(date -Is)"

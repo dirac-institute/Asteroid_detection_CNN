@@ -1,12 +1,12 @@
-"""End-to-end eval of the realistic-trained pipeline (NEW v7 + NEW RF).
+"""End-to-end eval of the realistic-trained pipeline (NEW seg_model + NEW RF).
 
-Everything is recomputed with the realistic-trained v7 (the cached old-v7 features
+Everything is recomputed with the realistic-trained seg_model (the cached old-seg_model features
 can't be reused). Steps:
-  1. features on the realistic-trained v7's VAL panels (DATA_DIFFIM_realistic) -> RF train pool
+  1. features on the realistic-trained seg_model's VAL panels (DATA_DIFFIM_realistic) -> RF train pool
   2. features on uniform test_5sigma -> synthetic eval (no-regression guard)
   3. windowed features on the real in-region stack-missed sightings -> truth-candidate
      acceptance (does the realistic RF now keep real trails?)
-Compares the realistic v7+RF against the published baseline. test_real only READ.
+Compares the realistic seg_model+RF against the published baseline. test_real only READ.
 """
 from __future__ import annotations
 import json, sys, time
@@ -20,11 +20,11 @@ sys.path.insert(0, str(REPO / "experiments/explore_simreal_gap"))
 import improve_rf as ir
 from ADCNN.inference.diffim_postproc_v2 import (
     RF_FEATURES_V2, compute_v2_features, apply_rf_v2, materialize_label_mask_v2, save_rf)
-from probe_features import predict_window_heads   # windowed v7 heads
+from probe_features import predict_window_heads   # windowed seg_model heads
 from ADCNN.data.diffim_dataset import diffim_mad_sigma
 
-RUN = REPO / "experiments/diffim_runs/pilot_v7_realistic"
-SCRIPTED = RUN / "ckpts/v7_realistic_scripted.pt"
+RUN = REPO / "experiments/diffim_runs/pilot_seg_realistic"
+SCRIPTED = RUN / "ckpts/seg_realistic_scripted.pt"
 RDATA = REPO / "DATA_DIFFIM_realistic"
 TEST = REPO / "DATA_DIFFIM/test_5sigma"
 OUT = REPO / "experiments/explore_simreal_gap"
@@ -38,7 +38,7 @@ def train_rf(X, y):
 
 
 def real_acceptance(model, rf, dev):
-    """Windowed v7 -> compute_v2_features -> new RF on the 119 real in-region
+    """Windowed seg_model -> compute_v2_features -> new RF on the 119 real in-region
     stack-missed sightings; return RF score of the truth candidate."""
     reg = pd.read_csv(OUT / "inregion_real.csv")
     miss = reg[~reg.stack_detected.astype(bool)].reset_index(drop=True)
@@ -73,7 +73,7 @@ def real_acceptance(model, rf, dev):
 def main():
     dev = torch.device("cuda")
     model = torch.jit.load(str(SCRIPTED), map_location=dev).eval()
-    print(f"[e2e] new v7 = {SCRIPTED}", flush=True)
+    print(f"[e2e] new seg_model = {SCRIPTED}", flush=True)
 
     CACHE = Path("/sdf/scratch/users/m/mrakovci/e2e_cache"); CACHE.mkdir(parents=True, exist_ok=True)
     # 1. RF train pool from realistic-val panels (cached for preemption-safety)
@@ -91,7 +91,7 @@ def main():
         print(f"[train] {len(vcand)} cand pos={int(vlab.sum())} ({time.time()-t0:.0f}s)", flush=True)
         vcand.to_parquet(CACHE / "vcand.parquet"); np.save(CACHE / "vlab.npy", vlab)
 
-    # 2. test_5sigma features (new v7), cached
+    # 2. test_5sigma features (new seg_model), cached
     tcat = pd.read_csv(TEST / "test.csv")
     if (CACHE / "tcand.parquet").exists():
         tcand = pd.read_parquet(CACHE / "tcand.parquet")
@@ -109,13 +109,13 @@ def main():
     df, match = ir.eval_on_test(rf, tcand, tprob, treal, tcat)
     sreal = real_acceptance(model, rf, dev)
     n = np.isfinite(sreal).sum()
-    print("\n================ REALISTIC v7+RF (end-to-end) ================", flush=True)
+    print("\n================ REALISTIC seg_model+RF (end-to-end) ================", flush=True)
     print(df.to_string(index=False), flush=True)
     print(f"SYNTH comb_TP @ NN_FP={ir.MATCH_FP} = {match:.0f} ({match/10:.1f}% recall)", flush=True)
     print(f"REAL in-region stack-missed truth-cands: cand@truth={n}/119  "
           f"RF med={np.nanmedian(sreal):.3f}  "
           f"kept@0.5={int(np.nansum(sreal>=0.5))}  kept@0.3={int(np.nansum(sreal>=0.3))}", flush=True)
-    print("\nBaseline (old uniform v7+RF): synth ~64.1%; real kept@0.5=0/46, @0.3=3.", flush=True)
+    print("\nBaseline (old uniform seg_model+RF): synth ~64.1%; real kept@0.5=0/46, @0.3=3.", flush=True)
     save_rf(rf, OUT / "rf_postproc_v2_realistic_e2e.pkl")
     pd.DataFrame({"score_rf": sreal}).to_csv(OUT / "real_acceptance_e2e.csv", index=False)
     print("E2E DONE", flush=True)

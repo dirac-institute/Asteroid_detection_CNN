@@ -1,4 +1,4 @@
-# Multi-visit tracklet linking as an FP-suppression lever for the v7 CNN 2nd stage
+# Multi-visit tracklet linking as an FP-suppression lever for the segmentation model CNN 2nd stage
 
 Scope: CPU-only re-analysis of existing dumps under
 `experiments/diffim_runs/test_real/results/`. No tracked files modified, no
@@ -10,7 +10,7 @@ console output captured in `_numbers.txt`, `_fp_numbers.txt`.
 **Multi-visit linking is NOT the lever that rescues this operating point —
 it is killed on the true-positive side before the FP benefit can be
 collected.** All **7** of the NN-only objects (the actual scientific prize:
-asteroids the 5σ stack never caught) are detected by the v7 NN in **exactly
+asteroids the 5σ stack never caught) are detected by the segmentation model NN in **exactly
 one visit each**. Any rule of the form "require ≥2 NN detections that link
 into a tracklet" removes **7/7** of them. The combined per-object recall
 gain over the stack collapses from **+7 → +0**. The 46 stack-missed
@@ -21,7 +21,7 @@ suppression, residual ≪1 false multi-night track per field) but it requires
 **3-epoch cross-night orbit attribution**, not a cheap 2-of-2 positional
 gate — and it is moot here because the prize does not survive.
 
-Bottom line: with the v7 NN as it is, linking cannot be the dominant lever
+Bottom line: with the segmentation model NN as it is, linking cannot be the dominant lever
 for shrinking the FP price *without first making the NN fire on the same
 object in ≥2 visits*. The recommendation is to attack the FP price directly
 (reranker / threshold) and treat linking as a downstream confirmation step
@@ -99,7 +99,7 @@ object-level prize.
 
 Across all 86 NN-recovered objects, only 43 have ≥2 NN-detected distinct
 visits and 26 have ≥3; the per-object NN-detection multiplicity
-distribution is dominated by the "1" bin (43 of 86 objects). The v7 NN is a
+distribution is dominated by the "1" bin (43 of 86 objects). The segmentation model NN is a
 *sporadic* detector per track — exactly the regime in which a
 multi-detection requirement is most destructive.
 
@@ -175,7 +175,7 @@ axis**.
 
 **Is multi-visit linking the dominant lever to shrink the FP price here?
 No.** It would be a spectacular FP lever (~10² suppression) *if there were
-multi-visit NN detections to link*, but the v7 NN produces the +7 prize
+multi-visit NN detections to link*, but the segmentation model NN produces the +7 prize
 objects from **single** detections, so the linking requirement zeroes the
 unique scientific gain before the FP benefit is realized. Linking does not
 shrink the FP price *for free*; it trades essentially the entire object-
@@ -184,7 +184,7 @@ multiplicity / per-sighting recall**, not FP geometry.
 
 ### Recommendation
 
-1. **Do not gate the current v7 output on multi-visit linking.** It
+1. **Do not gate the current segmentation model output on multi-visit linking.** It
    eliminates 7/7 of the new objects. The FP price must be attacked
    directly first (the V2 RF reranker / threshold work already in flight),
    keeping the operating point single-visit until per-object recall rises.

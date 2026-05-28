@@ -25,8 +25,8 @@ from ADCNN.inference.diffim_postproc_v2 import (
 import ADCNN.evaluation.detection as evals
 
 DATA   = REPO / "DATA_DIFFIM"
-CK     = REPO / "experiments/diffim_runs/pilot_v7/ckpts"
-MODEL  = CK / "v7_scripted.pt"
+CK     = REPO / "experiments/diffim_runs/pilot_seg/ckpts"
+MODEL  = CK / "segmentation_scripted.pt"
 OLD_RF = CK / "rf_postproc_v2.pkl"
 NEW_RF = Path("/sdf/scratch/users/m/mrakovci/rf_leakage/rf_postproc_v2_valtrain.pkl")
 OUT    = Path("/sdf/scratch/users/m/mrakovci/rf_leakage")

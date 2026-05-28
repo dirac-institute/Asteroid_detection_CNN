@@ -1,15 +1,15 @@
 """Does the line-overlap matcher (objectwise_confusion) explain anything beyond
-the RF? Compare three ways of counting v7-alone recovery (NO RF) on the 119
+the RF? Compare three ways of counting seg_model-alone recovery (NO RF) on the 119
 real in-region stack-missed sightings:
 
-  A. point-probe: max v7 prob within +/-12px of catalog (x,y)  [already have]
+  A. point-probe: max seg_model prob within +/-12px of catalog (x,y)  [already have]
   B. line-match : run the ACTUAL objectwise_confusion (draws trail from
-     x,beta,trail_length, thickness=half_psf, hit = any v7 component on the line)
-     on the v7-only mask (prob>=thr), same matcher used for sim scoring.
+     x,beta,trail_length, thickness=half_psf, hit = any seg_model component on the line)
+     on the seg_model-only mask (prob>=thr), same matcher used for sim scoring.
 
 If B >> A, my point-probe undercounted and the line matcher is fine/generous.
 If B << A, the drawn line (beta/length/anchor) is mis-placed for real trails and
-the matcher itself is dropping true v7 hits. Either way this isolates matching
+the matcher itself is dropping true seg_model hits. Either way this isolates matching
 from the RF (which we already showed kills the candidates).
 """
 from __future__ import annotations
@@ -28,7 +28,7 @@ from ADCNN.inference.diffim_eval import hann2d
 import ADCNN.evaluation.detection as evals
 
 OUT = REPO / "experiments/explore_simreal_gap"
-MODEL = REPO / "experiments/diffim_runs/pilot_v7/ckpts/v7_scripted.pt"
+MODEL = REPO / "experiments/diffim_runs/pilot_seg/ckpts/segmentation_scripted.pt"
 REAL_H5 = REPO / "DATA_DIFFIM/test_real/test.h5"
 R = 12
 
@@ -98,7 +98,7 @@ def main():
             pmax = float(prob[yy0:yy1, xx0:xx1].max())
             rec = dict(ObjID=r.ObjID, image_id=idx, trail_length=r.trail_length,
                        snr=r.lsst_psf_snr, pmax_pt=pmax)
-            # line-match via the real matcher, v7-only (no RF), per threshold
+            # line-match via the real matcher, seg_model-only (no RF), per threshold
             cat1 = pd.DataFrame([{ "image_id": 0, "x": xw, "y": yw,
                                    "beta": r.beta, "trail_length": r.trail_length }])
             for thr in THRS:
@@ -113,13 +113,13 @@ def main():
     df.to_csv(OUT / "probe_linematch.csv", index=False)
 
     N = len(df)
-    print(f"\n=== v7-ALONE recovery (NO RF), real in-region stack-missed n={N} ===")
+    print(f"\n=== seg_model-ALONE recovery (NO RF), real in-region stack-missed n={N} ===")
     print("thr   point(±12px)   line-match(objectwise)   ")
     for thr in THRS:
         pt = int(df[f"pt_thr{thr}"].sum()); ln = int(df[f"line_thr{thr}"].sum())
         print(f"  {thr:.1f}   {pt:3d} ({100*pt/N:4.1f}%)      {ln:3d} ({100*ln/N:4.1f}%)")
     print("\n(pipeline w/ synthetic RF @0.5 scored 2/119=1.7%; synth stack-missed "
-          "v7-fire 72%)")
+          "seg_model-fire 72%)")
     print("LINEMATCH DONE", flush=True)
 
 

@@ -15,7 +15,7 @@ set -eo pipefail
 export RUBIN_EUPS_PATH="${RUBIN_EUPS_PATH:-}"
 NSHARDS=20
 REPO_DIR="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"
-MODEL="${REPO_DIR}/experiments/diffim_runs/pilot_v7_realistic/ckpts/v7_realistic_scripted.pt"
+MODEL="${REPO_DIR}/experiments/diffim_runs/pilot_seg_realistic/ckpts/seg_realistic_scripted.pt"
 RF="${REPO_DIR}/experiments/explore_simreal_gap/rf_postproc_v2_realistic_neg5.pkl"
 RES="/sdf/scratch/users/m/mrakovci/realistic/test_real_realistic"
 cd "${REPO_DIR}"; export PYTHONPATH="${REPO_DIR}:${PYTHONPATH:-}"

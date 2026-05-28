@@ -1,5 +1,6 @@
 #!/bin/bash
-#SBATCH --job-name=adc-v7-realistic
+#SBATCH --job-name=adc-seg_model-real-aug
+#SBATCH --requeue
 #SBATCH --account=kipac:kipac
 #SBATCH --partition=ampere
 #SBATCH --nodes=1
@@ -8,16 +9,17 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=96G
 #SBATCH --time=04:00:00
-#SBATCH --output=/sdf/home/m/mrakovci/logs/ADCNN_v7_realistic_%j.out
-set -euo pipefail
+#SBATCH --output=/sdf/home/m/mrakovci/logs/ADCNN_seg_realistic_%j.out
+set -eo pipefail
+export RUBIN_EUPS_PATH="${RUBIN_EUPS_PATH:-}"
 REPO="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"
 cd "$REPO"; export PYTHONPATH="$REPO:${PYTHONPATH:-}"
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
 NTRAIN="${NTRAIN:-750}"; NVAL="${NVAL:-50}"
-echo "=== v7 retrain on realistic data (ntrain=$NTRAIN nval=$NVAL) === $(date -Is)"
+echo "=== seg_model retrain on realistic data (ntrain=$NTRAIN nval=$NVAL) === $(date -Is)"
 srun python3 -u -m ADCNN.training.diffim_train \
-  --run-name pilot_v7_realistic \
+  --run-name pilot_seg_realistic_aug \
   --data-h5 "$REPO/DATA_DIFFIM_realistic/train.h5" \
   --data-csv "$REPO/DATA_DIFFIM_realistic/train.csv" \
   --n-train-panels "$NTRAIN" --n-val-panels "$NVAL" \
@@ -27,5 +29,5 @@ srun python3 -u -m ADCNN.training.diffim_train \
   --aftl-alpha 0.3 --aftl-beta 0.7 --aftl-gamma 1.3 --aftl-bce-anchor 0.1 \
   --lambda-orient 0.5 --kernel-lens 11 21 41 --n-angles 12 \
   --widths 24 48 96 192 384 --num-workers 6 --seed 2026 \
-  --ema-decay 0.999 --ema-exclude agg_alpha --device cuda
-echo "V7 REALISTIC DONE $(date -Is)"
+  --ema-decay 0.999 --ema-exclude agg_alpha --augment --device cuda
+echo "SEG_MODEL REALISTIC DONE $(date -Is)"

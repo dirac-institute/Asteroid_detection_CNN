@@ -7,7 +7,7 @@ from ADCNN.inference.predict import predict_panel_overlap_3ch_full
 from ADCNN.inference.candidates import extract_candidates, CandidateExtractorConfig
 from ADCNN.inference.rf_postproc import RF_FEATURES_V2, compute_v2_features, apply_rf_v2, load_rf
 dev=torch.device("cuda"); torch.backends.cudnn.benchmark=True
-m=torch.jit.load(str(REPO/"models/v7_diffim_scripted.pt"),map_location=dev).eval()
+m=torch.jit.load(str(REPO/"models/segmentation_model.pt"),map_location=dev).eval()
 rf=load_rf(str(REPO/"models/rf_postproc.pkl"))
 h5=REPO/"DATA_DIFFIM/test_5sigma/test.h5"
 import warnings; warnings.filterwarnings("ignore")

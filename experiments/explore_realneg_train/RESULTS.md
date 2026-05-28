@@ -1,4 +1,4 @@
-# Real-negative-background training for v7 — DESIGN + EVIDENCE + GO/NO-GO
+# Real-negative-background training for segmentation model — DESIGN + EVIDENCE + GO/NO-GO
 
 Scope: design, CPU prototype and cost/benefit only. No GPU, no SLURM, no
 tracked-file edits. Everything here lives under `experiments/explore_realneg_train/`
@@ -13,7 +13,7 @@ Artifacts produced:
 
 ## 0. The idea, in one line
 
-v7 was trained on faint synthetic trails injected on real-background diffims,
+segmentation model was trained on faint synthetic trails injected on real-background diffims,
 but it **never saw a real subtraction residual *as a negative*** with
 faint-trail-grade probability targets. The idea: build training panels =
 **real empty-CCD difference image + a painted faint synthetic streak
@@ -28,7 +28,7 @@ distribution it fails on, rather than on clean synthetic-only negatives.
 ### 1.1 The two existing builders (read in full)
 
 `ADCNN/data/dataset_creation/simulate_inject_diffim.py` — the **synthetic
-injector** v7 was trained on. Per (visit, detector):
+injector** segmentation model was trained on. Per (visit, detector):
 
 1. fetch PVI + `single_visit_star_footprints` + overlapping `template_coadd`
 2. AlardLupton subtract the **clean** PVI → clean diffim
@@ -122,32 +122,32 @@ Net: the heavy stack machinery (subtract, detect, inject, flux model, label
 mask, 3-channel, fine-tune) is **100% already built and validated**. The work
 is ~3 small, reversible edits (empty-fraction, SNR draw, neg-anchor bias) +
 a clean empty-panel scan. This is the same surface the existing
-`slurm_v7_finetune.sh` already exercised.
+`slurm_seg_finetune.sh` already exercised.
 
 ---
 
 ## 2. Evidence: the separability gap that on-real-bg training targets
 
 `step2_separability.py` over the on-disk dumps
-(`results/parts/emp_*.csv` 131,494 raw v7 real-empty candidates;
-`empft_*.csv` 121,844 v7_ft real-empty candidates; `syn5_ft.pkl` 877
+(`results/parts/emp_*.csv` 131,494 raw segmentation model real-empty candidates;
+`empft_*.csv` 121,844 seg_ft real-empty candidates; `syn5_ft.pkl` 877
 synthetic TRUE trails / 35,150 synthetic FALSE; `per_panel_fp.csv`).
 
-**FP magnitude.** On 119 scored real empty CCDs, v7+V2-RF still fires
+**FP magnitude.** On 119 scored real empty CCDs, segmentation model+V2-RF still fires
 **mean 81.7 / median 67 / max 292 false "asteroids" per empty CCD**;
-**0 / 119 panels are FP-free**. v7 raw emits ~900 raw candidates/panel
+**0 / 119 panels are FP-free**. segmentation model raw emits ~900 raw candidates/panel
 before the RF. This is the entire problem.
 
 **Where the real FP live in feature space vs. genuine faint trails**
 (median [p25,p75]):
 
-| feature | real-FP (v7_ft) | synthetic TRUE | reads as |
+| feature | real-FP (seg_ft) | synthetic TRUE | reads as |
 |---|---|---|---|
 | `mf_snr` | 1.10 [0.0, 2.26] | **4.04 [2.72, 5.77]** | real FP cluster at the noise floor; true trails are real signal |
 | `mf_length` | 29 [12, 43] | **55 [41, 68]** | true trails are longer |
 | `mf_flux` | 284 [0, 863] | **3120 [1714, 5115]** | true trails carry ~10× the integrated flux |
 | `or_agg_max` | (low) | **0.91 [0.85, 1.0]** | orientation-coherence; AUC 0.91 alone |
-| `max_p` | 0.87 [0.67, 0.98] | **1.00 [1.00, 1.00]** | v7's own confidence |
+| `max_p` | 0.87 [0.67, 0.98] | **1.00 [1.00, 1.00]** | segmentation model's own confidence |
 | `loc_dipole` | 0.20-ish | similar | **does NOT separate** (76% overlap) |
 | `aspect` | 1.x | 1.x | **does NOT separate** (86% overlap) |
 
@@ -165,7 +165,7 @@ synthetic-TRUE at **AUC 0.95** (held-out). So the two populations *are*
 separable in principle — but the RF that achieves it is itself
 synthetic-trained, and the FT-RF hard-neg attempt already
 **plateaued at ~43 FP/CCD** (`RETRAIN_PLAN.md` Step ① / `fp_fix.txt`):
-RF reranking halved FP but the bottleneck is now **v7's candidate
+RF reranking halved FP but the bottleneck is now **segmentation model's candidate
 generation**, not the reranker. The 0.95 AUC says the signal exists; the
 plateau says it has to be injected *into the CNN's training distribution*,
 not bolted on downstream. **This is the quantitative case for on-real-bg
@@ -234,9 +234,9 @@ flux + `forbidden` mask), which already exists and is validated.
 - `test_real` already burned 150 `role=empty` CCDs (day_obs window of the
   fast-mover catalog). Training empties **must** be scanned from a
   **disjoint (visit,detector) set** — easiest: a **different day_obs
-  window** in `--where` than both the v7 training set and `test_real`.
+  window** in `--where` than both the segmentation model training set and `test_real`.
   Record the exact (visit,detector) lists; assert empty-set ∩ test_real-empty
-  = ∅ and ∩ v7-train = ∅ before building.
+  = ∅ and ∩ segmentation model-train = ∅ before building.
 - Supply needed: the addressable prize is small (≈30–40 stack-missed
   sightings at SNR 3–7). FP suppression — not recall — is the lever, and FP
   is learned from *empty* panels. Target **~400–600 real CCDs total**,
@@ -250,7 +250,7 @@ flux + `forbidden` mask), which already exists and is validated.
   `eval_snr_gain.py`; spending capacity above 10 is wasted — see
   `RETRAIN_PLAN.md §"Where the gains actually are"`).
 - `--trail-length-min 4 --trail-length-max 200` (real trails reach 150+ px;
-  v7 trained 6–60 → length OOD).
+  segmentation model trained 6–60 → length OOD).
 - `--number` ≈ 15–25 on trail panels; **`--empty-fraction ≈ 0.35`**
   (new knob) → those panels get `--number 0`.
 - Keep the existing `forbidden` mask so trails are not painted onto real
@@ -265,13 +265,13 @@ loss is dominated by "real residual → output ≈ 0".
 
 ## 5. Fine-tune recipe (reuse, no new infra)
 
-Reuse `experiments/diffim_runs/test_real/slurm_v7_finetune.sh` verbatim,
+Reuse `experiments/diffim_runs/test_real/slurm_seg_finetune.sh` verbatim,
 swapping the data and bumping negatives:
 
 ```
 python -m experiments.diffim_pilot.v5_train \
-  --run-name v7_ft_realneg \
-  --init-from .../diffim_runs/pilot_v7/ckpts/best.pt   # or the precision-tilt best.pt
+  --run-name seg_ft_realneg \
+  --init-from .../diffim_runs/pilot_seg/ckpts/best.pt   # or the precision-tilt best.pt
   --data-h5 <new realneg train.h5> --data-csv <...> \
   --n-train-panels ~500 --n-val-panels ~40 \
   --epochs 12 --batch-size 24 --lr 5e-5 \
@@ -281,7 +281,7 @@ python -m experiments.diffim_pilot.v5_train \
   --ema-decay 0.999 --ema-exclude agg_alpha
 ```
 
-Architecture flags must match the v7 checkpoint (they do above). Then export
+Architecture flags must match the segmentation model checkpoint (they do above). Then export
 TorchScript + retrain the V2 RF including the new empty-panel candidates as
 negatives (RETRAIN_PLAN §D) — cheap, high-leverage, no GPU.
 
@@ -295,9 +295,9 @@ on `roma`. `test_real` build (2,678 panels) completed in one slurm job;
 ~40–90-way CPU array** (subtract+detect dominated). No GPU.
 
 **Fine-tune (1 × A100/ampere):** the *measured* precision-tilt fine-tune
-(`experiments/diffim_runs/v7_ft_hn/train.log`) ran **12 epochs × 740 panels ×
+(`experiments/diffim_runs/seg_ft_hn/train.log`) ran **12 epochs × 740 panels ×
 7,000 anchors/epoch at ~250 s/epoch ≈ 51 min total** on one ampere GPU
-(`slurm_v7_finetune.sh` requests 4 h, used <1 h). The realneg fine-tune is
+(`slurm_seg_finetune.sh` requests 4 h, used <1 h). The realneg fine-tune is
 **smaller** (~500 panels) with **more negative anchors** (~9,000/epoch vs
 7,000) → est. **~280–320 s/epoch × 12 ≈ 1.0–1.1 GPU-hours**. Budget **1
 ampere-GPU job, ≤2 h** (well inside the existing 4 h request). TorchScript
@@ -315,7 +315,7 @@ data build.** This is *small* — comparable to one existing fine-tune cycle.
 
 ## 7. Expected FP-reduction mechanism
 
-v7 currently emits ~900 raw candidates / empty CCD because, on tiles
+segmentation model currently emits ~900 raw candidates / empty CCD because, on tiles
 containing real residuals it never saw labeled as negatives, its AFTL/Hough
 head has no gradient pushing those to 0 — the synthetic training panels'
 residuals were never *anchored* as negatives (negatives were uniform-random
@@ -328,14 +328,14 @@ realistic mechanism: **raw candidates/empty CCD drop from ~900 toward
 *if* the residual distribution is learnable by the CNN (the AUC-0.95 result
 says the information is present). Recall in the SNR 3–7 band should be
 preserved or improved (we now train at exactly that SNR with realistic
-lengths, vs the OOD 6–60 px / SNR 2–8 v7 saw).
+lengths, vs the OOD 6–60 px / SNR 2–8 segmentation model saw).
 
 ---
 
 ## 8. Leakage / eval protocol
 
 1. **No-leak scan**: training empties scanned from a day_obs window disjoint
-   from both v7-train and `test_real`; assert (visit,detector) disjointness
+   from both segmentation model-train and `test_real`; assert (visit,detector) disjointness
    before build; persist the lists in the run dir.
 2. **Held-out real empties**: reserve a fresh real-empty scan (different
    pairs again) as the FP benchmark — do NOT score on training empties.
@@ -388,7 +388,7 @@ Rationale from the evidence:
 
 - **GO factors.** (i) Cost is *small and measured*: ~1 GPU-hour fine-tune +
   ≤10 CPU-h data build, all infra/scripts already exist and were exercised
-  (`slurm_v7_finetune.sh`, `v7_ft_hn/train.log`). (ii) The mechanism is
+  (`slurm_seg_finetune.sh`, `seg_ft_hn/train.log`). (ii) The mechanism is
   sound and *quantified*: real FP overlap genuine trails on the
   hand-features the RF relies on (dipole 76%, aspect 86%, skew 72% overlap),
   so downstream reranking provably plateaued (~43 FP/CCD) — the fix must be
@@ -403,7 +403,7 @@ Rationale from the evidence:
   (retrain the V2 RF with real empty-panel hard negatives) is even cheaper
   and *already done*: it **halved** real-empty FP (85→43 @thr0.10) with
   **synthetic recall fully preserved**, then **plateaued**. That plateau is
-  the green light — it isolates the bottleneck to v7's candidate generation,
+  the green light — it isolates the bottleneck to segmentation model's candidate generation,
   which is exactly what on-real-bg retraining addresses. So: **GO to the
   on-real-bg fine-tune**, with the explicit kill-criterion below.
 
@@ -413,7 +413,7 @@ Rationale from the evidence:
   (b) held-out real-empty FP/CCD does not improve **meaningfully beyond the
   RF-hard-neg plateau (~43/CCD)** — i.e. < ~2× further reduction. If FP
   cannot be driven toward a 2nd-stage-usable rate (order ≤1–2/CCD)
-  *regardless of recall*, v7-as-second-stage is not worth pursuing and this
+  *regardless of recall*, segmentation model-as-second-stage is not worth pursuing and this
   line should stop. The small addressable prize (~30–40 stack-missed
   sightings at SNR 3–7) does not justify more than this one bounded,
   reuse-only experiment.

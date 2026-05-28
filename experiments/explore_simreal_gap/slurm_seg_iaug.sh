@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=adc-v7-iaug
+#SBATCH --job-name=adc-seg_model-iaug
 #SBATCH --requeue
 #SBATCH --account=kipac:kipac
 #SBATCH --partition=ampere
@@ -9,16 +9,16 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=96G
 #SBATCH --time=04:00:00
-#SBATCH --output=/sdf/home/m/mrakovci/logs/ADCNN_v7_iaug_%j.out
+#SBATCH --output=/sdf/home/m/mrakovci/logs/ADCNN_seg_iaug_%j.out
 set -eo pipefail
 export RUBIN_EUPS_PATH="${RUBIN_EUPS_PATH:-}"
 REPO="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"
 cd "$REPO"; export PYTHONPATH="$REPO:${PYTHONPATH:-}"
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
-echo "=== v7 retrain on BIGGER realistic set (1749 panels) + augment === $(date -Is)"
+echo "=== seg_model retrain on BIGGER realistic set (1749 panels) + augment === $(date -Is)"
 srun python3 -u -m ADCNN.training.diffim_train \
-  --run-name pilot_v7_big_iaug \
+  --run-name pilot_seg_big_iaug \
   --data-h5 "$REPO/DATA_DIFFIM_realistic_big/train.h5" \
   --data-csv "$REPO/DATA_DIFFIM_realistic_big/train.csv" \
   --n-train-panels 1700 --n-val-panels 64 \
@@ -29,4 +29,4 @@ srun python3 -u -m ADCNN.training.diffim_train \
   --lambda-orient 0.5 --kernel-lens 11 21 41 --n-angles 12 \
   --widths 24 48 96 192 384 --num-workers 6 --seed 2026 \
   --ema-decay 0.999 --ema-exclude agg_alpha --augment --intensity-aug --device cuda
-echo "V7 BIG DONE $(date -Is)"
+echo "SEG_MODEL BIG DONE $(date -Is)"

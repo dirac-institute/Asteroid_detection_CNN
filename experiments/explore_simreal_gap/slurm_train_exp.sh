@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=adc-v7-exp
+#SBATCH --job-name=adc-seg_model-exp
 #SBATCH --requeue
 #SBATCH --account=kipac:kipac
 #SBATCH --partition=ampere

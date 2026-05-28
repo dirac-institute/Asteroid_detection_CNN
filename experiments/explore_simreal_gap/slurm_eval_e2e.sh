@@ -16,6 +16,6 @@ REPO="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"
 cd "$REPO"; export PYTHONPATH="$REPO:${PYTHONPATH:-}"
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
-echo "=== e2e eval (realistic v7+RF) === $(date -Is)"
+echo "=== e2e eval (realistic seg_model+RF) === $(date -Is)"
 srun python3 -u experiments/explore_simreal_gap/eval_realistic_e2e.py
 echo "EVAL E2E DONE $(date -Is)"

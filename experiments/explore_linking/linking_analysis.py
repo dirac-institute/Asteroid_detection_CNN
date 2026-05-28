@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Multi-visit tracklet-linking lever analysis for the v7 CNN 2nd-stage.
+Multi-visit tracklet-linking lever analysis for the seg_model CNN 2nd-stage.
 
 CPU-only, reads existing dumps. Writes numbers consumed by RESULTS.md.
 

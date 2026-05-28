@@ -1,7 +1,7 @@
 #!/bin/bash
 # EXPERIMENTAL realneg dataset build (CPU, LSST stack env, roma).
 # Three leakage-disjoint builds (trail / empty / held-out empty) + merge.
-# Outputs under the gitignored experiments/diffim_runs/v7_ft_realneg/.
+# Outputs under the gitignored experiments/diffim_runs/seg_ft_realneg/.
 # Usage: sbatch experiments/explore_realneg_train/slurm_build_realneg.sh
 #
 #SBATCH --job-name=adc-realneg-build

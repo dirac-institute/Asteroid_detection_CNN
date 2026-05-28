@@ -1,6 +1,6 @@
 """Extract real-TP truth-candidate features via the SAME full-panel inference path
 as probe_empty_fp.py (so size features are comparable -> no extraction-path artifact
-in the separability diagnostic). Full-panel v7 on the in-region stack-missed asteroid
+in the separability diagnostic). Full-panel seg_model on the in-region stack-missed asteroid
 panels; for each truth (x,y) keep the candidate whose materialized mask covers it.
 Read-only on test_real. Sharded.
 """
@@ -15,7 +15,7 @@ from ADCNN.inference.diffim_eval import predict_panel_overlap_3ch_full
 from ADCNN.inference.diffim_postproc_v2 import (
     compute_v2_features, materialize_label_mask_v2, RF_FEATURES_V2)
 
-MODEL = REPO / "experiments/diffim_runs/pilot_v7_realistic/ckpts/v7_realistic_scripted.pt"
+MODEL = REPO / "experiments/diffim_runs/pilot_seg_realistic/ckpts/seg_realistic_scripted.pt"
 OUT = REPO / "DATA_DIFFIM/test_real"
 RES = Path("/sdf/scratch/users/m/mrakovci/realistic/real_tp_fp")
 FEATS = list(RF_FEATURES_V2)

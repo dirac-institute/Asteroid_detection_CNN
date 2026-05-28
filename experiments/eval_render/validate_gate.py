@@ -10,7 +10,7 @@ from ADCNN.inference.catalog import build_detection_catalog
 from ADCNN.evaluation.catalog_match import match_trail_catalogs
 from ADCNN.inference.rf_postproc import DEFAULT_THR
 
-V7=REPO/"models/v7_diffim_scripted.pt"; RF=REPO/"models/rf_postproc.pkl"
+SEG_MODEL=REPO/"models/segmentation_model.pt"; RF=REPO/"models/rf_postproc.pkl"
 VAL_H5=REPO/"DATA_DIFFIM_realistic/shard_3/train.h5"
 VAL_CSV=REPO/"DATA_DIFFIM_realistic/shard_3_val.csv"
 TOL=20.0
@@ -25,7 +25,7 @@ def run():
     print(f"VAL leak-free sweep on {npan} held-out shard_3 val panels (ids {val_ids[0]}..{val_ids[-1]})",flush=True)
     for nm,gate,stride in configs:
         t0=time.time()
-        cat=build_detection_catalog(str(VAL_H5),str(V7),str(RF),rf_thr=DEFAULT_THR,
+        cat=build_detection_catalog(str(VAL_H5),str(SEG_MODEL),str(RF),rf_thr=DEFAULT_THR,
                                     device="cuda",panel_ids=val_ids,gate_pmax=gate,stride=stride)
         dt=time.time()-t0
         _,_,c=match_trail_catalogs(cat,truth,tol_px=TOL)

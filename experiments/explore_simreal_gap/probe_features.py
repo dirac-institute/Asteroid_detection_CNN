@@ -1,4 +1,4 @@
-"""Extract the FULL RF feature vector of the v7 candidate at each real
+"""Extract the FULL RF feature vector of the seg_model candidate at each real
 in-region stack-missed truth, so we can compare real trail-candidate features to
 the SYNTHETIC positives the RF was trained on, and find which features push real
 trails into the RF's 'background' region. Read-only on test_real.
@@ -21,7 +21,7 @@ from ADCNN.inference.diffim_postproc_v2 import (
     load_rf, RF_FEATURES_V2)
 
 OUT = REPO / "experiments/explore_simreal_gap"
-MODEL = REPO / "experiments/diffim_runs/pilot_v7/ckpts/v7_scripted.pt"
+MODEL = REPO / "experiments/diffim_runs/pilot_seg/ckpts/segmentation_scripted.pt"
 RF_PKL = REPO / "experiments/explore_rf_leakage/rf_postproc_v2_valtrain.pkl"
 REAL_H5 = REPO / "DATA_DIFFIM/test_real/test.h5"
 R = 12

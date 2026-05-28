@@ -1,8 +1,8 @@
 """Diagnostic for the sim-to-real gain gap.
 
-Decisive question: on faint trails the LSST 5sigma stack MISSES, does v7 even
+Decisive question: on faint trails the LSST 5sigma stack MISSES, does seg_model even
 produce probability mass at the asteroid's true position? We compare the
-distribution of `max v7 prob within +/-R px of the true (x,y)` between:
+distribution of `max seg_model prob within +/-R px of the true (x,y)` between:
 
   - REAL  in-region sightings (SNR 2-10, trail 6-60), split stack-detected vs missed
   - SYNTH in-region injections (SNR_estimation 2-10, trail 6-60), same split
@@ -11,7 +11,7 @@ The stack-detected vs stack-missed split is measurement-independent, so it
 sidesteps the SNR-axis comparability problem (synthetic detection-scale SNR vs
 real point-source PSF-fit lsst_psf_snr).
 
-REAL probs are recomputed with v7 (GPU). SYNTH probs come from the cached
+REAL probs are recomputed with seg_model (GPU). SYNTH probs come from the cached
 test_probs.npy (no GPU needed) produced by improve_rf.py.
 """
 from __future__ import annotations
@@ -30,7 +30,7 @@ from ADCNN.inference.diffim_eval import hann2d
 
 SC = Path("/sdf/scratch/users/m/mrakovci/rf_leakage")
 OUT = REPO / "experiments/explore_simreal_gap"
-MODEL = REPO / "experiments/diffim_runs/pilot_v7/ckpts/v7_scripted.pt"
+MODEL = REPO / "experiments/diffim_runs/pilot_seg/ckpts/segmentation_scripted.pt"
 REAL_H5 = REPO / "DATA_DIFFIM/test_real/test.h5"
 R = 12  # half-window (px) around true position for max-prob extraction
 
@@ -57,7 +57,7 @@ def panel_sigma(dset, idx, stats_crop=1024):
 
 def predict_window(model, fimg, frl, idx, x, y, sigma, device, *,
                    half=192, tile=128, stride=64, clip=5.0):
-    """Run v7 ONLY on tiles covering a (2*half) box around (x,y), Hann-blended.
+    """Run seg_model ONLY on tiles covering a (2*half) box around (x,y), Hann-blended.
     Reads just the crop from h5 (not the 65 MB panel). Returns (prob_crop, y0, x0)
     in panel coords. Normalization sigma is passed in (panel-level), so the
     output matches full-panel inference inside the window."""
@@ -159,7 +159,7 @@ def do_synth():
 
 def summarize(real, synth):
     def block(df, name):
-        out = [f"\n=== {name} (max v7 prob within +/-{R}px of truth) ==="]
+        out = [f"\n=== {name} (max seg_model prob within +/-{R}px of truth) ==="]
         for tag, g in [("stack-MISSED", df[~df.stack]),
                        ("stack-detected", df[df.stack])]:
             if not len(g):

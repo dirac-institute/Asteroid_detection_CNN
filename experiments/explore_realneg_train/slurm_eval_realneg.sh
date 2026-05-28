@@ -21,8 +21,8 @@ BASE="/sdf/scratch/users/m/mrakovci/realneg"
 RES="${BASE}/eval"
 HELD="${BASE}/data/heldout"
 SYN="${REPO_DIR}/DATA_DIFFIM/test_5sigma"                          # read-only
-CK="${REPO_DIR}/experiments/diffim_runs/pilot_v7/ckpts"            # promoted ft (read-only)
-RNM="${BASE}/runs/v7_ft_realneg/ckpts/v7_ft_realneg_scripted.pt"   # new model
+CK="${REPO_DIR}/experiments/diffim_runs/pilot_seg/ckpts"            # promoted ft (read-only)
+RNM="${BASE}/runs/seg_ft_realneg/ckpts/seg_ft_realneg_scripted.pt"   # new model
 RNRF="${BASE}/ckpts/rf_postproc_v2_realneg.pkl"                    # new RF (made below)
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
@@ -35,12 +35,12 @@ ln -sf data.h5 "${HELD}/test.h5"
 
 M=ADCNN.evaluation.fp_analysis
 # 1) held-out real-empty feature dumps — SAME panels, both models.
-python -m $M dump-empty --data "${HELD}" --model "${CK}/v7_scripted.pt" \
+python -m $M dump-empty --data "${HELD}" --model "${CK}/segmentation_scripted.pt" \
   --rf "${CK}/rf_postproc_v2.pkl" --tag emporig --results-dir "${RES}"
 python -m $M dump-empty --data "${HELD}" --model "${RNM}" \
   --rf "${CK}/rf_postproc_v2.pkl" --tag emprn   --results-dir "${RES}"
 # 2) synthetic test_5sigma feature dumps (both models) — posR side.
-python -m $M dump-syn --syn-dir "${SYN}" --model "${CK}/v7_scripted.pt" \
+python -m $M dump-syn --syn-dir "${SYN}" --model "${CK}/segmentation_scripted.pt" \
   --tag ftbase --results-dir "${RES}"
 python -m $M dump-syn --syn-dir "${SYN}" --model "${RNM}" \
   --tag rn     --results-dir "${RES}"

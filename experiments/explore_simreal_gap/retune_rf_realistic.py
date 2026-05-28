@@ -1,10 +1,10 @@
-"""RF-side remedy #1: retune the stage-2 RF for the realistic v7's candidate pool.
+"""RF-side remedy #1: retune the stage-2 RF for the realistic seg_model's candidate pool.
 
-The realistic-trained v7 emits ~92k val candidates (2.5x uniform) with ~950 pos, so
+The realistic-trained seg_model emits ~92k val candidates (2.5x uniform) with ~950 pos, so
 the RF over-rejects. Sweep negative-rebalancing (subsample ratio) x leaf x class_weight,
 judged by SYNTHETIC test_5sigma recall @ matched FP (no-regression), with REAL
 truth-candidate acceptance reported alongside. Synthetic-only training; test_real READ
-only (one feature extraction with the realistic v7, then CPU sweep).
+only (one feature extraction with the realistic seg_model, then CPU sweep).
 
 Reuses cached features from eval_realistic_e2e (/sdf/scratch/.../e2e_cache).
 """
@@ -25,13 +25,13 @@ from probe_features import predict_window_heads
 
 CACHE = Path("/sdf/scratch/users/m/mrakovci/e2e_cache")
 OUT = REPO / "experiments/explore_simreal_gap"
-SCRIPTED = REPO / "experiments/diffim_runs/pilot_v7_realistic/ckpts/v7_realistic_scripted.pt"
+SCRIPTED = REPO / "experiments/diffim_runs/pilot_seg_realistic/ckpts/seg_realistic_scripted.pt"
 FEATS = list(RF_FEATURES_V2); R = 12
 
 
 def real_truth_features():
     """Full RF feature vectors of the truth candidate for each real in-region
-    stack-missed sighting, under the realistic v7. Cached."""
+    stack-missed sighting, under the realistic seg_model. Cached."""
     cp = CACHE / "real_feats_realistic.parquet"
     if cp.exists():
         print(f"[cache] real feats {cp}", flush=True); return pd.read_parquet(cp)
@@ -114,7 +114,7 @@ def main():
         rec = dict(tag=tag, synth=match/10, k5=k5, k3=k3, med=float(np.median(sreal)))
         if best is None or (rec["synth"] >= 60.0 and rec["k5"] > best["k5"]):
             best = rec
-    print(f"\nbaseline uniform v7+RF: synth 64.1%, real kept@0.5=0; "
+    print(f"\nbaseline uniform seg_model+RF: synth 64.1%, real kept@0.5=0; "
           f"realistic default RF: synth 60.7%, real kept@0.5=5 (of {len(real)})", flush=True)
     print(f"[best by synth>=60 & max real kept@0.5] {best}", flush=True)
     print("RETUNE DONE", flush=True)

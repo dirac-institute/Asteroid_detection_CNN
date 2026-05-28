@@ -8,7 +8,7 @@ REPO=Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"); sys.
 from ADCNN.data.preprocessing import build_3channel, diffim_mad_sigma
 from ADCNN.inference.predict import hann2d, _tile_starts
 dev=torch.device("cuda"); torch.backends.cudnn.benchmark=True
-m=torch.jit.load(str(REPO/"models/v7_diffim_scripted.pt"),map_location=dev).eval()
+m=torch.jit.load(str(REPO/"models/segmentation_model.pt"),map_location=dev).eval()
 H5=REPO/"DATA_DIFFIM/test_5sigma/test.h5"
 tile,stride,BATCH,clip=128,64,64,5.0
 T={k:0.0 for k in ["prep","h2d","fwd","d2h","acc"]}; ntiles=0

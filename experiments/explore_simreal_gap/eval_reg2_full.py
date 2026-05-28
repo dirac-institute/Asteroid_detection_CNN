@@ -1,7 +1,7 @@
-"""End-to-end v7+RF eval for the NEW reg2 model (lambda_orient0+dropout+wd+intensity-aug).
-Recomputes ALL feature sets with reg2 (old caches are old-v7), retrains the neg5 RF on
+"""End-to-end seg_model+RF eval for the NEW reg2 model (lambda_orient0+dropout+wd+intensity-aug).
+Recomputes ALL feature sets with reg2 (old caches are old-seg_model), retrains the neg5 RF on
 reg2's VAL candidates (shard_3 holdout, leakage-safe), and reports synth + real TP/FP
-vs the deployed v7-realistic+neg5. Saves the reg2 RF. GPU. Read-only on test sets.
+vs the deployed seg_model-realistic+neg5. Saves the reg2 RF. GPU. Read-only on test sets.
 """
 from __future__ import annotations
 import sys, time
@@ -19,7 +19,7 @@ from ADCNN.inference.diffim_eval import predict_panel_overlap_3ch_full
 from probe_features import predict_window_heads
 from ADCNN.data.diffim_dataset import diffim_mad_sigma
 
-REG2 = REPO / "experiments/diffim_runs/pilot_v7_reg2/ckpts/v7_reg2_best_scripted.pt"
+REG2 = REPO / "experiments/diffim_runs/pilot_seg_reg2/ckpts/segmentation_reg2_best_scripted.pt"
 SHARD3 = REPO / "DATA_DIFFIM_realistic/shard_3/train.h5"
 VALCSV = REPO / "DATA_DIFFIM_realistic/shard_3_val.csv"
 TEST5 = REPO / "DATA_DIFFIM/test_5sigma"
@@ -129,14 +129,14 @@ def main():
     Xfp = Xfp_df[FEATS].replace([np.inf, -np.inf], np.nan).fillna(0).to_numpy(np.float32)
     stp = rf.predict_proba(Xtp)[:, 1]; sfp = rf.predict_proba(Xfp)[:, 1]
 
-    print("\n================ reg2 v7+RF (neg5) END-TO-END ================", flush=True)
+    print("\n================ reg2 seg_model+RF (neg5) END-TO-END ================", flush=True)
     print(df.to_string(index=False), flush=True)
     print(f"SYNTH comb_TP @ NN_FP={ir.MATCH_FP} = {match:.0f} ({match/10:.1f}% recall)", flush=True)
     print(f"\nREAL (in-region stack-missed truth-cands found {len(Xtp)}/{n_miss}):", flush=True)
     for t in [0.3, 0.5, 0.7]:
         print(f"  thr={t}: real TP kept={int((stp>=t).sum())}/{len(Xtp)}  "
               f"empty FP/panel={(sfp>=t).sum()/N_EMPTY:.1f}", flush=True)
-    print("\nDEPLOYED baseline (v7-realistic+neg5, from notebooks): synth obj TP=682/1000 FP=2107; "
+    print("\nDEPLOYED baseline (seg_model-realistic+neg5, from notebooks): synth obj TP=682/1000 FP=2107; "
           "real per-sighting NN TP=705 FP=10386 (69.2/panel)", flush=True)
     print("REG2 E2E DONE", flush=True)
 

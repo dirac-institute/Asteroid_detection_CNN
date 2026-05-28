@@ -1,8 +1,8 @@
 """Is val_pixel_auc the right early-stop metric? Compare the BEST checkpoint
 (peak val_pixel_auc, ep9) vs the LAST checkpoint (ep24, lower pixel-AUC, higher
-agg_alpha) of pilot_v7_big on the TASK metric (object detection), not pixel AUC:
-  - SYNTH test_5sigma: v7 candidate-at-truth objectwise recall (model only, no RF)
-  - REAL in-region stack-missed (119): v7 fires at truth (the +8-object regime)
+agg_alpha) of pilot_seg_big on the TASK metric (object detection), not pixel AUC:
+  - SYNTH test_5sigma: seg_model candidate-at-truth objectwise recall (model only, no RF)
+  - REAL in-region stack-missed (119): seg_model fires at truth (the +8-object regime)
 If LAST >= BEST on these despite lower pixel-AUC, then pixel-AUC is the WRONG
 early-stop metric and the post-ep10 "overfitting" is largely a metric artifact.
 Read-only on test sets.
@@ -20,7 +20,7 @@ from ADCNN.data.diffim_dataset import diffim_mad_sigma
 from probe_features import predict_window_heads
 import ADCNN.evaluation.detection as evals
 
-CK = REPO / "experiments/diffim_runs/pilot_v7_big/ckpts"
+CK = REPO / "experiments/diffim_runs/pilot_seg_big/ckpts"
 TEST5 = REPO / "DATA_DIFFIM/test_5sigma"
 REAL = REPO / "DATA_DIFFIM/test_real/test.h5"
 R = 12
@@ -55,7 +55,7 @@ def synth_recall(model, dev):
             p, *_ = predict_panel_overlap_3ch_full(model, img, rl, device=dev)
             probs.append(p.astype(np.float32))
     probs = np.stack(probs)
-    # v7-only objectwise recall at a fixed pixel threshold (candidate at truth)
+    # seg_model-only objectwise recall at a fixed pixel threshold (candidate at truth)
     tp, fp, fn, _ = evals.objectwise_confusion(cat, (probs >= 0.5).astype(np.uint8), 0.5,
                                                use_threads=True, max_workers=8)
     return tp, fn, tp / max(tp + fn, 1)
@@ -64,12 +64,12 @@ def synth_recall(model, dev):
 def main():
     dev = torch.device("cuda")
     for tag in ["best", "last"]:
-        m = torch.jit.load(str(CK / f"v7_big_{tag}_scripted.pt"), map_location=dev).eval()
+        m = torch.jit.load(str(CK / f"seg_big_{tag}_scripted.pt"), map_location=dev).eval()
         n, f5, f3, med = real_fire(m, dev)
         stp, sfn, srec = synth_recall(m, dev)
         print(f"\n===== {tag} =====", flush=True)
-        print(f"  SYNTH test_5sigma v7-only objectwise recall: {stp}/{stp+sfn} = {100*srec:.1f}%", flush=True)
-        print(f"  REAL in-region stack-missed v7-fire@truth: n={n}  >=0.5={f5} ({100*f5/n:.0f}%)  "
+        print(f"  SYNTH test_5sigma seg_model-only objectwise recall: {stp}/{stp+sfn} = {100*srec:.1f}%", flush=True)
+        print(f"  REAL in-region stack-missed seg_model-fire@truth: n={n}  >=0.5={f5} ({100*f5/n:.0f}%)  "
               f">=0.3={f3} ({100*f3/n:.0f}%)  med_pmax={med:.3f}", flush=True)
     print("\n(best=ep9 val_pixel_auc 0.944; last=ep24 ~0.90. If last>=best here -> pixel-AUC "
           "is the wrong early-stop metric.)", flush=True)

@@ -1,8 +1,8 @@
 ==============================================================================
 STEP 2  —  REAL empty-CCD FP  vs  SYNTHETIC true positives
 ==============================================================================
-real empty cand (emp_*, v7 raw)   :  131494 rows  panels=150
-real empty cand (empft_*, v7_ft)  :  121844 rows  panels=150
+real empty cand (emp_*, segmentation model raw)   :  131494 rows  panels=150
+real empty cand (empft_*, seg_ft)  :  121844 rows  panels=150
 synthetic cand total              :   36027 rows
   synthetic TRUE  (label_v2==1)   :     877
   synthetic FALSE (label_v2==0)   :   35150

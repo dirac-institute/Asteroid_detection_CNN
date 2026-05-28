@@ -1,4 +1,4 @@
-"""v7-level TP-vs-FP operating curve on test_5sigma: sweep prob threshold and report
+"""seg_model-level TP-vs-FP operating curve on test_5sigma: sweep prob threshold and report
 objectwise TP-recall AND FP count for each model. The model whose curve dominates
 (>= recall at < FP) is better for 'more TP, fewer FP'. Args: pairs of ckpt:label.
 """

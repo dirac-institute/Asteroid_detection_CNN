@@ -4,9 +4,9 @@ The shipped rf_postproc_v2.pkl was trained on test_5sigma — the SAME set it is
 evaluated on (see postproc_iter/train_rf_v2.py). That is evaluation leakage.
 
 This script removes it with a textbook train/val/test split:
-  * v7 trained on the 750 train panels of train.h5 (split.json:train_panels)
+  * seg_model trained on the 750 train panels of train.h5 (split.json:train_panels)
   * stage-2 RF trained HERE on the 50 val panels (split.json:val_panels) that
-    v7 only ever saw for early-stopping — same 5-sigma build, (visit,detector)-
+    seg_model only ever saw for early-stopping — same 5-sigma build, (visit,detector)-
     disjoint from test_5sigma, 1000 injections (matches test_5sigma).
   * evaluate on test_5sigma (untouched by either model).
 
@@ -40,10 +40,10 @@ from ADCNN.inference.diffim_postproc_v2 import (
 import ADCNN.evaluation.detection as evals
 
 DATA   = REPO / "DATA_DIFFIM"
-CK     = REPO / "experiments/diffim_runs/pilot_v7/ckpts"
-MODEL  = CK / "v7_scripted.pt"
+CK     = REPO / "experiments/diffim_runs/pilot_seg/ckpts"
+MODEL  = CK / "segmentation_scripted.pt"
 OLD_RF = CK / "rf_postproc_v2.pkl"                       # leaky (trained on test)
-SPLIT  = REPO / "experiments/diffim_runs/pilot_v7/split.json"
+SPLIT  = REPO / "experiments/diffim_runs/pilot_seg/split.json"
 OUT    = Path("/sdf/scratch/users/m/mrakovci/rf_leakage")
 NEW_RF = OUT / "rf_postproc_v2_valtrain.pkl"
 OUT.mkdir(parents=True, exist_ok=True)
@@ -58,7 +58,7 @@ def load_model():
 
 
 def infer_panels(model, h5_path, panel_idx):
-    """Run v7 full inference over the given panel indices of an h5.
+    """Run seg_model full inference over the given panel indices of an h5.
 
     Returns (prob, sin, cos, agg, diffims, real_labels, gt) each (n,H,W),
     panels in the order given by `panel_idx`.

@@ -1,4 +1,4 @@
-# explore_oppoint — best science operating point for the v7 CNN 2nd stage
+# explore_oppoint — best science operating point for the segmentation model CNN 2nd stage
 
 Scope: CPU-only, read-only on `experiments/diffim_runs/test_real/results/`.
 All scripts + raw reports in this dir. Nothing tracked was modified.

@@ -1,6 +1,6 @@
 """Is the stage-2 RF the bottleneck on real stack-missed trails?
 
-The prob-at-truth probe showed v7 fires (pmax>=0.5) on ~46/119 real in-region
+The prob-at-truth probe showed seg_model fires (pmax>=0.5) on ~46/119 real in-region
 stack-missed sightings, yet the full pipeline scored only 2. Stale positions are
 ruled out. Remaining suspect: the synthetic-trained RF rejects the (real, OOD)
 candidate at the truth.
@@ -29,7 +29,7 @@ from ADCNN.inference.diffim_postproc_v2 import (
     load_rf, RF_FEATURES_V2)
 
 OUT = REPO / "experiments/explore_simreal_gap"
-MODEL = REPO / "experiments/diffim_runs/pilot_v7/ckpts/v7_scripted.pt"
+MODEL = REPO / "experiments/diffim_runs/pilot_seg/ckpts/segmentation_scripted.pt"
 RF_PKL = REPO / "experiments/explore_rf_leakage/rf_postproc_v2_valtrain.pkl"
 REAL_H5 = REPO / "DATA_DIFFIM/test_real/test.h5"
 R = 12
@@ -130,9 +130,9 @@ def main():
 
     has = df.truth_score_rf.notna()
     print(f"\n=== REAL in-region stack-missed (n={len(df)}) ===", flush=True)
-    print(f"v7 candidate exists at truth: {int(has.sum())}/{len(df)}", flush=True)
+    print(f"seg_model candidate exists at truth: {int(has.sum())}/{len(df)}", flush=True)
     fired = df[df.pmax >= 0.5]
-    print(f"v7 pmax>=0.5 at truth: {len(fired)}  (of those, candidate w/ RF score: "
+    print(f"seg_model pmax>=0.5 at truth: {len(fired)}  (of those, candidate w/ RF score: "
           f"{int(fired.truth_score_rf.notna().sum())})", flush=True)
     s = df.truth_score_rf.dropna()
     if len(s):
@@ -142,7 +142,7 @@ def main():
     for thr in [0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.0]:
         rec = int((df.truth_score_rf >= thr).sum())
         print(f"  thr={thr:.2f}:  {rec:3d}/{len(df)}  ({100*rec/len(df):.1f}%)", flush=True)
-    print("\n(shipped thr=0.5 scored 2/119 = 1.7%. Synthetic stack-missed v7-fire "
+    print("\n(shipped thr=0.5 scored 2/119 = 1.7%. Synthetic stack-missed seg_model-fire "
           "was 72%.)", flush=True)
     print("RF-KILLER PROBE DONE", flush=True)
 

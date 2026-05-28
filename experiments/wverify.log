@@ -1,3 +1,0 @@
-=== consolidated-pipeline accuracy verification ===
-VERIFY consolidated v7-only objectwise recall @0.5: 960/1000 = 96.0%  (reg2 baseline 96.0%)
-VERIFY DONE

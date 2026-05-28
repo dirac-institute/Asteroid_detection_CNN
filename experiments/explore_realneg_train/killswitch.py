@@ -145,7 +145,7 @@ def main() -> None:
                  "(requires test_real re-score to confirm objects-gained).")
     else:
         L.append("  -> per design §10 this bounded experiment stops here; "
-                 "v7-as-2nd-stage at a usable FP rate is not reached. "
+                 "seg_model-as-2nd-stage at a usable FP rate is not reached. "
                  "Bank the evidence; do not promote.")
     out = "\n".join(L) + "\n"
     print(out)

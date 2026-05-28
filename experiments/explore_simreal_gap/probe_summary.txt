@@ -1,8 +1,8 @@
 
-=== SYNTHETIC in-region (SNR_estimation 2-10, trail 6-60) (max v7 prob within +/-12px of truth) ===
+=== SYNTHETIC in-region (SNR_estimation 2-10, trail 6-60) (max segmentation model prob within +/-12px of truth) ===
   stack-MISSED    n= 521  pmax med=0.995 mean=0.710  frac>=0.5= 72.2%  frac>=0.1= 78.5%  frac>=0.293= 74.7%
   stack-detected  n= 472  pmax med=1.000 mean=0.991  frac>=0.5= 98.9%  frac>=0.1= 99.8%  frac>=0.293= 99.8%
 
-=== REAL in-region (lsst_psf_snr 2-10, trail 6-60) (max v7 prob within +/-12px of truth) ===
+=== REAL in-region (lsst_psf_snr 2-10, trail 6-60) (max segmentation model prob within +/-12px of truth) ===
   stack-MISSED    n= 119  pmax med=0.357 mean=0.437  frac>=0.5= 38.7%  frac>=0.1= 55.5%  frac>=0.293= 51.3%
   stack-detected  n= 120  pmax med=0.997 mean=0.894  frac>=0.5= 90.8%  frac>=0.1= 92.5%  frac>=0.293= 90.8%

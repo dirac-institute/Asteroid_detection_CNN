@@ -21,7 +21,7 @@ BASE="/sdf/scratch/users/m/mrakovci/realneg"
 RES="${BASE}/eval/${RUN}"
 HELD="${BASE}/data/heldout"
 SYN="${REPO_DIR}/DATA_DIFFIM/test_5sigma"
-CK="${REPO_DIR}/experiments/diffim_runs/pilot_v7/ckpts"
+CK="${REPO_DIR}/experiments/diffim_runs/pilot_seg/ckpts"
 RNM="${BASE}/runs/${RUN}/ckpts/${RUN}_scripted.pt"
 RNRF="${BASE}/ckpts/rf_postproc_v2_${RUN}.pkl"
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
@@ -34,12 +34,12 @@ ln -sf data.h5 "${HELD}/test.h5"
 
 M=ADCNN.evaluation.fp_analysis
 # Held-out real-empty dumps for both models on the SAME panels.
-python -m $M dump-empty --data "${HELD}" --model "${CK}/v7_scripted.pt" \
+python -m $M dump-empty --data "${HELD}" --model "${CK}/segmentation_scripted.pt" \
   --rf "${CK}/rf_postproc_v2.pkl" --tag emporig --results-dir "${RES}"
 python -m $M dump-empty --data "${HELD}" --model "${RNM}" \
   --rf "${CK}/rf_postproc_v2.pkl" --tag emp_${RUN} --results-dir "${RES}"
 # Synthetic test_5sigma dumps for both models — posR side.
-python -m $M dump-syn --syn-dir "${SYN}" --model "${CK}/v7_scripted.pt" \
+python -m $M dump-syn --syn-dir "${SYN}" --model "${CK}/segmentation_scripted.pt" \
   --tag ftbase --results-dir "${RES}"
 python -m $M dump-syn --syn-dir "${SYN}" --model "${RNM}" \
   --tag syn_${RUN} --results-dir "${RES}"

@@ -1,6 +1,6 @@
 #!/bin/bash
 # EXPERIMENTAL realneg fine-tune: continue from the PROMOTED precision-tilt
-# v7 (v7_ft_hn/last.pt) on the real-empty-background dataset. Bounded ~1
+# seg_model (seg_ft_hn/last.pt) on the real-empty-background dataset. Bounded ~1
 # GPU-h (design RESULTS.md §5-6). Reuses tracked ADCNN.training.diffim_train
 # (no tracked edits). New run dir; nothing promoted automatically.
 # Usage: sbatch experiments/explore_realneg_train/slurm_finetune_realneg.sh
@@ -17,7 +17,7 @@
 #SBATCH --output=/sdf/home/m/mrakovci/logs/ADCNN_realneg_ft_%j.out
 set -euo pipefail
 REPO_DIR="${REPO_DIR:-/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN}"
-RUN="v7_ft_realneg"
+RUN="seg_ft_realneg"
 # Heavy outputs on the 80G scratch area (repo quota full). Trainer writes to
 # ${OUTROOT}/${RUN}/ via --out-root.
 BASE="/sdf/scratch/users/m/mrakovci/realneg"
@@ -25,7 +25,7 @@ OUTROOT="${BASE}/runs"
 RUN_DIR="${OUTROOT}/${RUN}"
 DS="${BASE}/dataset"
 # Continue from the PROMOTED precision-tilt ft trainable ckpt (model+EMA).
-INIT="${REPO_DIR}/experiments/diffim_runs/v7_ft_hn/ckpts/last.pt"
+INIT="${REPO_DIR}/experiments/diffim_runs/seg_ft_hn/ckpts/last.pt"
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
 cd "${REPO_DIR}"; export PYTHONPATH="${REPO_DIR}:${PYTHONPATH:-}"
@@ -35,7 +35,7 @@ mkdir -p "${RUN_DIR}/ckpts"
 # Same precision-tilt AFTL as the promoted run; 2x negative anchors so the
 # loss is dominated by "real residual -> ~0" on the real-empty-bg panels
 # (~35% of the set are zero-injection empties; the rest are real subtracted
-# diffims that also carry residuals). Arch flags MUST match the v7 ckpt.
+# diffims that also carry residuals). Arch flags MUST match the seg_model ckpt.
 PYTHONUNBUFFERED=1 srun python -m ADCNN.training.diffim_train \
   --run-name "${RUN}" --out-root "${OUTROOT}" --init-from "${INIT}" \
   --data-h5 "${DS}/train.h5" --data-csv "${DS}/train.csv" \
@@ -50,5 +50,5 @@ PYTHONUNBUFFERED=1 srun python -m ADCNN.training.diffim_train \
 # Export the LAST ckpt (best.pt is val_auc-selected, peaks pre-tilt).
 PYTHONUNBUFFERED=1 python -m ADCNN.inference.diffim_export \
   --ckpt "${RUN_DIR}/ckpts/last.pt" \
-  --out  "${RUN_DIR}/ckpts/v7_ft_realneg_scripted.pt" --no-optimize
-echo "REALNEG-FT DONE $(date -Is) -> ${RUN_DIR}/ckpts/v7_ft_realneg_scripted.pt"
+  --out  "${RUN_DIR}/ckpts/seg_ft_realneg_scripted.pt" --no-optimize
+echo "REALNEG-FT DONE $(date -Is) -> ${RUN_DIR}/ckpts/seg_ft_realneg_scripted.pt"

@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=adc-v7-stream
+#SBATCH --job-name=adc-seg_model-stream
 #SBATCH --requeue
 #SBATCH --account=kipac:kipac
 #SBATCH --partition=ampere
@@ -9,15 +9,15 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=96G
 #SBATCH --time=08:00:00
-#SBATCH --output=/sdf/home/m/mrakovci/logs/ADCNN_v7_stream_%j.out
+#SBATCH --output=/sdf/home/m/mrakovci/logs/ADCNN_seg_stream_%j.out
 set -eo pipefail
 export RUBIN_EUPS_PATH="${RUBIN_EUPS_PATH:-}"
 REPO="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN"
 cd "$REPO"; export PYTHONPATH="$REPO:${PYTHONPATH:-}"
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh; conda activate asteroid_cnn
-echo "=== v7 streaming train === $(date -Is)"
+echo "=== seg_model streaming train === $(date -Is)"
 srun python3 -u -m ADCNN.training.diffim_train \
-  --run-name pilot_v7_stream \
+  --run-name pilot_seg_stream \
   --stream-buffer "$REPO/DATA_DIFFIM_stream_buffer" \
   --data-h5 "$REPO/DATA_DIFFIM_realistic/train.h5" \
   --data-csv "$REPO/DATA_DIFFIM_realistic/train.csv" \
@@ -28,4 +28,4 @@ srun python3 -u -m ADCNN.training.diffim_train \
   --widths 24 48 96 192 384 --num-workers 8 --seed 2026 \
   --ema-decay 0.999 --ema-exclude agg_alpha --augment --device cuda
 touch "$REPO/DATA_DIFFIM_stream_buffer/STOP"   # halt the producer
-echo "V7 STREAM DONE $(date -Is)"
+echo "SEG_MODEL STREAM DONE $(date -Is)"

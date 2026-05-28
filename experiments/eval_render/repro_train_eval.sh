@@ -15,7 +15,7 @@ python -m ADCNN.pipelines.train_end_to_end --run-name reg2_repro
 
 echo "===== STAGE B: evaluate the REPRODUCED model on synthetic test sets ====="
 python -m ADCNN.pipelines.make_eval_catalogs \
-    --v7 models/reg2_repro_v7_scripted.pt --rf models/reg2_repro_rf_postproc.pkl \
+    --seg-model models/reg2_repro_segmentation_scripted.pt --rf models/reg2_repro_rf_postproc.pkl \
     --out Evaluation/catalogs_repro --sets test_5sigma test_4sigma test_3sigma
 echo "DEPLOYED reg2 reference:  5sigma recall=0.725  4sigma=0.744  3sigma=0.788"
 echo "REPRO-TRAIN-EVAL DONE $(date -Is)"

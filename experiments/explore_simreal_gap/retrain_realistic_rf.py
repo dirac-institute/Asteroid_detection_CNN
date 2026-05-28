@@ -2,7 +2,7 @@
 evaluate on synthetic test_5sigma (no-regression guard) and on the cached real
 truth-candidates (leakage-free: test_real never trained on).
 
-Reuses improve_rf.{infer_features,build_pool,eval_on_test}. v7 inference (GPU) on
+Reuses improve_rf.{infer_features,build_pool,eval_on_test}. seg_model inference (GPU) on
 the 50 realistic-trail val panels -> candidate features + injection labels ->
 RF -> eval. Compares against the baseline RF (trained on the stock uniform-trail
 val candidates, cached val_cand.parquet).
@@ -22,7 +22,7 @@ SC = Path("/sdf/scratch/users/m/mrakovci/rf_leakage")
 RESIM = Path("/sdf/scratch/users/m/mrakovci/resim_realistic_val")
 OUT = REPO / "experiments/explore_simreal_gap"
 FEATS = list(RF_FEATURES_V2)
-MODEL = REPO / "experiments/diffim_runs/pilot_v7/ckpts/v7_scripted.pt"
+MODEL = REPO / "experiments/diffim_runs/pilot_seg/ckpts/segmentation_scripted.pt"
 
 
 def train_rf(X, y):

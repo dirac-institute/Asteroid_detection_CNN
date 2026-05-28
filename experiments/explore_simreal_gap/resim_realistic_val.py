@@ -33,7 +33,7 @@ ARGS = dict(n_inject=20, trail_length=(6, 60), mag=(2, 8), beta=(0, 180),
 
 def val_pairs():
     import json
-    val = set(json.load(open(REPO / "experiments/diffim_runs/pilot_v7/split.json"))["val_panels"])
+    val = set(json.load(open(REPO / "experiments/diffim_runs/pilot_seg/split.json"))["val_panels"])
     tr = pd.read_csv(REPO / "DATA_DIFFIM/train.csv")
     vp = (tr[tr.image_id.isin(val)][["image_id", "visit", "detector"]]
           .drop_duplicates("image_id").sort_values("image_id"))

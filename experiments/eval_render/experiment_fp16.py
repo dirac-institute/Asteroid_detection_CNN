@@ -1,6 +1,6 @@
 """Experiment: speed up the GPU forward WITHOUT changing detections, validated on the
 held-out shard_3 val panels (leak-free). Variants:
-  baseline  : scripted v7, autocast (current)
+  baseline  : scripted seg_model, autocast (current)
   jit-opt   : torch.jit.freeze + optimize_for_inference (conv-bn fusion; numerically equal)
   fp16      : full model.half() + half inputs (more aggressive; must validate)
 Reports TP/FP/recall + s/panel for each; we keep only what holds TP and doesn't add FP.
@@ -59,7 +59,7 @@ def run(label, model, fp16=False):
     print(f"[{label:10s}] TP={c['TP']} FP={c['FP']} FN={c['FN']} recall={c['TP']/max(c['TP']+c['FN'],1):.3f} | {dt:.0f}s ({dt/len(VAL_IDS):.2f}s/panel)",flush=True)
     return c
 
-base=torch.jit.load(str(REPO/"models/v7_diffim_scripted.pt"),map_location=dev).eval()
+base=torch.jit.load(str(REPO/"models/segmentation_model.pt"),map_location=dev).eval()
 cb=run("baseline", base)
 try:
     opt=torch.jit.optimize_for_inference(torch.jit.freeze(base))
@@ -68,7 +68,7 @@ try:
 except Exception as e:
     print("jit-opt FAILED:",repr(e),flush=True)
 try:
-    half=torch.jit.load(str(REPO/"models/v7_diffim_scripted.pt"),map_location=dev).eval().half()
+    half=torch.jit.load(str(REPO/"models/segmentation_model.pt"),map_location=dev).eval().half()
     ch=run("fp16", half, fp16=True)
     print(f"   fp16 vs baseline:    dTP={ch['TP']-cb['TP']:+d} dFP={ch['FP']-cb['FP']:+d}",flush=True)
 except Exception as e:

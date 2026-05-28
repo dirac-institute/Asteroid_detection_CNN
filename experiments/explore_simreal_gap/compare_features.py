@@ -48,9 +48,9 @@ with pd.option_context("display.width", 200, "display.max_columns", 20):
     print(top[["feat","imp","med_pos","med_neg","med_real","real_like_neg"]]
           .round(3).to_string(index=False))
 
-# condition on high v7 prob (real all fire ~1): among synth cands with max_p>0.9,
+# condition on high seg_model prob (real all fire ~1): among synth cands with max_p>0.9,
 # how do pos/neg/real compare on the key MF-SNR features?
-print("\n=== conditioned on max_p>0.9 (matched to real's high v7 confidence) ===")
+print("\n=== conditioned on max_p>0.9 (matched to real's high seg_model confidence) ===")
 hp = vc[(vc.max_p > 0.9)]; hpl = vl[(vc.max_p > 0.9).to_numpy()]
 hpos, hneg = hp[hpl == 1], hp[hpl == 0]
 key = ["max_p","mean_p","top5_mean_p","or_agg_max","mf_snr","lmf_snr_30",
