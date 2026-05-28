@@ -1,9 +1,9 @@
 """segmentation model inference primitive — sliding-window prediction over a full diffim panel.
 
-``predict_panel_overlap_3ch_full`` tiles a panel into 128px windows, runs the segmentation model model
-(seg + orientation + line-aggregator heads), and Hann-blends the overlapping tiles into
+``predict_panel_overlap_3ch_full`` tiles a panel into 128px windows, runs the segmentation
+model (seg + orientation + line-aggregator heads), and Hann-blends the overlapping tiles into
 full-panel maps (prob, sin2β, cos2β, aggregator). This is stage 1 of the detector and is
-used by run_inference, the RF feature/training code, and the real-data evaluation.
+used by run_inference, the stage-2 cutout-CNN feature/training code, and the real-data evaluation.
 """
 from __future__ import annotations
 import numpy as np
@@ -38,65 +38,7 @@ def hann2d(tile: int) -> np.ndarray:
     return (w[:, None] * w[None, :]).astype(np.float32)
 
 
-def predict_panel_overlap_3ch(
-    model: torch.nn.Module,
-    panel_image: np.ndarray,
-    panel_real_labels: np.ndarray,
-    *,
-    device,
-    tile: int = 128,
-    stride: int = 64,
-    clip: float = 5.0,
-    stats_crop: int = 1024,
-) -> np.ndarray:
-    """Sliding-window inference with Hann-weighted averaging on 3-channel input."""
-    H, W = panel_image.shape
-    s = min(stats_crop, H, W)
-    h0c = (H - s) // 2
-    w0c = (W - s) // 2
-    sigma = diffim_mad_sigma(panel_image[h0c:h0c + s, w0c:w0c + s])
-
-    prob_acc = np.zeros((H, W), dtype=np.float32)
-    weight_acc = np.zeros((H, W), dtype=np.float32)
-    hann = hann2d(tile)
-
-    ys = _tile_starts(H, tile, stride)
-    xs = _tile_starts(W, tile, stride)
-
-    batch_xs, batch_locs = [], []
-    BATCH = _TILE_BATCH  # tiles/forward (env ADCNN_TILE_BATCH); batching does not change results
-
-    def flush():
-        if not batch_xs:
-            return
-        # Each entry is already (3, T, T); stack to (B, 3, T, T)
-        xb = torch.from_numpy(np.stack(batch_xs)).to(device, non_blocking=True)
-        with torch.no_grad(), torch.amp.autocast("cuda", enabled=(device.type == "cuda")):
-            seg_logits, _, _, _, _ = model(xb)
-        probs = torch.sigmoid(seg_logits).cpu().numpy().astype(np.float32)
-        for (y0, x0), p in zip(batch_locs, probs[:, 0]):
-            prob_acc[y0:y0 + tile, x0:x0 + tile] += p * hann
-            weight_acc[y0:y0 + tile, x0:x0 + tile] += hann
-        batch_xs.clear(); batch_locs.clear()
-
-    for y0 in ys:
-        for x0 in xs:
-            diffim_tile = panel_image[y0:y0 + tile, x0:x0 + tile]
-            rl_tile = panel_real_labels[y0:y0 + tile, x0:x0 + tile]
-            x3 = build_3channel(diffim_tile, rl_tile, panel_sigma=sigma, clip=clip)
-            batch_xs.append(x3)
-            batch_locs.append((y0, x0))
-            if len(batch_xs) >= BATCH:
-                flush()
-    flush()
-
-    out = prob_acc / np.maximum(weight_acc, 1e-6)
-    return out.astype(np.float16)
-
-
 @torch.no_grad()
-
-
 def predict_panel_overlap_3ch_full(
     model: torch.nn.Module,
     panel_image: np.ndarray,
@@ -115,8 +57,7 @@ def predict_panel_overlap_3ch_full(
     Returns (prob, orient_sin, orient_cos, agg) — each (H, W) float16. `prob`
     is sigmoid(seg_logits); `orient_sin`/`orient_cos` are tanh-bounded
     sin(2β)/cos(2β); `agg` is the raw line-aggregator logit. All four maps
-    use Hann-weighted overlap blending (same convention as
-    `predict_panel_overlap_3ch`).
+    use Hann-weighted overlap blending.
 
     `tile_batch` (tiles per GPU forward) and `prep_workers` (CPU threads building the
     per-tile 3-channel input, overlapping the GPU) are speed knobs only — they do not

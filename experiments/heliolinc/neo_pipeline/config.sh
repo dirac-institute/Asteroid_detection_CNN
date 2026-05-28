@@ -17,7 +17,7 @@ KNOWN=${KNOWN:-$HL/NEO_small/known.csv}            # known-object sightings for 
 SEG_MODEL=${SEG_MODEL:-$REPO/models/segmentation_model.pt}
 
 # ---- stage 1: detect (ADCNN, GPU) -----------------------------------------
-CNN_THR=${CNN_THR:-0.63}             # CNN operating point (FP-matched to the old RF); same as eval
+CNN_THR=${CNN_THR:-0.63}             # CNN operating point; same as the eval notebooks
 N_GPUS=${N_GPUS:-4}
 
 # ---- stage 2: measure (Veres trailed fit, CPU) ----------------------------

@@ -7,8 +7,8 @@ without needing the UNetResSEOrientHough class definition.
 
 Usage:
     python -m ADCNN.inference.export \
-        --ckpt experiments/diffim_runs/pilot_seg/ckpts/best.pt \
-        --out  experiments/diffim_runs/../../models/segmentation_model.pt
+        --ckpt <run_dir>/ckpts/best.pt \
+        --out  models/segmentation_model.pt
 """
 from __future__ import annotations
 

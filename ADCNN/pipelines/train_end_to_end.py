@@ -3,8 +3,7 @@
 This pipeline is the single authoritative source of the deployed **reg2** recipe: every
 training parameter decision lives in :class:`Reg2Recipe` below and is passed explicitly to
 the trainer, so the result does NOT depend on ``ADCNN.training.train``'s argparse defaults.
-The recipe was captured from the deployed model's run config
-(``experiments/diffim_runs/pilot_seg_reg2/config.json``).
+The recipe was captured from the deployed model's training run config.
 
 Stage 1 (NN): trains segmentation model (UNetResSE + orientation + Hough aggregator) with the reg2 recipe on
   the realistic-trail diffim shards (``--data-sources``), then exports the best checkpoint to

@@ -1,7 +1,7 @@
-"""v5 dataset: 3-channel input on top of v4's random-crop + orient supervision.
+"""3-channel random-crop dataset with orientation supervision.
 
 Channels (computed in __getitem__, no regeneration needed):
-  ch0 = signed diffim MAD-normalized, clipped to ±5    (same as v4)
+  ch0 = signed diffim MAD-normalized, clipped to ±5
   ch1 = local standard deviation of ch0, window 11
             (gives per-pixel noise context — bright residuals, chip edges,
             saturation cores have high local std; flat backgrounds have low.
@@ -9,7 +9,8 @@ Channels (computed in __getitem__, no regeneration needed):
             that aren't actually a thin oriented line.)
   ch2 = real_labels > 0 (binary)                       (artefact / DIA mask)
 
-Orientation supervision and ignore mask: identical to v4.
+Orientation supervision (sin2β/cos2β maps from the truth catalog) and the ignore
+mask (real_labels > 0) are computed per tile in __getitem__.
 """
 from __future__ import annotations
 

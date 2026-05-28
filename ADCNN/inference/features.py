@@ -437,7 +437,7 @@ def _add_orient(cand_df, panel_probs, diffims, panel_sigmas,
         else:
             # Footprint principal-axis angle (PCA of the prob>low_thr mask) — ~8-10° MAD vs
             # truth. Makes or_beta true AND makes or_snr_L*/or_flux_L* integrate flux along the
-            # REAL trail axis. Changes these 7 RF features -> RF must be retrained to match.
+            # REAL trail axis. Changes these 7 features -> the stage-2 cutout dataset must be rebuilt.
             ys_m, xs_m = np.nonzero(mask)
             ym = ys_m.astype(np.float64) - ys_m.mean()
             xm = xs_m.astype(np.float64) - xs_m.mean()
@@ -536,7 +536,7 @@ def compute_v2_features(
 
     # Optional cheap gate: only compute the (expensive) matched-filter/orientation features
     # for candidates whose peak NN probability clears `gate_pmax`. Candidates below it are
-    # dropped (the RF would score them ~0 anyway); validate no-regression before enabling.
+    # dropped (the stage-2 CNN would score them ~0 anyway); validate no-regression before enabling.
     if gate_pmax > 0.0:
         cand_df = cand_df[cand_df["max_p"] >= gate_pmax].reset_index(drop=True)
         if not len(cand_df):

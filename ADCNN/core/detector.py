@@ -1,9 +1,8 @@
-"""segmentation model (reg2, deployed) model: UNet + orientation head + Hough-like line aggregator.
+"""segmentation model (reg2, deployed): UNet + orientation head + Hough-like line aggregator.
 
-The aggregator is the architectural ingredient v4 lacked: an explicit
-"vote along a thin oriented line" operator. v4 demonstrated that the raw
-UNet can suppress background, but cannot integrate sub-noise per-pixel
-evidence along a line direction. The aggregator gives it that pathway.
+The aggregator is an explicit "vote along a thin oriented line" operator. A plain
+UNet can suppress background but cannot integrate sub-noise per-pixel evidence along
+a line direction; the aggregator gives it that pathway.
 
 The mechanism:
   raw_seg_logits  : (B, 1, H, W)  — UNet's per-pixel segmentation logits
@@ -17,11 +16,11 @@ The directional kernels are thin lines (1-pixel wide along the angle)
 drawn through the center of an LxL stamp via Bresenham. Sums to 1 per
 kernel so the operation is a true MEAN over the line.
 
-At init, alpha=0 → the head behaves like v4. As training progresses, the
-optimizer can grow alpha if line aggregation helps. The combine is in
-logit space (additive), which matches the way evidence accumulates.
+At init, alpha=0 → the head behaves like a plain UNet + orient head. As training
+progresses, the optimizer can grow alpha if line aggregation helps. The combine is
+in logit space (additive), which matches the way evidence accumulates.
 
-Also exposes `orient_sin, orient_cos` like v4 for the orientation aux loss.
+Also exposes `orient_sin, orient_cos` for the orientation aux loss.
 """
 from __future__ import annotations
 
@@ -102,9 +101,9 @@ class UNetResSEOrientHough(nn.Module):
         # UNet outputs 3 channels: seg_logit, orient_sin (pre-tanh), orient_cos (pre-tanh).
         self.backbone = UNetResSE(in_ch=in_ch, out_ch=3, widths=widths, p_drop=p_drop)
         self.line_agg = LineAggregator(kernel_lens=kernel_lens, n_angles=n_angles)
-        # Learnable scalar mixing weight; init 0 so the network starts as
-        # plain UNet + orient head (≡ v4 with 3-channel input) and grows
-        # the aggregation contribution as training progresses.
+        # Learnable scalar mixing weight; init 0 so the network starts as a
+        # plain UNet + orient head and grows the aggregation contribution as
+        # training progresses.
         self.agg_alpha = nn.Parameter(torch.tensor(0.0))
 
     def forward(self, x: torch.Tensor):

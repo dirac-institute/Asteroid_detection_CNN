@@ -7,7 +7,7 @@ position + on-sky velocity), so linking needs only one detection per night inste
 ```
   butler diffims
         │  STAGE 1  detect      (GPU, asteroid_cnn)   discover_stream.py        — multi-GPU stream
-        ▼          ADCNN segmentation model + RF -> sky detections + de-biased trail endpoints
+        ▼          ADCNN segmentation model + focal cutout CNN -> sky detections + de-biased trail endpoints
   adcnn_dets.csv
         │  STAGE 2  measure     (CPU, lsst_distrib)   veres_measure_catalog.py  — parallel over panels
         ▼          precise per-panel-PSF Veres trailed fit -> accurate sky endpoints
@@ -16,7 +16,7 @@ position + on-sky velocity), so linking needs only one detection per night inste
         ▼          score / Veres-rChiSq / length cuts  + HOOK for reliability+coherence cleaning
   adcnn_dets_clean.csv
         │  STAGE 3b link        (CPU, grid-parallel)  trail_tracklets.py + heliolinc + link_refine
-        ▼          110k-pt hypothesis grid sharded across N cores; minobsnights=2 (fast movers)
+        ▼          ~49k-pt NEO hypothesis grid sharded across N cores; minobsnights=2 (fast movers)
   lr.csv ──────────  STAGE 3c crossmatch  crossmatch.py  -> confirmed.csv (known) + new_candidates.csv (NEW)
 ```
 
@@ -37,7 +37,8 @@ HelioLinC `MINNIGHTS`/`NPT`/grid). Stages are SLURM jobs chained `--dependency=a
 - **Stage 2** parallel over panels (`MEAS_WORKERS`), thread-pinned (1 BLAS thread/worker — avoids the
   oversubscription that tanked throughput), one Butler per worker, bounded L-BFGS-B fit.
 - **Stage 3b** the hypothesis grid is embarrassingly parallel: sharded across `NSHARD` heliolinc
-  processes, merged by `link_refine`. Full 110k-pt grid in ~20 min on 96 cores.
+  processes, merged by `link_refine`. The 110k-pt general grid runs in ~20 min on 96 cores; the
+  default ~49k-pt NEO grid is ~2× faster.
 - To process **more data**: run one pipeline per region/epoch manifest (independent `RUN_NAME`s) —
   fully horizontal.
 

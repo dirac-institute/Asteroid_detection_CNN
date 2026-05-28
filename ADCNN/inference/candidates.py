@@ -6,8 +6,9 @@ stage 2: per-candidate features (max p, area, elongation, bbox center,
          by default; emit all features so we can replace the scorer later
          without re-running the network.
 
-This module is intentionally separate from training. `evaluate.py` calls
-extract_candidates(panel_prob, real_labels=…) and gets a pandas DataFrame.
+This module is intentionally separate from training.
+``features.compute_v2_features`` calls extract_candidates(panel_prob,
+real_labels=…) and gets a pandas DataFrame.
 """
 from __future__ import annotations
 
@@ -157,34 +158,3 @@ def extract_candidates(
         return pd.DataFrame(columns=cols)
     df = pd.DataFrame(rows)
     return df[cols]
-
-
-def candidate_pixel_mask(
-    shape: tuple[int, int],
-    candidate: pd.Series,
-    panel_prob: np.ndarray,
-    *,
-    t_low: float,
-) -> np.ndarray:
-    """Re-derive the binary footprint of one candidate from the original prob
-    map (cheaper than caching all component masks). Used by the object-level
-    matcher in evaluate.py."""
-    y0, y1 = int(candidate["y_min"]), int(candidate["y_max"])
-    x0, x1 = int(candidate["x_min"]), int(candidate["x_max"])
-    sub = panel_prob[y0:y1 + 1, x0:x1 + 1] > t_low
-    labels, n = ndi.label(sub)
-    if n == 0:
-        return np.zeros(shape, dtype=bool)
-    # The candidate's centroid (relative to bbox) maps to one label.
-    cy = int(round(candidate["y_centroid"] - y0))
-    cx = int(round(candidate["x_centroid"] - x0))
-    cy = int(np.clip(cy, 0, sub.shape[0] - 1))
-    cx = int(np.clip(cx, 0, sub.shape[1] - 1))
-    target_label = labels[cy, cx]
-    if target_label == 0:
-        # Pick the largest component as fallback.
-        sizes = ndi.sum(sub, labels, index=np.arange(1, n + 1))
-        target_label = int(np.argmax(sizes) + 1)
-    out = np.zeros(shape, dtype=bool)
-    out[y0:y1 + 1, x0:x1 + 1] = (labels == target_label)
-    return out

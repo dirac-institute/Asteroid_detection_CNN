@@ -1,12 +1,13 @@
 """Crossmatch HelioLinC-linked tracks against a known-object catalog -> CONFIRMED + NEW.
 
 A linked track (a cluster in ``lr.csv``, one row per clustered detection) is a real moving
-object whose orbit was consistent across >=3 nights. We label each track by matching its
+object whose orbit was consistent across multiple nights (the linker's minobsnights gate;
+2 for fast NEOs). We label each track by matching its
 detections, in (RA, Dec) and time, to a catalog of *known* object sightings:
 
   * CONFIRMED  -- a single known ObjID accounts for >= `min_frac` of the track's detections
                   (we re-discovered a catalogued asteroid from ADCNN detections alone).
-  * NEW        -- a quality track (PURE / low RMS / >=3 nights) that matches no known object:
+  * NEW        -- a quality track (PURE / low RMS / multi-night) that matches no known object:
                   a candidate previously-undiscovered asteroid, to be vetted.
 
 Default known catalog = the per-sighting truth for the test field (built from the DP2 SSObject

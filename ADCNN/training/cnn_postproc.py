@@ -127,20 +127,6 @@ def build_cutout_dataset(seg_ckpt, h5_path, csv_path, out_dir, *, k: int = CUTOU
     print(f"CUTOUTS DONE: {len(done)} panels -> {out}/ ({n_parts} parts)", flush=True)
 
 
-def load_cutout_parts(path):
-    """Load a cutout dataset: a directory of ``part_*.npz`` OR a single ``.npz``. Returns a dict
-    with concatenated X, y, panel, xy arrays."""
-    p = Path(path)
-    files = sorted(p.glob("part_*.npz")) if p.is_dir() else [p]
-    keys = ("X", "y", "panel", "xy")
-    acc = {k: [] for k in keys}
-    for fn in files:
-        z = np.load(fn, allow_pickle=True)
-        for k in keys:
-            acc[k].append(z[k])
-    return {k: np.concatenate(v) for k, v in acc.items()}
-
-
 # ---------------------------------------------------------------------------
 # Focal-loss training
 # ---------------------------------------------------------------------------
@@ -248,9 +234,9 @@ def train_cnn_from_val(seg_ckpt, val_h5, val_csv, val_panel_ids, out_pt, *,
     """Full stage-2 CNN training: load the TorchScript segmentation model, build labelled cutouts on the held-out
     val panels (in-memory), fit the focal CNN, and save the state_dict to `out_pt`.
 
-    Mirrors the leakage-safe contract of the old ``train_rf_from_val``: the val panels' truth
-    catalog image_ids are remapped into the 0..N stacking order before injection-overlap labelling
-    (so it works even when the val panels are a high-index slice of a shared shard h5)."""
+    Leakage-safe contract: the val panels' truth catalog image_ids are remapped into the
+    0..N stacking order before injection-overlap labelling (so it works even when the val
+    panels are a high-index slice of a shared shard h5)."""
     import torch
     dev = torch.device(device if torch.cuda.is_available() else "cpu")
     model = torch.jit.load(str(seg_ckpt), map_location=dev).eval()
