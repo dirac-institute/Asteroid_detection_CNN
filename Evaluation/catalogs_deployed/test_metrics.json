@@ -1,0 +1,13 @@
+{
+  "TP": 4202,
+  "FP": 26927,
+  "FN": 1118,
+  "recall": 0.7898496240601504,
+  "fp_per_panel": 101.22932330827068,
+  "n_panels": 266,
+  "set": "test",
+  "seg_model": "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/models/segmentation_model.pt",
+  "cnn": "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/models/cnn_postproc.pt",
+  "cnn_thr": 0.63,
+  "tol_px": 20.0
+}
