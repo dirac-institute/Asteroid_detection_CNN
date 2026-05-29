@@ -260,13 +260,19 @@ class DiffimConcatDataset(Dataset):
     def __init__(self, sources, *, tile=128, clip=5.0,
                  n_pos_anchors_per_epoch=3000, n_neg_anchors_per_epoch=900,
                  stk_balance=0.6, anchor_jitter=48, seed=0, augment=False,
-                 intensity_aug=False):
+                 intensity_aug=False, orient_cache_size=24):
         # Weight each source PROPORTIONAL to its panel count so every panel is sampled
         # at the same rate -> identical to one combined h5. (Equal-per-source would
         # over-sample a smaller shard's panels, e.g. a 685-panel shard vs 1100.)
         dfs = [(h5, pd.read_csv(csv) if isinstance(csv, str) else csv) for h5, csv in sources]
         npans = [int(df["image_id"].nunique()) for _, df in dfs]
         ntot = max(1, sum(npans))
+        # Split the orientation-cache budget ACROSS sources so the TOTAL cached maps per DataLoader
+        # worker stays ~the single-source budget. Giving each of N shards the full orient_cache_size
+        # would cache N x the maps (tens of MB each) and OOM the loader. Cache size only affects
+        # memoization, never the values returned (a miss recomputes the identical map), so the
+        # trained model is unchanged.
+        per_sub_cache = max(1, int(orient_cache_size) // max(1, len(dfs)))
         self.subs = []
         for i, ((h5, df), npan) in enumerate(zip(dfs, npans)):
             frac = npan / ntot
@@ -275,6 +281,7 @@ class DiffimConcatDataset(Dataset):
                 n_pos_anchors_per_epoch=max(1, round(n_pos_anchors_per_epoch * frac)),
                 n_neg_anchors_per_epoch=max(1, round(n_neg_anchors_per_epoch * frac)),
                 stk_balance=stk_balance, anchor_jitter=anchor_jitter,
+                orient_cache_size=per_sub_cache,
                 seed=seed + 13 * i, augment=augment)
             sub.intensity_aug = bool(intensity_aug)
             self.subs.append(sub)

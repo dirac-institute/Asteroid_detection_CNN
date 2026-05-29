@@ -4,7 +4,7 @@
 #SBATCH --partition=ampere
 #SBATCH --gres=gpu:a100:1
 #SBATCH --cpus-per-task=16
-#SBATCH --mem=128G
+#SBATCH --mem=400G
 #SBATCH --time=1-00:00:00
 #SBATCH --output=%x_%j.log
 #SBATCH --requeue

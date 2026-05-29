@@ -117,6 +117,10 @@ def main():
     ap.add_argument("--n-val-panels", type=int, default=30)
     ap.add_argument("--tile", type=int, default=128)
     ap.add_argument("--epochs", type=int, default=40)
+    ap.add_argument("--patience", type=int, default=8,
+                    help="early-stop after this many epochs with no val_pixel_auc improvement (the best "
+                         "checkpoint is already saved, so the exported model is unchanged — this only "
+                         "skips the non-improving tail). <=0 disables (run the full --epochs).")
     ap.add_argument("--batch-size", type=int, default=24,
                     help="reg2 used 24. Kept modest because the line aggregator is the "
                          "GPU-memory hotspot (3 multi-scale convs at full resolution).")
@@ -199,7 +203,8 @@ def main():
             n_pos_anchors_per_epoch=args.n_pos_anchors_per_epoch,
             n_neg_anchors_per_epoch=args.n_neg_anchors_per_epoch,
             stk_balance=args.stk_balance, anchor_jitter=args.anchor_jitter,
-            seed=args.seed, augment=args.augment, intensity_aug=bool(args.intensity_aug))
+            seed=args.seed, augment=args.augment, intensity_aug=bool(args.intensity_aug),
+            orient_cache_size=args.orient_cache_size)
         # val from a held-out source (--data-h5/--data-csv), disjoint from --data-sources.
         vcsv = pd.read_csv(args.data_csv)
         vp = sorted(vcsv["image_id"].unique())[: args.n_val_panels]
@@ -315,6 +320,7 @@ def main():
         ema.update = _filtered_update
 
     best_metric = -1.0
+    best_epoch = 0
     history: list[dict] = []
     for epoch in range(1, args.epochs + 1):
         train_ds.set_epoch(epoch)
@@ -387,6 +393,7 @@ def main():
         metric = float(val_metrics.get("val_pixel_auc", float("nan")))
         if math.isfinite(metric) and metric > best_metric:
             best_metric = metric
+            best_epoch = epoch
             torch.save({
                 "model": model.state_dict(),
                 "ema": ema.state_dict(),
@@ -398,9 +405,18 @@ def main():
 
         (run_dir / "metrics" / "history.json").write_text(json.dumps(history, indent=2))
 
+        # Early stop once val_pixel_auc hasn't improved for --patience epochs. best.pt is already the
+        # best checkpoint (model selection), so this only skips the non-improving tail; the exported
+        # model is identical to running the full --epochs. --patience<=0 disables it.
+        if args.patience > 0 and best_epoch > 0 and (epoch - best_epoch) >= args.patience:
+            log(f"  early stop: no val_pixel_auc improvement for {args.patience} epochs "
+                f"(best={best_metric:.4f} @ep{best_epoch:02d}); stopping at ep{epoch:02d}/{args.epochs}")
+            break
+
     summary = {
         "best_val_pixel_auc": best_metric,
-        "epochs_run": args.epochs,
+        "best_epoch": best_epoch,
+        "epochs_run": epoch,
         "final_agg_alpha": float(model.agg_alpha),
         "train_panels": (len(train_panels) if train_panels is not None else None),
         "train_anchors_per_epoch": len(train_ds),
