@@ -2,9 +2,9 @@
 #SBATCH --job-name=adcnn-eval-e2e
 #SBATCH --account=kipac:kipac
 #SBATCH --partition=ampere
-#SBATCH --gres=gpu:a100:1
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=128G
+#SBATCH --gres=gpu:a100:4
+#SBATCH --cpus-per-task=32
+#SBATCH --mem=256G
 #SBATCH --time=06:00:00
 #SBATCH --output=%x_%j.log
 #SBATCH --requeue
