@@ -12,11 +12,12 @@ panels, ~1.4 s/panel on the candidate-dense real set — i.e. a full ~189-detect
 in ~3–4 min, images→catalog (NN + features + CNN all included, postprocessing hidden behind
 the GPU forward).
 
-    python -m ADCNN.pipelines.make_eval_catalogs                 # all default sets
-    python -m ADCNN.pipelines.make_eval_catalogs --sets test_5sigma test_real
+    python -m ADCNN.pipelines.make_eval_catalogs                 # the simulated `test` set
+    python -m ADCNN.pipelines.make_eval_catalogs --sets test test_real
 """
 from __future__ import annotations
 import argparse
+import json
 import time
 from pathlib import Path
 
@@ -27,7 +28,10 @@ from ADCNN.inference.cnn_postproc import CNN_DEFAULT_THR
 from ADCNN.evaluation.catalog_match import evaluate_catalog
 
 REPO = Path(__file__).resolve().parents[2]
-DEFAULT_SETS = ["test_5sigma", "test_4sigma", "test_3sigma", "test_real"]
+# The simulated test set is now ONE build-once/detect-many set (`test.h5`/`test.csv`): the NN runs
+# once and its metrics are sigma-independent, so a single inference covers all stack-sigma baselines
+# (the per-sigma stack comparison lives in the evaluation notebook).
+DEFAULT_SETS = ["test"]
 
 
 def main():
@@ -52,15 +56,20 @@ def main():
     data_root = Path(a.data_root)
 
     for name in a.sets:
-        d = data_root / name
-        h5 = d / "test.h5"
+        # Accept BOTH layouts: flat (<data_root>/<name>.h5 + <name>.csv, from make_sim_data) and
+        # the legacy subdir (<data_root>/<name>/test.h5 + test.csv).
+        flat_h5 = data_root / f"{name}.h5"
+        if flat_h5.exists():
+            h5, truth_csv, panels = flat_h5, data_root / f"{name}.csv", data_root / f"{name}_panels.csv"
+        else:
+            d = data_root / name
+            h5, truth_csv, panels = d / "test.h5", d / "test.csv", d / "panels.csv"
         if not h5.exists():
             print(f"[skip] {name}: no {h5}", flush=True)
             continue
         import h5py
         with h5py.File(h5, "r") as _f:        # true panel count for the fp_per_panel denominator
             n_panels = int(_f["images"].shape[0])
-        panels = d / "panels.csv"
         t0 = time.time()
         cfg = InferenceConfig(cnn_thr=a.cnn_thr, gate_pmax=a.gate_pmax, tile_batch=a.tile_batch)
         cat = build_detection_catalog_multigpu(
@@ -71,9 +80,11 @@ def main():
         cat.to_csv(out_csv, index=False)
         dt = time.time() - t0
 
-        truth_csv = d / "test.csv"
         if truth_csv.exists():
             c, _ = evaluate_catalog(cat, truth_csv, tol_px=a.tol_px, n_panels=n_panels)
+            metrics = {k: c[k] for k in ("TP", "FP", "FN", "recall", "fp_per_panel", "n_panels") if k in c}
+            metrics.update(set=name, seg_model=a.seg_model, cnn=a.cnn, cnn_thr=a.cnn_thr, tol_px=a.tol_px)
+            (out / f"{name}_metrics.json").write_text(json.dumps(metrics, indent=2))
             print(f"[{name}] {len(cat)} det -> {out_csv.name} | TP={c['TP']} FP={c['FP']} FN={c['FN']} "
                   f"recall={c['recall']:.3f} FP/panel={c['fp_per_panel']:.1f} | "
                   f"{dt:.0f}s ({dt/max(c['n_panels'],1):.2f}s/panel)", flush=True)

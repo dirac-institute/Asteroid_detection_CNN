@@ -200,8 +200,8 @@ def main():
                               thr_panel_ids=sorted(pd.read_csv(a.val2_csv)["image_id"].unique()))
                 print(f"[stage2-cnn] threshold on val2 = {a.val2_h5}", flush=True)
             print(f"[stage2-cnn] training on all {len(cnn_ids)} panels of {a.cnn_train_h5}", flush=True)
-            train_cnn_from_val(scripted, a.cnn_train_h5, a.cnn_train_csv, cnn_ids, cnn_out,
-                               epochs=recipe.cnn_epochs, fp_cap=recipe.cnn_fp_cap, **thr_kw)
+            _, cnn_info = train_cnn_from_val(scripted, a.cnn_train_h5, a.cnn_train_csv, cnn_ids, cnn_out,
+                                             epochs=recipe.cnn_epochs, fp_cap=recipe.cnn_fp_cap, **thr_kw)
         else:
             # Default: the EXACT panels stage 1 held out (split.json) so the FP-filter CNN is never
             # built on panels the segmentation model trained on.
@@ -210,9 +210,15 @@ def main():
                 val_ids = json.loads(split.read_text())["val_panels"]
             else:
                 val_ids = sorted(pd.read_csv(a.val_csv)["image_id"].unique())[: recipe.n_val_panels]
-            train_cnn_from_val(scripted, a.val_h5, a.val_csv, val_ids, cnn_out,
-                               epochs=recipe.cnn_epochs, fp_cap=recipe.cnn_fp_cap)
-        print(f"[stage2-cnn] done -> {cnn_out}", flush=True)
+            _, cnn_info = train_cnn_from_val(scripted, a.val_h5, a.val_csv, val_ids, cnn_out,
+                                             epochs=recipe.cnn_epochs, fp_cap=recipe.cnn_fp_cap)
+        # Persist the operating threshold (recall@0.95 on val2) + AUC next to the weights so evaluation
+        # and deployment score THIS model at its own operating point instead of the baked-in default.
+        sidecar = cnn_out.with_suffix(".json")
+        sidecar.write_text(json.dumps(cnn_info, indent=2))
+        print(f"[stage2-cnn] done -> {cnn_out} "
+              f"(threshold={cnn_info.get('threshold')} auc={cnn_info.get('holdout_auc')} -> {sidecar.name})",
+              flush=True)
     print("END-TO-END TRAINING DONE", flush=True)
 
 

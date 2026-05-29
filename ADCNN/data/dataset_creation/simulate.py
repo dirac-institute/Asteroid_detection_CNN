@@ -44,7 +44,9 @@ import os
 import random
 import traceback
 import warnings
+import math
 from multiprocessing import Lock, Manager, Value
+from types import SimpleNamespace
 from pathlib import Path
 from typing import Any, List, Sequence
 
@@ -113,20 +115,27 @@ from lsst.geom import Point2D
 from lsst.pipe.base import NoWorkFound, UnprocessableDataError, UpstreamFailureNoWorkFound
 from lsst.source.injection.inject_exposure import ExposureInjectTask
 
-# Stack-side control-flow exceptions that subclass BaseException (NOT Exception)
-# in lsst.pipe.base._status. They signal "this quantum has no work / can't be
-# processed" rather than a code bug — for our use case we want to log and
-# skip the pair, not crash the whole 850-pair run. The four-pair pilot lost
-# pair 198/850 to a NoWorkFound("Insufficient Template Coverage. (8.2% < 10%)")
-# until this was added.
+# InsufficientKernelSourcesError is raised by AlardLuptonSubtractTask when a panel has too few PSF-
+# matching kernel sources (config minKernelSources=3 — not enough good isolated stars to solve the AL
+# kernel). It must be caught IN-PROCESS: it is an lsst.pipe.base AlgorithmError whose __init__ takes
+# keyword-only required args, so Python's default exception pickling (which reconstructs via positional
+# args) raises TypeError on unpickle. If it escaped a worker, the parent could not unpickle it and the
+# whole ProcessPool would die with BrokenProcessPool. Catching it here makes it a clean panel skip.
+try:
+    from lsst.ip.diffim.subtractImages import InsufficientKernelSourcesError as _InsufficientKernelSrc
+    _EXTRA_SKIP_EXCEPTIONS = (_InsufficientKernelSrc,)
+except Exception:
+    _EXTRA_SKIP_EXCEPTIONS = ()
+
+# LSST-stack control-flow exceptions that legitimately mean "skip this panel" (template-coverage
+# shortfall, too-few kernel sources, no work for this quantum). NOT a place for bare Exception: that
+# would hide genuine bugs behind a silently-short dataset. Unexpected errors are handled by worker()'s
+# safety net, which surfaces them as visible errors without killing the pool.
 _SKIP_EXCEPTIONS = (
-    # ONLY the LSST-stack control-flow exceptions that legitimately mean "skip this pair" (e.g. a
-    # template-coverage shortfall). Do NOT add bare Exception here: that turns a genuine bug into a
-    # silently-skipped pair and yields an empty/short dataset with no failure signal.
     NoWorkFound,
     UnprocessableDataError,
     UpstreamFailureNoWorkFound,
-)
+) + _EXTRA_SKIP_EXCEPTIONS
 
 from ADCNN.utils.helpers import draw_one_line
 from ADCNN.data.dataset_creation.photometry import (
@@ -558,7 +567,20 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
                            source_type, ref_dataId, skymap, stage3_collection,
                            seed=None, debug=False, mag_mode="psf_mag",
                            psf_template="image", detection_threshold=5.0,
-                           measueTrails=False):
+                           measure_trails=False, stack_detection_thresholds=None,
+                           injection_detection_threshold=None):
+    """Inject + difference a single detector, then label it at the stack-detection threshold(s).
+
+    The expensive work — the clean and injected PSF-matching subtractions and the trail injection —
+    runs exactly once per panel; only the DIA detection + footprint labelling varies with sigma, so
+    that is the only step repeated. ``stack_detection_thresholds`` selects the return shape:
+
+      - ``None``  -> single-sigma: returns ``(True, image, mask, real_labels, catalog)`` (or a
+                     7-tuple when ``debug``).
+      - a list    -> multi-sigma: the injection placement is fixed at one reference sigma so the
+                     IMAGE is identical across the sweep, and detection is re-run per sigma. Returns
+                     ``(True, image, mask, {sigma: (real_labels, catalog)})``.
+    """
     try:
         if seed is None:
             seed = np.random.randint(0, 10000)
@@ -573,60 +595,57 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
             stage3_collection=stage3_collection,
         )
 
-        # 2. Clean diffim subtraction.
+        # Build at THIS panel's own pixel dimensions (LSSTCam mixes ITL 4072x4000 and e2v 4096x4004
+        # CCDs); the h5 writer later pads every panel to the common max frame so both geometries are
+        # kept. (The passed-in `dimensions` is only the h5 target; injection/labels use the real size.)
+        _bb = pvi.getBBox()
+        dimensions = SimpleNamespace(x=int(_bb.getWidth()), y=int(_bb.getHeight()))
+
+        # 2. Clean diffim subtraction (ONCE; shared by every requested sigma).
         sub_clean = run_subtract(template=template, science=pvi, sources=sources)
         diffim_clean = sub_clean.difference
 
-        # 3. Pre-injection sources = real residuals on the clean diffim.
-        det_clean = run_detect_diffim(
-            science=pvi,
-            matchedTemplate=sub_clean.matchedTemplate,
-            difference=diffim_clean,
-            threshold=detection_threshold,
-            measueTrails=measueTrails,
-        )
-        pre_injection_Src = det_clean.diaSources
+        single = stack_detection_thresholds is None
+        sigmas = [float(detection_threshold)] if single else [float(s) for s in stack_detection_thresholds]
+        # Injection placement / forbidden mask are fixed at ONE reference sigma so the injected image
+        # is identical across the sweep (default = the single sigma, or the deepest for a multi build).
+        inj_thr = (float(injection_detection_threshold) if injection_detection_threshold is not None
+                   else (float(detection_threshold) if single else max(sigmas)))
 
-        # 4. Forbidden mask from PVI mask + clean-diffim residual footprints.
-        forbidden = build_forbidden_mask(pvi, pre_injection_Src, dimensions)
+        # Clean-diffim detections, cached by sigma: the forbidden mask and each sigma's real-residual
+        # labels come from these, so a sigma shared between them is detected only once.
+        _clean: dict = {}
+        def detect_clean(thr):
+            thr = float(thr)
+            if thr not in _clean:
+                _clean[thr] = run_detect_diffim(
+                    science=pvi, matchedTemplate=sub_clean.matchedTemplate,
+                    difference=diffim_clean, threshold=thr, measure_trails=measure_trails,
+                ).diaSources
+            return _clean[thr]
 
-        # 5. Generate injection catalog using PVI photometry/PSF/WCS.
+        # 3-5. Forbidden mask (reference sigma) -> injection catalog (placement identical for all sigmas).
+        forbidden = build_forbidden_mask(pvi, detect_clean(inj_thr), dimensions)
         injection_catalog = generate_one_line(
             n_inject, trail_length, mag, beta, ref, dimensions, seed, pvi,
-            mag_mode=mag_mode, psf_template=psf_template,
-            forbidden_mask=forbidden,
+            mag_mode=mag_mode, psf_template=psf_template, forbidden_mask=forbidden,
         )
 
-        # n_inject==0: real-empty-background mode. Skip the inject/re-subtract/
-        # re-detect path (ExposureInjectTask rejects empty catalogs); the
-        # "injected" diffim IS the clean diffim, truth mask is all zeros, and
-        # the panel still carries real_labels from pre-injection residuals.
+        # 6-9. n_inject==0: real-empty-background mode. Skip the inject/re-subtract path
+        # (ExposureInjectTask rejects empty catalogs); the "injected" diffim IS the clean diffim and
+        # the truth mask is all zeros (the panel still carries real_labels from residuals).
         if n_inject == 0:
             diffim_inj = diffim_clean
+            pvi_injected = None
             mask = np.zeros((dimensions.y, dimensions.x), dtype=np.uint16)
-            real_labels = footprints_to_label_mask(pre_injection_Src, dimensions, dtype=np.uint16)
-            matched_fp_mask = None
+            def detect_inj(thr):
+                return None
         else:
-            # 6. Inject into a CLONE so the clean PVI stays around for later
-            # (and so the same `sources` give the same kernel-candidate set on
-            # both subtractions).
+            # Inject into a CLONE (clean PVI kept; same `sources` -> same kernel candidates on both
+            # subtractions). Inject + re-subtract + draw the truth mask ONCE.
             pvi_injected = inject(pvi.clone(), injection_catalog)
-
-            # 7. Injected diffim subtraction with the SAME sources.
             sub_inj = run_subtract(template=template, science=pvi_injected, sources=sources)
             diffim_inj = sub_inj.difference
-
-            # 8. Post-injection sources on the injected diffim.
-            det_inj = run_detect_diffim(
-                science=pvi_injected,
-                matchedTemplate=sub_inj.matchedTemplate,
-                difference=diffim_inj,
-                threshold=detection_threshold,
-                measueTrails=measueTrails,
-            )
-            post_injection_Src = det_inj.diaSources
-
-            # 9. Drawn-line truth (identical to direct-image flow).
             mask = np.zeros((dimensions.y, dimensions.x), dtype=np.uint16)
             for i, row in enumerate(injection_catalog):
                 psf_width = pvi_injected.psf.getLocalKernel(Point2D(row["x"], row["y"])).getWidth()
@@ -634,42 +653,55 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
                     mask, [row["x"], row["y"]], row["beta"], row["trail_length"],
                     true_value=i + 1, line_thickness=int(psf_width / 2),
                 )
+            _inj: dict = {}
+            def detect_inj(thr):
+                thr = float(thr)
+                if thr not in _inj:
+                    _inj[thr] = run_detect_diffim(
+                        science=pvi_injected, matchedTemplate=sub_inj.matchedTemplate,
+                        difference=diffim_inj, threshold=thr, measure_trails=measure_trails,
+                    ).diaSources
+                return _inj[thr]
 
-            # 10. Crossmatch pre vs post; mark recovered injections by footprint
-            # overlap with drawn truth.
-            injection_catalog, matched_fp_mask = stack_hits_by_footprints(
-                post_src=crossmatch_catalogs(pre_injection_Src, post_injection_Src),
-                calexp_pre=pvi,
-                calexp_post=pvi_injected,
-                dimensions=dimensions,
-                truth_id_mask=mask,
-                injection_catalog=injection_catalog,
-                overlap_minpix=1,
-                overlap_frac=0.0,
-                return_matched_fp_masks=debug,
+        # 10-11. Per-sigma labelling: stack-detection (post-injection footprint overlap with the drawn
+        # truth) + real-residual labels (pre-injection footprints). The catalog is copied per sigma so
+        # each carries its own stack_detection columns.
+        per_sigma = {}
+        for s in sigmas:
+            pre_s = detect_clean(s)
+            real_labels_s = footprints_to_label_mask(pre_s, dimensions, dtype=np.uint16)
+            if n_inject == 0:
+                per_sigma[s] = (real_labels_s, injection_catalog, None)
+                continue
+            cat_s = injection_catalog.copy()
+            cat_s, matched_fp_mask = stack_hits_by_footprints(
+                post_src=crossmatch_catalogs(pre_s, detect_inj(s)),
+                calexp_pre=pvi, calexp_post=pvi_injected, dimensions=dimensions,
+                truth_id_mask=mask, injection_catalog=cat_s,
+                overlap_minpix=1, overlap_frac=0.0,
+                return_matched_fp_masks=debug and single,
             )
+            per_sigma[s] = (real_labels_s, cat_s, matched_fp_mask)
 
-            # real_labels = footprints of pre-injection diffim residuals.
-            real_labels = footprints_to_label_mask(pre_injection_Src, dimensions, dtype=np.uint16)
+        img = diffim_inj.image.array.astype("float32")
+        mask_b = mask.astype("bool")
+        if not single:
+            return True, img, mask_b, {s: (rl, cat) for s, (rl, cat, _) in per_sigma.items()}
 
-        # 11. Image written to HDF5 = the injected DIFFIM (1-channel float32).
+        # single-sigma: 5-tuple, or 7-tuple when debug is set.
+        real_labels, catalog, matched_fp_mask = per_sigma[sigmas[0]]
         if not debug:
-            return True, diffim_inj.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog
-        else:
-            det_mask = None
-            mplanes = diffim_inj.mask.getMaskPlaneDict()
-            if "DETECTED" in mplanes:
-                det_bit = diffim_inj.mask.getPlaneBitMask("DETECTED")
-                det_mask = (diffim_inj.mask.array & det_bit) != 0
-            det_neg_mask = None
-            if "DETECTED_NEGATIVE" in mplanes:
-                detn_bit = diffim_inj.mask.getPlaneBitMask("DETECTED_NEGATIVE")
-                det_neg_mask = (diffim_inj.mask.array & detn_bit) != 0
-            matched_fp_masks = (
-                np.any(np.stack(matched_fp_mask, axis=-1), axis=-1)
-                if matched_fp_mask is not None else None
-            )
-            return True, diffim_inj.image.array.astype("float32"), mask.astype("bool"), real_labels, injection_catalog, det_mask, matched_fp_masks
+            return True, img, mask_b, real_labels, catalog
+        det_mask = None
+        mplanes = diffim_inj.mask.getMaskPlaneDict()
+        if "DETECTED" in mplanes:
+            det_bit = diffim_inj.mask.getPlaneBitMask("DETECTED")
+            det_mask = (diffim_inj.mask.array & det_bit) != 0
+        matched_fp_masks = (
+            np.any(np.stack(matched_fp_mask, axis=-1), axis=-1)
+            if matched_fp_mask is not None else None
+        )
+        return True, img, mask_b, real_labels, catalog, det_mask, matched_fp_masks
     except _SKIP_EXCEPTIONS as e:
         return False, ref_dataId, repr(e), traceback.format_exc()
 
@@ -678,34 +710,81 @@ def one_detector_injection(n_inject, trail_length, mag, beta, repo, coll, dimens
 # Worker / pool
 # ======================================================================================
 
+def _pad(a, shape):
+    """Place a 2-D panel array top-left in a zero/false `shape`=(H,W) frame (pad), or crop if larger.
+    LSSTCam mixes ITL (4072x4000) and e2v (4096x4004) CCDs; padding every panel to the common max
+    frame keeps BOTH geometries in one fixed-size h5 instead of dropping the minority vendor. The
+    injected trails live in the real top-left region, so pixel coordinates are unchanged."""
+    H, W = int(shape[0]), int(shape[1])
+    if a.shape == (H, W):
+        return a
+    out = np.zeros((H, W), dtype=a.dtype)
+    h, w = min(a.shape[0], H), min(a.shape[1], W)
+    out[:h, :w] = a[:h, :w]
+    return out
+
+
+def _sigma_tag(s):
+    """5.0 -> '5', 4.5 -> '4.5'  (suffix for per-sigma h5 datasets / CSV columns)."""
+    s = float(s)
+    return str(int(s)) if s.is_integer() else str(s)
+
+
+_STACK_COLS = ("stack_detection", "stack_mag", "stack_mag_err", "stack_snr")
+
+
 def worker(args):
     (counters, dataId, repo, coll, dims, lock, h5path, csvpath, number, trail_length,
      magnitude, beta, source_type, global_seed, mag_mode, psf_template,
-     detection_threshold, measueTrails, skymap, stage3_collection) = args
+     detection_threshold, measure_trails, skymap, stage3_collection) = args
+    # A list in the threshold slot selects the multi-sigma build (one panel, labelled at each sigma).
+    multi = isinstance(detection_threshold, (list, tuple))
     seed = (int(global_seed) * 1_000_003 + int(dataId["visit"]) * 1_003 + int(dataId["detector"])) & 0xFFFFFFFF
     try:
         res = one_detector_injection(
             number, trail_length, magnitude, beta, repo, coll, dims, source_type,
             dataId, skymap=skymap, stage3_collection=stage3_collection, seed=seed,
-            mag_mode=mag_mode, psf_template=psf_template,
-            detection_threshold=detection_threshold, measueTrails=measueTrails,
+            mag_mode=mag_mode, psf_template=psf_template, measure_trails=measure_trails,
+            detection_threshold=(5.0 if multi else detection_threshold),
+            stack_detection_thresholds=(detection_threshold if multi else None),
         )
         if res[0] is False:
             return ("err", res[1], res[2], res[3])
-        _, img, mask, real_labels, catalog = res
-        # Write index assigned under the lock, only on success -> successful panels land
-        # contiguously (0..n-1) with NO gaps; the h5 is truncated to the final count after the
-        # pool drains. A panel that fails to subtract is simply dropped (its failure is repeatable,
-        # so the set of panels + their injections stays deterministic across reruns).
+        # Index assigned under the lock, only on success -> successful panels land contiguously
+        # (0..n-1) with NO gaps; the h5 is truncated to the final count after the pool drains. A
+        # panel that fails to subtract is simply dropped (its failure is repeatable, so the set of
+        # panels + their injections stays deterministic across reruns).
         with lock:
             idx = int(counters[h5path]); counters[h5path] = idx + 1
-            with h5py.File(h5path, "a") as f:
-                f["images"][idx] = img
-                f["masks"][idx] = mask
-                if "real_labels" in f:
-                    f["real_labels"][idx] = real_labels
-
-            df = catalog_to_pandas(catalog, measueTrails=measueTrails)
+            if not multi:
+                _, img, mask, real_labels, catalog = res
+                with h5py.File(h5path, "a") as f:
+                    tgt = f["images"].shape[1:]                 # pad this panel to the common h5 frame
+                    f["images"][idx] = _pad(img, tgt)
+                    f["masks"][idx] = _pad(mask, tgt)
+                    if "real_labels" in f:
+                        f["real_labels"][idx] = _pad(real_labels, tgt)
+                df = catalog_to_pandas(catalog, measure_trails=measure_trails)
+            else:
+                _, img, mask, per_sigma = res
+                tags = sorted(per_sigma, reverse=True)             # e.g. [5.0, 4.0, 3.0]
+                with h5py.File(h5path, "a") as f:
+                    tgt = f["images"].shape[1:]                    # pad this panel to the common h5 frame
+                    f["images"][idx] = _pad(img, tgt)
+                    f["masks"][idx] = _pad(mask, tgt)
+                    # plain real_labels = deepest sigma (= injection-reference = training sigma) -> the
+                    # segmentation model's DIA-mask input channel, matching how it was trained.
+                    f["real_labels"][idx] = _pad(per_sigma[tags[0]][0], tgt)
+                    for s in tags:
+                        f[f"real_labels_{_sigma_tag(s)}sigma"][idx] = _pad(per_sigma[s][0], tgt)
+                # ONE row-block: shared truth columns once + the per-sigma stack_* columns suffixed.
+                df = catalog_to_pandas(per_sigma[tags[0]][1], measure_trails=measure_trails)
+                df = df.drop(columns=[c for c in _STACK_COLS if c in df.columns])
+                for s in tags:
+                    cs = catalog_to_pandas(per_sigma[s][1], measure_trails=measure_trails)
+                    for c in _STACK_COLS:
+                        if c in cs.columns:
+                            df[f"{c}_{_sigma_tag(s)}sigma"] = cs[c].values
             df["image_id"] = idx
             file_exists = os.path.exists(csvpath)
             df.to_csv(csvpath, mode=("a" if file_exists else "w"),
@@ -715,6 +794,13 @@ def worker(args):
     except _SKIP_EXCEPTIONS:
         tb = traceback.format_exc()
         return ("err", -1, dataId, tb)
+    except Exception as e:
+        # SAFETY NET: never let an exception cross the ProcessPool boundary as a pickled object. Several
+        # LSST AlgorithmError/RepeatableQuantumError subclasses have keyword-only __init__ and FAIL to
+        # unpickle in the parent, which silently kills the whole pool (BrokenProcessPool). Re-raise as a
+        # plain (picklable) RuntimeError carrying the type+message: the build then prints + counts it as
+        # a visible "worker error" (a flood still trips the per-set >=50% guard), and the pool survives.
+        raise RuntimeError(f"{type(e).__module__}.{type(e).__name__}: {str(e)[:300]}") from None
 
 
 def _key_from_dataId(d):
@@ -738,6 +824,7 @@ def select_good_refs_random_check(
     pool_size: int = 5000,
     max_checks: int = 200000,
     check_refs: bool = True,
+    filter_dims: bool = True,
     exclude_keys: set | None = None,
     min_ecliptic_lat: float = 0.0,
     verbose: bool = False,
@@ -860,7 +947,7 @@ def select_good_refs_random_check(
             if pc is None:
                 return False
 
-            if dim_x is not None and dim_y is not None:
+            if filter_dims and dim_x is not None and dim_y is not None:
                 try:
                     dims_local = local_b.get(
                         "preliminary_visit_image.dimensions",
@@ -964,46 +1051,106 @@ def _partition(keys, sizes, seed):
 
 
 def _build_set(dataids, *, name, repo, coll, dims, save_path, number, trail_length, magnitude,
-               beta, mag_mode, psf_template, stack_detection_threshold, measueTrails, seed,
-               skymap, stage3_collection, parallel, chunks):
-    """Inject + difference + truth-label every panel in `dataids` into <save_path>/<name>.{h5,csv},
-    reusing the validated per-panel `worker`/`one_detector_injection` unchanged. The h5 is created
-    RESIZABLE and truncated to the count actually built, so a panel that fails to subtract leaves
-    NO empty slot (its failure is repeatable, so the panel set + injections stay deterministic)."""
+               beta, mag_mode, psf_template, measure_trails, seed, skymap, stage3_collection,
+               parallel, chunks, stack_detection_threshold=None,
+               stack_detection_thresholds=None, compress=False, target=None):
+    """Inject + difference + truth-label every panel in `dataids` into <save_path>/<name>.{h5,csv}
+    via the per-panel `worker`/`one_detector_injection`. The h5 is created RESIZABLE and truncated to
+    the count actually built, so a panel that fails to subtract leaves NO empty slot (its failure is
+    repeatable, so the panel set + injections stay deterministic).
+
+    `stack_detection_thresholds` (a list) labels each panel — injected once — at every sigma, writing
+    ONE h5 (shared images/masks + `real_labels_<sigma>sigma` per sigma) and ONE csv (shared truth
+    columns + `stack_detection_<sigma>sigma` per sigma). `stack_detection_threshold` (a scalar) is the
+    single-sigma path.
+
+    `compress` gzips the h5 (read-only eval sets — test — like the original test pipeline: the diffims
+    are mostly background so they pack ~10x, keeping the multi-sigma test set tiny; the big TRAIN sets
+    stay uncompressed for fast training-loop reads).
+
+    `target` (build-to-target cap): `dataids` is the over-allocated slice (target x headroom); the build
+    STOPS once `target` panels are successfully built (cancelling the rest), so skip-prevalidation panel
+    failures don't leave the set short AND the on-disk size is bounded (no overshoot). In-flight workers
+    at the cap may add up to ~`parallel` extra panels (harmless)."""
+    multi = stack_detection_thresholds is not None
+    thr_arg = [float(s) for s in stack_detection_thresholds] if multi else stack_detection_threshold
+    # Single-sigma: one `real_labels`. Multi-sigma: a plain `real_labels` (= the deepest/injection-
+    # reference sigma) that the segmentation model consumes as its DIA-mask input channel exactly as in
+    # training, PLUS a per-sigma `real_labels_<s>sigma` for the notebook's stack-FP-per-panel counts.
+    label_dsets = ([("real_labels", "uint16")]
+                   + ([(f"real_labels_{_sigma_tag(s)}sigma", "uint16") for s in thr_arg] if multi else []))
     h5_path = os.path.join(save_path, f"{name}.h5")
     csv_path = os.path.join(save_path, f"{name}.csv")
     if os.path.exists(csv_path):
         os.remove(csv_path)
     ch = (1, min(int(chunks), dims.y), min(int(chunks), dims.x)) if chunks else None
+    ds_kw = {}
+    if compress:
+        if ch is None:                       # gzip requires chunking
+            ch = (1, min(512, dims.y), min(512, dims.x))
+        ds_kw = dict(compression="gzip", compression_opts=4, shuffle=True)
     with h5py.File(h5_path, "w") as f:
         mx = (None, dims.y, dims.x)
-        for nm, dt in (("images", "float32"), ("masks", "bool"), ("real_labels", "uint16")):
-            f.create_dataset(nm, shape=(len(dataids), dims.y, dims.x), maxshape=mx, dtype=dt, chunks=ch)
+        for nm, dt in ([("images", "float32"), ("masks", "bool")] + label_dsets):
+            f.create_dataset(nm, shape=(len(dataids), dims.y, dims.x), maxshape=mx, dtype=dt, chunks=ch, **ds_kw)
     manager = Manager()
     lock = manager.Lock()
     counters = manager.dict()
     counters[h5_path] = 0
     tasks = [[counters, did, repo, coll, dims, lock, h5_path, csv_path, number, trail_length,
               magnitude, beta, "preliminary_visit_image", seed, mag_mode, psf_template,
-              stack_detection_threshold, measueTrails, skymap, stage3_collection]
+              thr_arg, measure_trails, skymap, stage3_collection]
              for did in dataids]
-    print(f"[build:{name}] {len(tasks)} panels -> {h5_path}", flush=True)
+    print(f"[build:{name}] {len(tasks)} panels -> {h5_path}"
+          + (f" (sigmas={thr_arg})" if multi else ""), flush=True)
     err = 0
     if parallel > 1:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as ex:
-            futs = [ex.submit(worker, t) for t in tasks]
-            for done, fut in enumerate(concurrent.futures.as_completed(futs), 1):
-                try:
-                    out = fut.result()
-                except BaseException as e:  # NoWorkFound etc. subclass BaseException, not Exception
-                    err += 1
-                    print(f"[{name} {done}/{len(tasks)}] WORKER CRASH: {type(e).__name__}: {e}", flush=True)
-                    print(traceback.format_exc(), flush=True)
-                    continue
-                if out[0] != "ok":
-                    err += 1
-                if done % 25 == 0 or done == len(tasks):
-                    print(f"[{name} {done}/{len(tasks)}] built={int(counters[h5_path])} err={err}", flush=True)
+        # Plain process pool. worker() never lets an exception escape unpickled (it returns a clean
+        # skip or re-raises as a picklable RuntimeError — see worker()), so a bad panel is just counted
+        # in `err` and dropped; it cannot break the pool. The only thing that still can is genuine
+        # infrastructure trouble (node OOM / eviction): for that we retry the leftover panels a few
+        # times in a fresh pool, then leave the remainder to SLURM --requeue.
+        from concurrent.futures.process import BrokenProcessPool
+        pending = list(tasks)
+        capped = False
+        for attempt in range(1, 4):
+            if not pending or capped:
+                break
+            batch, pending = pending, []
+            try:
+                with concurrent.futures.ProcessPoolExecutor(
+                        max_workers=parallel, max_tasks_per_child=40) as ex:
+                    futmap = {ex.submit(worker, t): t for t in batch}
+                    left = set(futmap)
+                    for fut in concurrent.futures.as_completed(futmap):
+                        left.discard(fut)
+                        try:
+                            if fut.result()[0] != "ok":
+                                err += 1
+                        except BrokenProcessPool:
+                            pending.append(futmap[fut])
+                        except BaseException as e:
+                            err += 1
+                            print(f"[{name}] worker error: {type(e).__name__}: {e}", flush=True)
+                        if target and int(counters[h5_path]) >= int(target):
+                            capped = True
+                            for f in left:
+                                f.cancel()
+                            break
+                        done = len(batch) - len(left)
+                        if done % 50 == 0:
+                            print(f"[{name} {done}/{len(batch)}] built={int(counters[h5_path])} "
+                                  f"err={err}", flush=True)
+                    if not capped:
+                        pending.extend(futmap[f] for f in left)
+            except BrokenProcessPool:
+                pass
+            if pending and not capped and attempt < 3:
+                print(f"[{name}] pool broke (infrastructure); retrying {len(pending)} panels "
+                      f"(attempt {attempt + 1}/3)", flush=True)
+        if pending and not capped:
+            err += len(pending)
+            print(f"[{name}] DROPPED {len(pending)} panels after retries — SLURM --requeue will rerun", flush=True)
     else:
         for t in tasks:
             worker(t)
@@ -1011,11 +1158,71 @@ def _build_set(dataids, *, name, repo, coll, dims, save_path, number, trail_leng
     # Truncate to the number actually built -> no empty tail slots from panels that failed.
     n = int(counters[h5_path])
     with h5py.File(h5_path, "a") as f:
-        for ds in ("images", "masks", "real_labels"):
+        for ds in ["images", "masks"] + [nm for nm, _ in label_dsets]:
             if f[ds].shape[0] != n:
                 f[ds].resize(n, axis=0)
     print(f"[build:{name}] DONE built={n}/{len(dataids)} err={err} -> {h5_path} (+ {csv_path})", flush=True)
     return n
+
+
+def gather_shards(save_path, name, cleanup=True):
+    """Concatenate the per-shard files a sharded build produced — <name>.shard*.{h5,csv} — into the
+    single <name>.{h5,csv} that the trainer/eval read, renumbering image_id to 0..N-1. This is the
+    recombine step for a set whose build was spread across a SLURM array (see make_datasets_fleet.sh);
+    train is read directly from its shards via --data-sources, so only the small sets are gathered.
+    Generic over datasets (single-sigma real_labels and multi-sigma real_labels_<s>sigma alike).
+
+    Memory- and disk-safe: copies in small panel-blocks (bounded RAM) and, when cleanup is set, deletes
+    each shard the moment it has been consumed, so the growing output and the not-yet-consumed shards
+    never both need to fit at once — the gather succeeds even with little free space."""
+    import glob
+    import re as _re
+    shards = sorted(glob.glob(os.path.join(save_path, f"{name}.shard*.h5")),
+                    key=lambda p: int(_re.search(r"shard(\d+)\.h5$", p).group(1)))
+    if not shards:
+        raise SystemExit(f"[gather] no {name}.shard*.h5 under {save_path}")
+    with h5py.File(shards[0], "r") as f0:
+        dsets = [(k, f0[k].dtype) for k in f0.keys()]
+        Y, X = int(f0["images"].shape[1]), int(f0["images"].shape[2])
+        compressed = f0["images"].compression is not None
+    counts = []
+    for s in shards:
+        with h5py.File(s, "r") as f:
+            counts.append(int(f["images"].shape[0]))
+    total = sum(counts)
+    ds_kw = (dict(compression="gzip", compression_opts=4, shuffle=True,
+                  chunks=(1, min(512, Y), min(512, X))) if compressed else {})
+    out_h5 = os.path.join(save_path, f"{name}.h5")
+    out_csv = os.path.join(save_path, f"{name}.csv")
+    # CSV first (cheap) — read every shard csv before any shard is deleted, renumber image_id, concat.
+    frames, off = [], 0
+    for s, n in zip(shards, counts):
+        df = pd.read_csv(s[:-3] + ".csv")
+        df["image_id"] = df["image_id"].astype(int) + off
+        frames.append(df)
+        off += n
+    pd.concat(frames, ignore_index=True).to_csv(out_csv, index=False)
+    # h5: copy in 32-panel blocks and delete each shard right after it is consumed.
+    with h5py.File(out_h5, "w") as fo:
+        for k, dt in dsets:
+            fo.create_dataset(k, shape=(total, Y, X), dtype=dt, **ds_kw)
+        off = 0
+        for s, n in zip(shards, counts):
+            if n:
+                with h5py.File(s, "r") as f:
+                    for k, _dt in dsets:
+                        for a in range(0, n, 32):
+                            b = min(a + 32, n)
+                            fo[k][off + a:off + b] = f[k][a:b]
+                off += n
+            if cleanup:
+                for p in (s, s[:-3] + ".csv"):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+    print(f"[gather] {name}: {len(shards)} shards -> {total} panels -> {out_h5}", flush=True)
+    return total
 
 
 # ======================================================================================
@@ -1024,9 +1231,8 @@ def _build_set(dataids, *, name, repo, coll, dims, save_path, number, trail_leng
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Build the SIMULATED (injected-trail) diffim datasets — train(+val), "
-                    "train2(+val2), test — from ONE deterministic panel partition; each set is "
-                    "injected with the same validated core. See module docstring.",
+        description="Build the simulated (injected-trail) diffim datasets — train(+val), "
+                    "train2(+val2), test — from one deterministic panel partition. See module docstring.",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     # --- Butler / region (needs stage3=template_coadd + stage2=PVI/sources) ---
     ap.add_argument("--repo", type=str, default="dp2_prep")
@@ -1055,7 +1261,7 @@ def main():
     ap.add_argument("--repartition", action="store_true",
                     help="re-select the panel universe + rewrite split.json. Otherwise an existing "
                          "split.json is reused (so partial/repeat builds are consistent + deterministic).")
-    # --- injection core knobs (UNCHANGED semantics + defaults) ---
+    # --- injection core knobs ---
     ap.add_argument("--trail-length-min", type=float, default=6)
     ap.add_argument("--trail-length-max", type=float, default=60)
     ap.add_argument("--mag-min", type=float, default=22.5)
@@ -1066,14 +1272,17 @@ def main():
     ap.add_argument("--beta-max", type=float, default=180)
     ap.add_argument("--number", type=int, default=20)
     ap.add_argument("--stack-detection-threshold", type=float, default=5.0,
-                    help="stack DIA detection sigma for the stack_detection label (train family + val)")
-    ap.add_argument("--test-sigma", type=float, default=None,
-                    help="stack-detection sigma for the TEST set only (default = --stack-detection-threshold). "
-                         "Rebuild test at another depth with `--sets test --test-sigma N` (same panels).")
+                    help="stack DIA detection sigma for the stack_detection label (train family + val, "
+                         "and the single-sigma test build when --test-sigmas is not given)")
+    ap.add_argument("--test-sigmas", nargs="*", type=float, default=None,
+                    help="label the TEST set at several stack-detection sigmas at once (e.g. 5 4 3): each "
+                         "panel is injected once and detected at every sigma. Writes one gzip'd test.h5 "
+                         "(shared images/masks, plain real_labels = deepest sigma for the model input, plus "
+                         "real_labels_<s>sigma) and one test.csv (stack_detection_<s>sigma per sigma).")
     ap.add_argument("--realistic-trail", action="store_true", default=False,
                     help="render trails with the realistic (light-curve/tapered/curved) renderer "
                          "instead of the uniform galsim.Box (leakage-free: physical priors only)")
-    ap.add_argument("--measueTrails", action="store_true", default=False)
+    ap.add_argument("--measure_trails", action="store_true", default=False)
     # --- determinism / scale ---
     ap.add_argument("--seed", type=int, default=2026,
                     help="ONE seed: panel universe selection + partition + per-panel injections")
@@ -1082,6 +1291,22 @@ def main():
     ap.add_argument("--skip-prevalidation", action="store_true", default=False,
                     help="skip the slow per-panel template/source pre-validation when selecting the "
                          "universe (faster; unbuildable panels are simply skipped at build time)")
+    # --- multi-node sharding (one build spread across a SLURM job array) ---
+    ap.add_argument("--plan-only", action="store_true", default=False,
+                    help="select + partition the universe, write split.json, then EXIT (no build), so a "
+                         "fleet of array tasks can reuse one deterministic partition.")
+    ap.add_argument("--gather", action="store_true", default=False,
+                    help="GATHER mode: concatenate <name>.shard*.{h5,csv} -> <name>.{h5,csv} for each "
+                         "--only-sets name (renumbering image_id), then EXIT. No Butler/build. Run after a "
+                         "sharded build to recombine each small set into the single file the trainer reads.")
+    ap.add_argument("--only-sets", nargs="*", default=None,
+                    help="build exactly these set NAMES (train/val/train2/val2/test), overriding the "
+                         "--sets group expansion. For per-set parallel jobs.")
+    ap.add_argument("--n-shards", type=int, default=1,
+                    help="split the built set into this many strided shards across array tasks; this task "
+                         "builds shard --shard into <name>.shard<shard>.{h5,csv} (per-shard target = ceil/N). "
+                         "n_shards=1 writes a single <name>.{h5,csv}.")
+    ap.add_argument("--shard", type=int, default=0, help="which shard index this task builds (0..n_shards-1)")
     ap.add_argument("--exclude-pairs-csv", nargs="*", default=None,
                     help="CSV(s) with visit/FieldID + detector columns to keep OUT of the universe "
                          "(leakage guard against EXTERNAL sets, e.g. the real-asteroid catalog)")
@@ -1096,9 +1321,22 @@ def main():
         print("[main] realistic trail renderer ENABLED", flush=True)
     logging.getLogger("lsst").setLevel(logging.ERROR)
     ensure_dir(args.save_path)
+    if args.gather:   # recombine a sharded build's per-shard files into single per-set files, then exit
+        if not args.only_sets:
+            raise SystemExit("[gather] --gather requires --only-sets <names>")
+        for nm in args.only_sets:
+            gather_shards(args.save_path, nm)
+        print("GATHER DONE", flush=True)
+        return
     coll = args.collections if len(args.collections) > 1 else args.collections[0]
     sizes = {"train": args.n_train, "val": args.n_val, "train2": args.n_train2,
              "val2": args.n_val2, "test": args.n_test}
+    # Over-allocate the panel universe by ADCNN_ALLOC_HEADROOM so that panels which can't be built (no
+    # overlapping template / too few kernel sources, ~20%) don't leave a set short; the build then CAPS
+    # each set at its target count, so the on-disk size stays bounded. Set the headroom to 1.0 to disable
+    # over-allocation (e.g. when the targets are already sized for the expected drop rate).
+    HEADROOM = float(os.environ.get("ADCNN_ALLOC_HEADROOM", "1.5"))
+    alloc = {k: (int(round(sizes[k] * HEADROOM)) if sizes[k] > 0 else 0) for k in _SET_ORDER}
     split_path = os.path.join(args.save_path, "split.json")
 
     # --- 1. panel partition (deterministic; cached in split.json) ---
@@ -1117,21 +1355,22 @@ def main():
         if exclude_keys:
             print(f"[split] excluding {len(exclude_keys)} (visit,detector) panels from "
                   f"{len(args.exclude_pairs_csv)} catalog(s) (real-asteroid leakage guard)", flush=True)
-        n_universe = sum(sizes.values())
+        n_universe = sum(alloc.values())
         refs = select_good_refs_random_check(
             repo=args.repo, collections=coll, where=args.where, skymap=args.skymap,
             stage3_collection=args.stage3_collection, instrument="LSSTCam",
             k=n_universe, seed=args.seed, exclude_keys=exclude_keys,
             min_ecliptic_lat=args.min_ecliptic_lat,
-            check_refs=not args.skip_prevalidation, verbose=True)
+            check_refs=not args.skip_prevalidation, filter_dims=False, verbose=True)
         keys = [_key_from_dataId(r.dataId) for r in refs]
         if len(keys) < n_universe:
-            print(f"[split] WARNING: universe has {len(keys)} < requested {n_universe} panels; "
-                  "sets will be short — widen --where, lower --n-*, or lower --min-ecliptic-lat.", flush=True)
-        parts = _partition(keys, sizes, args.seed)
+            print(f"[split] WARNING: universe has {len(keys)} < allocated {n_universe} panels; "
+                  "sets may be short — widen --where, lower --n-*, or lower --min-ecliptic-lat.", flush=True)
+        parts = _partition(keys, alloc, args.seed)   # partition the OVER-ALLOCATED universe
         meta = {"seed": args.seed, "where": args.where,
                 "min_ecliptic_lat": args.min_ecliptic_lat,
                 "exclude_pairs_csv": args.exclude_pairs_csv or [],
+                "targets": sizes, "alloc": {k: len(parts[k]) for k in _SET_ORDER},
                 "sizes": {k: len(parts[k]) for k in _SET_ORDER},
                 "sets": {k: [[int(v), int(d)] for (v, d) in parts[k]] for k in _SET_ORDER}}
         with open(split_path, "w") as f:
@@ -1139,32 +1378,85 @@ def main():
         print(f"[split] wrote {split_path}: "
               + ", ".join(f"{k}={len(parts[k])}" for k in _SET_ORDER), flush=True)
 
-    # --- 2. build the requested sets with the validated injection core ---
-    build = [s for g in args.sets for s in _GROUPS[g]]
+    # --plan-only: the deterministic partition (split.json) is now written/reused; stop here so a fleet
+    # of sharded array tasks can all reuse this ONE partition without racing to (re)select it.
+    if args.plan_only:
+        print(f"[main] PLAN ONLY -> {split_path} written/reused; exiting before build", flush=True)
+        return
+
+    # --- 2. build the requested sets ---
+    # `--only-sets a b c` builds exactly those set names (for sharded/parallel jobs); else expand groups.
+    build = list(args.only_sets) if args.only_sets else [s for g in args.sets for s in _GROUPS[g]]
     all_keys = [k for s in _SET_ORDER for k in parts[s]]
     if not all_keys:
         raise SystemExit("[main] empty partition; nothing to build")
     butler = Butler(args.repo, collections=coll)
-    v0, d0 = all_keys[0]
-    dims = butler.get("preliminary_visit_image.dimensions",
-                      dataId={"instrument": "LSSTCam", "visit": int(v0), "detector": int(d0)})
-    test_sigma = args.test_sigma if args.test_sigma is not None else args.stack_detection_threshold
+    # Common h5 frame = MAX panel dims over every distinct detector in the universe (LSSTCam mixes
+    # ITL 4072x4000 and e2v 4096x4004 CCDs). Each panel is built at its own size then padded to this
+    # frame, so BOTH geometries are kept rather than dropping the minority vendor. Dims are a detector
+    # property, so one (visit,detector) per distinct detector covers all geometries present.
+    import concurrent.futures as _cf
+    _uniq = {}
+    for (v, d) in all_keys:
+        _uniq.setdefault(int(d), (int(v), int(d)))
+
+    def _dims_of(vd):
+        v, d = vd
+        try:
+            lb = Butler(args.repo, collections=coll)
+            dd = lb.get("preliminary_visit_image.dimensions",
+                        dataId={"instrument": "LSSTCam", "visit": int(v), "detector": int(d)})
+            return int(dd.y), int(dd.x)
+        except Exception:
+            return None
+    with _cf.ThreadPoolExecutor(max_workers=16) as _ex:
+        _ds = [r for r in _ex.map(_dims_of, _uniq.values()) if r]
+    if not _ds:
+        raise SystemExit("[main] could not read panel dimensions for any detector")
+    dims = SimpleNamespace(y=max(r[0] for r in _ds), x=max(r[1] for r in _ds))
+    print(f"[main] h5 frame padded to max (y,x)=({dims.y},{dims.x}) over {len(_ds)}/{len(_uniq)} "
+          f"distinct detectors", flush=True)
+    test_sigma = args.stack_detection_threshold
     common = dict(repo=args.repo, coll=coll, dims=dims, save_path=args.save_path,
                   number=args.number, trail_length=[args.trail_length_min, args.trail_length_max],
                   magnitude=[args.mag_min, args.mag_max], beta=[args.beta_min, args.beta_max],
                   mag_mode=args.mag_mode, psf_template=args.psf_template,
-                  measueTrails=args.measueTrails, seed=args.seed, skymap=args.skymap,
+                  measure_trails=args.measure_trails, seed=args.seed, skymap=args.skymap,
                   stage3_collection=args.stage3_collection, parallel=args.parallel, chunks=args.chunks)
+    nsh = max(1, int(args.n_shards))   # multi-node sharding: this task builds 1 of nsh
+    sh = int(args.shard)
+    built_counts = {}
     for name in _SET_ORDER:
         if name not in build:
             continue
         if not parts[name]:
             print(f"[build:{name}] no panels in partition; skipping", flush=True)
             continue
-        thr = test_sigma if name == "test" else args.stack_detection_threshold
-        dataids = [{"instrument": "LSSTCam", "visit": int(v), "detector": int(d)} for (v, d) in parts[name]]
-        _build_set(dataids, name=name, stack_detection_threshold=thr, **common)
-    print("DATASETS DONE", flush=True)
+        # Shard: this task takes a strided slice of the over-allocated panels and builds 1/nsh of the
+        # target into <name>.shard<sh>.{h5,csv}; the parts are read from the SHARED split.json so every
+        # shard is disjoint and consistent. nsh==1 -> the normal single-file build.
+        panels = parts[name][sh::nsh] if nsh > 1 else parts[name]
+        out_name = f"{name}.shard{sh}" if nsh > 1 else name
+        tgt = int(math.ceil(sizes[name] / nsh)) if nsh > 1 else sizes[name]   # per-shard build-to-target cap
+        dataids = [{"instrument": "LSSTCam", "visit": int(v), "detector": int(d)} for (v, d) in panels]
+        if name == "test" and args.test_sigmas:
+            # test labelled at several sigmas at once -> compressed h5 (shared images/masks +
+            # real_labels_<sigma>sigma) + csv (stack_detection_<sigma>sigma per sigma).
+            built_counts[out_name] = _build_set(dataids, name=out_name, stack_detection_thresholds=args.test_sigmas,
+                                                compress=True, target=tgt, **common)
+        elif name == "test":
+            built_counts[out_name] = _build_set(dataids, name=out_name, stack_detection_threshold=test_sigma,
+                                                compress=True, target=tgt, **common)
+        else:
+            built_counts[out_name] = _build_set(dataids, name=out_name, stack_detection_threshold=args.stack_detection_threshold,
+                                                compress=False, target=tgt, **common)
+        # Guard per set: abort if a build comes up far short of its target (a sign something is wrong on
+        # this node), so it can't silently feed a too-small dataset into training. Skip the check for tiny
+        # per-shard targets, where a single unbuildable panel is normal.
+        if tgt >= 10 and built_counts[out_name] < 0.50 * tgt:
+            raise SystemExit(f"[main] ABORT: {out_name} built {built_counts[out_name]} < 50% of target {tgt}; "
+                             "check the log")
+    print("DATASETS DONE built:", built_counts, flush=True)
 
 
 if __name__ == "__main__":
