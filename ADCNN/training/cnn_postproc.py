@@ -252,62 +252,6 @@ def save_cnn(net, out_pt):
 # ---------------------------------------------------------------------------
 # Combined 5sigma-stack + ADCNN operating point
 # ---------------------------------------------------------------------------
-def _stack_sigma_catalog(h5_path, csv_path, panel_ids, *, sigma: int = STACK_SIGMA) -> "pd.DataFrame":
-    """Build the 5sigma-stack DETECTION catalog over `panel_ids`: detected injected trails (TP side,
-    rows with ``stack_detection_<sigma>sigma==True``) plus real-residual centroids (FP side,
-    connected components of the ``real_labels_<sigma>sigma`` h5 plane). Columns:
-    ``image_id, x, y, beta, length``. Length/beta = truth values for the TP rows, zero for the
-    residual rows. `panel_ids` index both the csv image_id and the h5 array (the per-set h5 is
-    indexed by image_id, see ``DATA/val2.h5`` etc.).
-    """
-    flag = f"stack_detection_{sigma}sigma"
-    plane = f"real_labels_{sigma}sigma"
-    truth = pd.read_csv(csv_path)
-    if flag not in truth.columns:
-        raise ValueError(f"{csv_path}: missing column '{flag}' (rebuild with --multi-sigma-sets "
-                         f"covering this set + --test-sigmas {sigma})")
-    truth = truth[truth["image_id"].isin(set(panel_ids))]
-    det = truth[truth[flag] == True][["image_id", "x", "y", "beta", "trail_length"]].rename(
-        columns={"trail_length": "length"}).copy()
-    resid_rows = []
-    with h5py.File(h5_path, "r") as f:
-        if plane not in f:
-            raise ValueError(f"{h5_path}: missing dataset '{plane}' (rebuild with "
-                             f"--multi-sigma-sets covering this set + --test-sigmas {sigma})")
-        for pid in panel_ids:
-            rl = f[plane][int(pid)][:]
-            mx = int(rl.max()) if rl.size else 0
-            if mx <= 0:
-                continue
-            ys, xs = np.nonzero(rl)
-            lab = rl[ys, xs]
-            for L in range(1, mx + 1):
-                m = lab == L
-                if m.any():
-                    resid_rows.append((int(pid), float(xs[m].mean()), float(ys[m].mean()), 0.0, 0.0))
-    resid = pd.DataFrame(resid_rows, columns=["image_id", "x", "y", "beta", "length"])
-    return pd.concat([det, resid], ignore_index=True)
-
-
-def _dedup_within_panel(df: "pd.DataFrame", *, tol_px: float) -> "pd.DataFrame":
-    """Drop detections coincident within `tol_px` of an earlier row on the SAME panel (per
-    ``image_id``). Used to dedup the 5sigma+ADCNN union — a source both detectors fire on is one
-    detection, not two. The frame's row order matters: an earlier row is kept over a later
-    coincident one, so concatenate the stack catalog FIRST (stack geometry wins on overlap)."""
-    from scipy.spatial import cKDTree
-    parts = []
-    for _, g in df.groupby("image_id", sort=False):
-        g = g.reset_index(drop=True)
-        if len(g) <= 1:
-            parts.append(g); continue
-        keep = np.ones(len(g), bool)
-        for a, b in cKDTree(g[["x", "y"]].values).query_pairs(tol_px):
-            if keep[a] and keep[b]:
-                keep[b] = False
-        parts.append(g[keep])
-    return pd.concat(parts, ignore_index=True) if parts else df.iloc[0:0]
-
-
 def combined_fpp_threshold(adcnn_cat: "pd.DataFrame", stack_cat: "pd.DataFrame",
                            truth, n_panels: int, *, budget: float = FPP_BUDGET,
                            tol_px: float = DEDUP_TOL_PX) -> tuple[float, dict]:
@@ -323,7 +267,7 @@ def combined_fpp_threshold(adcnn_cat: "pd.DataFrame", stack_cat: "pd.DataFrame",
     `truth`     : truth catalog (path or DataFrame) for the recall denominator.
     `n_panels`  : panel count for the ``fp_per_panel`` denominator (== ``len(panel_ids)``).
     """
-    from ADCNN.evaluation.catalog_match import evaluate_catalog
+    from ADCNN.evaluation.catalog_match import evaluate_catalog, dedup_cross_catalog
 
     cols = ["image_id", "x", "y", "beta", "length"]
     stack = stack_cat[cols].copy()
@@ -331,7 +275,9 @@ def combined_fpp_threshold(adcnn_cat: "pd.DataFrame", stack_cat: "pd.DataFrame",
 
     def union_metrics(thr: float):
         a = adcnn[adcnn["score"] >= thr][cols]
-        u = _dedup_within_panel(pd.concat([stack, a], ignore_index=True), tol_px=tol_px)
+        # Cross-catalog dedup: a source both detectors fire on counts once (attributed to stack);
+        # within-stack and within-ADCNN clusters are preserved (each detector reports its own).
+        u = dedup_cross_catalog(stack, a, tol_px=tol_px)
         m, _ = evaluate_catalog(u, truth, tol_px=tol_px, n_panels=n_panels)
         return m
 
@@ -381,10 +327,11 @@ def calibrate_combined_threshold(seg_ckpt, cnn_pt, h5_path, csv_path, panel_ids,
     Requires `h5_path`/`csv_path` to carry the per-sigma stack plane + column (build the set
     with ``make_sim_data --multi-sigma-sets <set> --test-sigmas <sigma>``)."""
     from ADCNN.inference.catalog import (InferenceConfig, build_detection_catalog_multigpu)
+    from ADCNN.evaluation.catalog_match import stack_sigma_catalog
     cfg = InferenceConfig(cnn_thr=0.0)
     print(f"[combined-fpp] building val ADCNN catalog (cnn_thr=0) on {len(panel_ids)} panels", flush=True)
     adcnn = build_detection_catalog_multigpu(h5_path, seg_ckpt, cnn_pt, config=cfg, panel_ids=list(panel_ids))
-    stack = _stack_sigma_catalog(h5_path, csv_path, list(panel_ids), sigma=sigma)
+    stack = stack_sigma_catalog(h5_path, csv_path, list(panel_ids), sigma=sigma)
     print(f"[combined-fpp] stack {sigma}sigma catalog: {len(stack)} rows | ADCNN catalog: {len(adcnn)} rows", flush=True)
     return combined_fpp_threshold(adcnn, stack, csv_path, n_panels=len(panel_ids),
                                   budget=budget, tol_px=tol_px)

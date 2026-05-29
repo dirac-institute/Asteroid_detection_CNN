@@ -20,12 +20,14 @@ including faint ones below the detection limit). Rows with non-finite geometry n
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Union
+from typing import Iterable, Union
 
+import h5py
 import numpy as np
 import pandas as pd
 
-__all__ = ["match_trail_catalogs", "evaluate_catalog", "match_pairs"]
+__all__ = ["match_trail_catalogs", "evaluate_catalog", "match_pairs",
+           "stack_sigma_catalog", "dedup_within_panel", "dedup_cross_catalog"]
 
 # Columns every trail catalog must provide (besides its length column).
 _REQUIRED_COLUMNS = ("image_id", "x", "y", "beta")
@@ -213,6 +215,115 @@ def evaluate_catalog(
     metrics["n_panels"] = n_panels
     metrics["fp_per_panel"] = counts["FP"] / max(n_panels, 1)
     return metrics, truth_out
+
+
+def stack_sigma_catalog(h5_path, csv_path, panel_ids: Iterable[int], *, sigma: int = 5) -> pd.DataFrame:
+    """Build the LSST stack DETECTION catalog for the given panels at one sigma.
+
+    Returns one row per stack detection -- both sides of confusion:
+      * detected injected trails (TP side): rows of `csv_path` whose
+        ``stack_detection_<sigma>sigma == True``; carries the truth trail's beta + trail_length
+        so segment-overlap matching in :func:`evaluate_catalog` works as for the deployed catalog.
+      * real-residual centroids (FP side): per-label centroids from the h5
+        ``real_labels_<sigma>sigma`` plane; point-like (length=0, beta=0).
+
+    The set's h5 is indexed by ``image_id`` (val2.h5, test.h5 are both 0..N contiguous), so
+    `panel_ids` index both the h5 dataset and the csv ``image_id`` column directly.
+
+    Used by both the FP-budget calibration (:func:`ADCNN.training.cnn_postproc.combined_fpp_threshold`)
+    and the eval notebook to compute the dedup'd 5sigma+NN union FP correctly.
+    """
+    flag = f"stack_detection_{sigma}sigma"
+    plane = f"real_labels_{sigma}sigma"
+    panel_ids = list(panel_ids)
+    truth = pd.read_csv(csv_path)
+    if flag not in truth.columns:
+        raise ValueError(f"{csv_path}: missing column '{flag}' (rebuild with --multi-sigma-sets "
+                         f"covering this set + --test-sigmas {sigma})")
+    truth = truth[truth["image_id"].isin(set(panel_ids))]
+    det = truth[truth[flag] == True][["image_id", "x", "y", "beta", "trail_length"]].rename(
+        columns={"trail_length": "length"}).copy()
+    resid_rows = []
+    with h5py.File(h5_path, "r") as f:
+        if plane not in f:
+            raise ValueError(f"{h5_path}: missing dataset '{plane}' (rebuild with "
+                             f"--multi-sigma-sets covering this set + --test-sigmas {sigma})")
+        for pid in panel_ids:
+            rl = f[plane][int(pid)][:]
+            mx = int(rl.max()) if rl.size else 0
+            if mx <= 0:
+                continue
+            ys, xs = np.nonzero(rl)
+            lab = rl[ys, xs]
+            for L in range(1, mx + 1):
+                m = lab == L
+                if m.any():
+                    resid_rows.append((int(pid), float(xs[m].mean()), float(ys[m].mean()), 0.0, 0.0))
+    resid = pd.DataFrame(resid_rows, columns=["image_id", "x", "y", "beta", "length"])
+    return pd.concat([det, resid], ignore_index=True)
+
+
+def dedup_cross_catalog(primary: pd.DataFrame, secondary: pd.DataFrame, *,
+                        tol_px: float = 20.0) -> pd.DataFrame:
+    """Concat `primary` then `secondary`, drop rows in `secondary` that fall within `tol_px` of
+    ANY `primary` row on the same panel; rows within `primary`-vs-`primary` or
+    `secondary`-vs-`secondary` are PRESERVED.
+
+    This is the right dedup for combining two independent detectors' catalogs (e.g. the LSST
+    stack and ADCNN): a source both detectors fire on counts once, but each detector's own
+    cluster of detections on the same source is left alone (each catalog reports what its
+    pipeline reports). `dedup_within_panel` is the stronger collapse that also drops
+    within-catalog coincidences -- not what you want when comparing two independent detectors.
+    """
+    from scipy.spatial import cKDTree
+    if not len(secondary):
+        return primary.copy()
+    if not len(primary):
+        return secondary.copy()
+    parts = []
+    sec_by_panel = secondary.groupby("image_id", sort=False).indices  # {pid: positional indices}
+    pri_by_panel = primary.groupby("image_id", sort=False).indices
+    for pid, p_idx in pri_by_panel.items():
+        p_rows = primary.iloc[p_idx]
+        s_idx = sec_by_panel.get(pid)
+        if s_idx is None or not len(s_idx):
+            parts.append(p_rows); continue
+        s_rows = secondary.iloc[s_idx]
+        tree = cKDTree(p_rows[["x", "y"]].values)
+        # any secondary row within tol_px of any primary row -> drop that secondary row
+        nbr = tree.query_ball_point(s_rows[["x", "y"]].values, r=tol_px)
+        keep_s = np.array([len(n) == 0 for n in nbr])
+        parts.append(p_rows)
+        parts.append(s_rows[keep_s])
+    # panels seen only in secondary: keep all secondary rows
+    sec_only_panels = set(secondary["image_id"].unique()) - set(pri_by_panel)
+    if sec_only_panels:
+        parts.append(secondary[secondary["image_id"].isin(sec_only_panels)])
+    return pd.concat(parts, ignore_index=True)
+
+
+def dedup_within_panel(df: pd.DataFrame, *, tol_px: float = 20.0) -> pd.DataFrame:
+    """Drop detections coincident within `tol_px` of an EARLIER row on the same panel.
+
+    Per ``image_id``, scipy's ``cKDTree.query_pairs(tol_px)`` returns coincident index pairs;
+    the later index is dropped. The frame's row order matters: concatenate the catalog you want
+    to prefer FIRST. For the 5sigma+NN union the stack rows come first, so a source both
+    detectors fire on is counted once and attributed to the stack.
+    """
+    from scipy.spatial import cKDTree
+    if not len(df):
+        return df
+    parts = []
+    for _, g in df.groupby("image_id", sort=False):
+        g = g.reset_index(drop=True)
+        if len(g) <= 1:
+            parts.append(g); continue
+        keep = np.ones(len(g), bool)
+        for a, b in cKDTree(g[["x", "y"]].values).query_pairs(tol_px):
+            if keep[a] and keep[b]:
+                keep[b] = False
+        parts.append(g[keep])
+    return pd.concat(parts, ignore_index=True)
 
 
 def match_pairs(measured, truth, *, tol_px: float = 20.0,
