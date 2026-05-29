@@ -149,6 +149,13 @@ def main():
                          "given (with --cnn-train-h5), the CNN trains on ALL of train2 and the "
                          "threshold is set on val2; otherwise a slice of train2 is held out for it.")
     ap.add_argument("--val2-csv", default=None, help="catalog for --val2-h5")
+    ap.add_argument("--fpp-budget", type=float, default=None,
+                    help="combined 5sigma-stack + ADCNN false-positives-per-panel budget for the "
+                         "operating point (default: FPP_BUDGET in ADCNN.training.cnn_postproc, "
+                         "currently 200). The CNN score cut is set on val2 so the deduplicated "
+                         "union (stack ∪ ADCNN) has exactly this FP/panel. Requires val2 to carry "
+                         "real_labels_5sigma + stack_detection_5sigma -- build it with "
+                         "`make_sim_data --multi-sigma-sets val2 --test-sigmas 5`.")
     ap.add_argument("--out-root", default=str(REPO / "experiments/diffim_runs"))
     ap.add_argument("--models-dir", default=str(REPO / "models"))
     ap.add_argument("--epochs", type=int, default=None, help="override the recipe epochs (e.g. smoke run)")
@@ -183,8 +190,9 @@ def main():
     # --- Stage 2: cutout CNN (focal FP filter) ---
     if not a.skip_cnn:
         import json
-        from ADCNN.training.cnn_postproc import train_cnn_from_val
+        from ADCNN.training.cnn_postproc import train_cnn_from_val, FPP_BUDGET
         cnn_out = Path(a.models_dir) / f"{a.run_name}_cnn_postproc.pt"
+        budget = a.fpp_budget if a.fpp_budget is not None else FPP_BUDGET
         if a.cnn_train_h5:
             # Dedicated stage-2 set (the train2 dataset): train the FP-filter CNN on ALL of its
             # panels. The segmentation model never trained on these panels (disjoint by construction),
@@ -201,7 +209,8 @@ def main():
                 print(f"[stage2-cnn] threshold on val2 = {a.val2_h5}", flush=True)
             print(f"[stage2-cnn] training on all {len(cnn_ids)} panels of {a.cnn_train_h5}", flush=True)
             _, cnn_info = train_cnn_from_val(scripted, a.cnn_train_h5, a.cnn_train_csv, cnn_ids, cnn_out,
-                                             epochs=recipe.cnn_epochs, fp_cap=recipe.cnn_fp_cap, **thr_kw)
+                                             epochs=recipe.cnn_epochs, fp_cap=recipe.cnn_fp_cap,
+                                             fpp_budget=budget, **thr_kw)
         else:
             # Default: the EXACT panels stage 1 held out (split.json) so the FP-filter CNN is never
             # built on panels the segmentation model trained on.
@@ -211,14 +220,16 @@ def main():
             else:
                 val_ids = sorted(pd.read_csv(a.val_csv)["image_id"].unique())[: recipe.n_val_panels]
             _, cnn_info = train_cnn_from_val(scripted, a.val_h5, a.val_csv, val_ids, cnn_out,
-                                             epochs=recipe.cnn_epochs, fp_cap=recipe.cnn_fp_cap)
-        # Persist the operating threshold (recall@0.95 on val2) + AUC next to the weights so evaluation
-        # and deployment score THIS model at its own operating point instead of the baked-in default.
+                                             epochs=recipe.cnn_epochs, fp_cap=recipe.cnn_fp_cap,
+                                             fpp_budget=budget)
+        # Persist the combined-budget operating threshold + diagnostics next to the weights so eval
+        # and deployment score THIS model at the FP-budget op-point instead of the baked-in default.
         sidecar = cnn_out.with_suffix(".json")
         sidecar.write_text(json.dumps(cnn_info, indent=2))
         print(f"[stage2-cnn] done -> {cnn_out} "
-              f"(threshold={cnn_info.get('threshold')} auc={cnn_info.get('holdout_auc')} -> {sidecar.name})",
-              flush=True)
+              f"(threshold={cnn_info.get('threshold')} combined_recall={cnn_info.get('combined_recall')} "
+              f"@ {cnn_info.get('combined_fp_per_panel')} FP/panel | budget={budget} "
+              f"-> {sidecar.name})", flush=True)
     print("END-TO-END TRAINING DONE", flush=True)
 
 

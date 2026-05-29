@@ -48,7 +48,8 @@ N_TRAIN2="${N_TRAIN2:-500}"
 N_VAL2="${N_VAL2:-100}"
 N_TEST="${N_TEST:-300}"
 SIGMA="${SIGMA:-5}"                   # stack-detection sigma (train family + val)
-TEST_SIGMAS="${TEST_SIGMAS:-5 4 3}"  # label test at each of these in one build (real_labels_/stack_detection_<s>sigma)
+TEST_SIGMAS="${TEST_SIGMAS:-5 4 3}"  # label the multi-sigma sets at each of these in one build (real_labels_/stack_detection_<s>sigma)
+MULTI_SIGMA_SETS="${MULTI_SIGMA_SETS:-test}"  # which sets get the per-sigma labelling (add val2 to calibrate the combined op-point)
 # Skip the per-panel pre-validation when selecting the universe: it is slow, and unbuildable panels are
 # simply dropped at build time anyway (absorbed by the over-allocation above). Set SKIP_PREVAL= to re-enable.
 SKIP_PREVAL="${SKIP_PREVAL:-1}"
@@ -77,7 +78,7 @@ python3 -u -m ADCNN.pipelines.make_sim_data \
   --save-path "$DATA_ROOT" --where "$WHERE" --seed "$SEED" \
   --sets $SETS \
   --n-train "$N_TRAIN" --n-val "$N_VAL" --n-train2 "$N_TRAIN2" --n-val2 "$N_VAL2" --n-test "$N_TEST" \
-  --stack-detection-threshold "$SIGMA" --test-sigmas $TEST_SIGMAS \
+  --stack-detection-threshold "$SIGMA" --test-sigmas $TEST_SIGMAS --multi-sigma-sets $MULTI_SIGMA_SETS \
   --min-ecliptic-lat "$MIN_ECLIPTIC_LAT" \
   --exclude-pairs-csv "$EXCLUDE_CSV" \
   --realistic-trail --mag-mode snr --mag-min 2 --mag-max 8 \

@@ -1275,10 +1275,16 @@ def main():
                     help="stack DIA detection sigma for the stack_detection label (train family + val, "
                          "and the single-sigma test build when --test-sigmas is not given)")
     ap.add_argument("--test-sigmas", nargs="*", type=float, default=None,
-                    help="label the TEST set at several stack-detection sigmas at once (e.g. 5 4 3): each "
-                         "panel is injected once and detected at every sigma. Writes one gzip'd test.h5 "
-                         "(shared images/masks, plain real_labels = deepest sigma for the model input, plus "
-                         "real_labels_<s>sigma) and one test.csv (stack_detection_<s>sigma per sigma).")
+                    help="label the multi-sigma sets (see --multi-sigma-sets) at several stack-detection "
+                         "sigmas at once (e.g. 5 4 3): each panel is injected once and detected at every "
+                         "sigma. Writes one gzip'd <set>.h5 (shared images/masks, plain real_labels = "
+                         "deepest sigma for the model input, plus real_labels_<s>sigma) and one <set>.csv "
+                         "(stack_detection_<s>sigma per sigma).")
+    ap.add_argument("--multi-sigma-sets", nargs="*", default=["test"],
+                    help="sets that get the per-sigma stack-detection labelling from --test-sigmas "
+                         "(default: test, the eval benchmark). Add val2 to also label the FP-filter "
+                         "threshold set, so the combined 5sigma+ADCNN operating point can be calibrated "
+                         "on it (the residual real_labels_<s>sigma plane it needs).")
     ap.add_argument("--realistic-trail", action="store_true", default=False,
                     help="render trails with the realistic (light-curve/tapered/curved) renderer "
                          "instead of the uniform galsim.Box (leakage-free: physical priors only)")
@@ -1416,7 +1422,6 @@ def main():
     dims = SimpleNamespace(y=max(r[0] for r in _ds), x=max(r[1] for r in _ds))
     print(f"[main] h5 frame padded to max (y,x)=({dims.y},{dims.x}) over {len(_ds)}/{len(_uniq)} "
           f"distinct detectors", flush=True)
-    test_sigma = args.stack_detection_threshold
     common = dict(repo=args.repo, coll=coll, dims=dims, save_path=args.save_path,
                   number=args.number, trail_length=[args.trail_length_min, args.trail_length_max],
                   magnitude=[args.mag_min, args.mag_max], beta=[args.beta_min, args.beta_max],
@@ -1439,17 +1444,18 @@ def main():
         out_name = f"{name}.shard{sh}" if nsh > 1 else name
         tgt = int(math.ceil(sizes[name] / nsh)) if nsh > 1 else sizes[name]   # per-shard build-to-target cap
         dataids = [{"instrument": "LSSTCam", "visit": int(v), "detector": int(d)} for (v, d) in panels]
-        if name == "test" and args.test_sigmas:
-            # test labelled at several sigmas at once -> compressed h5 (shared images/masks +
-            # real_labels_<sigma>sigma) + csv (stack_detection_<sigma>sigma per sigma).
+        # Multi-sigma sets (default: test; opt val2 in via --multi-sigma-sets) are labelled at every
+        # --test-sigmas in one build -> compressed h5 (shared images/masks + real_labels_<s>sigma) +
+        # csv (stack_detection_<s>sigma per sigma). The sparse per-sigma planes pack ~10x, so the test
+        # set is compressed even on the single-sigma path. Every other set is a plain single-sigma build.
+        do_multi = bool(args.test_sigmas) and name in args.multi_sigma_sets
+        compress = do_multi or name == "test"
+        if do_multi:
             built_counts[out_name] = _build_set(dataids, name=out_name, stack_detection_thresholds=args.test_sigmas,
-                                                compress=True, target=tgt, **common)
-        elif name == "test":
-            built_counts[out_name] = _build_set(dataids, name=out_name, stack_detection_threshold=test_sigma,
                                                 compress=True, target=tgt, **common)
         else:
             built_counts[out_name] = _build_set(dataids, name=out_name, stack_detection_threshold=args.stack_detection_threshold,
-                                                compress=False, target=tgt, **common)
+                                                compress=compress, target=tgt, **common)
         # Guard per set: abort if a build comes up far short of its target (a sign something is wrong on
         # this node), so it can't silently feed a too-small dataset into training. Skip the check for tiny
         # per-shard targets, where a single unbuildable panel is normal.
