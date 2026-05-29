@@ -61,7 +61,7 @@ srun python3 -u simulate_inject_fill_deterministic.py \
   --beta-min 0 --beta-max 180 \
   --number 20 \
   --stack-detection-threshold "$SNR" \
-  --measueTrails \
+  --measure_trails \
   --chunks 128 \
   --test-only \
   --where "$WHERE"

@@ -11,9 +11,9 @@ def _get_schema_names(catalog):
     except Exception:
         return [item.field.getName() for item in catalog.schema]
 
-def catalog_to_pandas(catalog, measueTrails=False):
+def catalog_to_pandas(catalog, measure_trails=False):
     df = catalog.to_pandas()
-    if measueTrails:
+    if measure_trails:
         trail_fields = [
             name for name in _get_schema_names(catalog)
             if name.startswith("ext_trailedSources_Naive_") or name.startswith("ext_trailedSources_Veres_")
@@ -106,19 +106,19 @@ def run_subtract(template, science, sources):
     return task.run(template=template, science=science, sources=sources)
 
 
-def run_detect_diffim(science, matchedTemplate, difference, threshold=5.0, measueTrails=False):
+def run_detect_diffim(science, matchedTemplate, difference, threshold=5.0, measure_trails=False):
     """DetectAndMeasure on the difference image. Returns the task Struct;
     use `.diaSources` for the catalog. Schema is API-compatible with
     SingleFrameDetectAndMeasureTask outputs (footprints, centroids, fluxes),
     so existing code that calls `.getFootprint()` / `.getCentroid()` works
     unchanged.
     """
-    if measueTrails:
+    if measure_trails:
         try:
             import lsst.meas.extensions.trailedSources  # noqa: F401
         except ImportError as e:
             raise RuntimeError(
-                "measueTrails=True requires lsst.meas.extensions.trailedSources to be set up."
+                "measure_trails=True requires lsst.meas.extensions.trailedSources to be set up."
             ) from e
 
     from lsst.ip.diffim.detectAndMeasure import (
@@ -128,7 +128,7 @@ def run_detect_diffim(science, matchedTemplate, difference, threshold=5.0, measu
     cfg = DetectAndMeasureConfig()
     cfg.doSkySources = False
     cfg.detection.thresholdValue = float(threshold)
-    if measueTrails:
+    if measure_trails:
         for plugin_name in (
             "base_SdssCentroid",
             "base_SdssShape",

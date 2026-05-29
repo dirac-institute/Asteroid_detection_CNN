@@ -26,7 +26,7 @@ consistent with a full build):
     --sets train          # build train + val only
     --sets train2         # build train2 + val2 only
     --sets test           # build test only
-    --sets test --test-sigma 4    # rebuild test at 4-sigma stack depth (same test panels)
+    --sets test --test-sigmas 5 4 3   # ONE gzip'd test.{h5,csv} labelled at each sigma (build once)
 
 Determinism: a fixed ``--seed`` fixes panel selection + partition + each panel's injections,
 so every rerun selects the same panels and injects identical trails (a panel that fails to
