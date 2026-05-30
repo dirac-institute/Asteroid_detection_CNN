@@ -152,10 +152,13 @@ def main():
     ap.add_argument("--fpp-budget", type=float, default=None,
                     help="combined 5sigma-stack + ADCNN false-positives-per-panel budget for the "
                          "operating point (default: FPP_BUDGET in ADCNN.training.cnn_postproc, "
-                         "currently 200). The CNN score cut is set on val2 so the deduplicated "
+                         "currently 100). The CNN score cut is set on val2 so the deduplicated "
                          "union (stack ∪ ADCNN) has exactly this FP/panel. Requires val2 to carry "
                          "real_labels_5sigma + stack_detection_5sigma -- build it with "
                          "`make_sim_data --multi-sigma-sets val2 --test-sigmas 5`.")
+    ap.add_argument("--gpus", type=int, default=1,
+                    help="DataParallel across this many GPUs for the stage-2 CNN training step "
+                         "(1 = single GPU; 4 on an ada node = the shipped 4-L40S setup).")
     ap.add_argument("--out-root", default=str(REPO / "experiments/diffim_runs"))
     ap.add_argument("--models-dir", default=str(REPO / "models"))
     ap.add_argument("--epochs", type=int, default=None, help="override the recipe epochs (e.g. smoke run)")
@@ -210,7 +213,7 @@ def main():
             print(f"[stage2-cnn] training on all {len(cnn_ids)} panels of {a.cnn_train_h5}", flush=True)
             _, cnn_info = train_cnn_from_val(scripted, a.cnn_train_h5, a.cnn_train_csv, cnn_ids, cnn_out,
                                              epochs=recipe.cnn_epochs, fp_cap=recipe.cnn_fp_cap,
-                                             fpp_budget=budget, **thr_kw)
+                                             fpp_budget=budget, gpus=a.gpus, **thr_kw)
         else:
             # Default: the EXACT panels stage 1 held out (split.json) so the FP-filter CNN is never
             # built on panels the segmentation model trained on.
@@ -221,7 +224,7 @@ def main():
                 val_ids = sorted(pd.read_csv(a.val_csv)["image_id"].unique())[: recipe.n_val_panels]
             _, cnn_info = train_cnn_from_val(scripted, a.val_h5, a.val_csv, val_ids, cnn_out,
                                              epochs=recipe.cnn_epochs, fp_cap=recipe.cnn_fp_cap,
-                                             fpp_budget=budget)
+                                             fpp_budget=budget, gpus=a.gpus)
         # Persist the combined-budget operating threshold + diagnostics next to the weights so eval
         # and deployment score THIS model at the FP-budget op-point instead of the baked-in default.
         sidecar = cnn_out.with_suffix(".json")

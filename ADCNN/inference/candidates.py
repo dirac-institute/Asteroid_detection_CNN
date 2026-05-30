@@ -1,14 +1,9 @@
 """Two-stage candidate extraction from a panel-level probability map.
 
 stage 1: t_low binarize -> connected components (8-connectivity)
-stage 2: per-candidate features (max p, area, elongation, bbox center,
-         top-k mean p, integrated logit). The candidate score is `max_p`
-         by default; emit all features so we can replace the scorer later
-         without re-running the network.
-
-This module is intentionally separate from training.
-``features.compute_v2_features`` calls extract_candidates(panel_prob,
-real_labels=…) and gets a pandas DataFrame.
+stage 2: per-candidate footprint features (max p, area, elongation, bbox center, top-k mean p,
+         integrated logit). ``features.extract_panel_candidates`` calls this on the seg-model
+         prob map and the matched-filter pass adds the trail geometry.
 """
 from __future__ import annotations
 

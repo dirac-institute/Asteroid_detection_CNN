@@ -54,7 +54,6 @@ _COLMAP = {
     "x_centroid": "x",          # measured centroid (px)
     "y_centroid": "y",
     "mf_beta": "beta",          # trail PA from footprint PCA (deg, 0=+x); recovers truth ~8-10deg MAD
-    "or_beta": "beta_nn",       # NN sin2β/cos2β-head orientation (DIAGNOSTIC ONLY: r≈0 vs truth)
     "mf_length": "length",      # measured trail length (px), de-biased to physical length (see MF_LEN_*)
     "mf_flux": "flux",          # integrated matched-filter flux (brightness proxy)
     "mf_snr": "mf_snr",
@@ -97,17 +96,17 @@ MF_LEN_OFFSET = 33.4
 MF_LEN_SLOPE = 0.887
 
 
-def _panel_to_catalog(pid: int, prob, img, sin, cos, agg, rl, cnn,
+def _panel_to_catalog(pid: int, prob, img, agg, rl, cnn,
                       config: InferenceConfig) -> Optional[pd.DataFrame]:
-    """Stage 2 for one panel: segmentation model candidates -> cutout-CNN score -> keep score>=cnn_thr -> public
-    schema. Returns the per-panel catalog slice, or None if no detection survives."""
-    from ADCNN.inference.features import compute_v2_features
+    """Stage 2 for one panel: segmentation candidates -> cutout-CNN score -> keep score>=cnn_thr
+    -> public schema. Returns the per-panel catalog slice, or None if no detection survives."""
+    from ADCNN.inference.features import extract_panel_candidates
     from ADCNN.inference.cnn_postproc import apply_cnn
-    cand, _ = compute_v2_features(prob[None], img[None], sin[None], cos[None], agg[None],
-                                  real_labels=rl[None], gate_pmax=config.gate_pmax, verbose=False)
+    cand, _ = extract_panel_candidates(prob[None], img[None], real_labels=rl[None],
+                                       gate_pmax=config.gate_pmax)
     if not len(cand):
         return None
-    dev = next(cnn.parameters()).device                 # CNN runs on the GPU (see _load_filter)
+    dev = next(cnn.parameters()).device                       # CNN runs on the GPU (see _load_filter)
     cand = apply_cnn(cand, cnn, img, prob, agg, device=dev)   # cutout score -> `score`
     cand = cand[cand["score"] >= config.cnn_thr].copy()
     if not len(cand):
@@ -163,18 +162,20 @@ def _worker(args):
 
 def _iter_panel_outputs(model, h5_path, panel_ids, device, config: InferenceConfig,
                         prep_workers) -> Iterator[tuple]:
-    """Yield ``(pid, prob, img, sin, cos, agg, rl)`` for each panel: read the diffim + DIA
-    mask and run segmentation model sliding-window inference (GPU, with parallel CPU prep)."""
+    """Yield ``(pid, prob, img, agg, rl)`` for each panel: read the diffim + DIA mask and run
+    the segmentation sliding-window inference (GPU, parallel CPU prep). The seg model's sin/cos
+    orientation heads aren't used downstream by the lean candidate extractor, so we discard
+    them here to keep memory and worker IPC small."""
     from ADCNN.inference.predict import predict_panel_overlap_3ch_full
     with h5py.File(h5_path, "r") as f:
         ids = range(int(f["images"].shape[0])) if panel_ids is None else panel_ids
         for pid in ids:
             img = f["images"][pid][:].astype(np.float32)
             rl = f["real_labels"][pid][:].astype(np.uint16)
-            prob, sin, cos, agg = predict_panel_overlap_3ch_full(
+            prob, _sin, _cos, agg = predict_panel_overlap_3ch_full(
                 model, img, rl, device=device, stride=config.stride,
                 tile_batch=config.tile_batch, prep_workers=prep_workers)
-            yield int(pid), prob, img, sin, cos, agg, rl
+            yield int(pid), prob, img, agg, rl
 
 
 def build_detection_catalog(h5_path, seg_ckpt, cnn_pt, *, config: InferenceConfig = DEFAULT_CONFIG,
@@ -224,8 +225,8 @@ def build_detection_catalog(h5_path, seg_ckpt, cnn_pt, *, config: InferenceConfi
 
     if n_workers <= 1:
         cnn = _load_filter(cnn_pt, config)
-        for pid, prob, img, sin, cos, agg, rl in panels:
-            r = _panel_to_catalog(pid, prob, img, sin, cos, agg, rl, cnn, config)
+        for pid, prob, img, agg, rl in panels:
+            r = _panel_to_catalog(pid, prob, img, agg, rl, cnn, config)
             if r is not None:
                 parts.append(r)
             n[0] += 1; tick()
