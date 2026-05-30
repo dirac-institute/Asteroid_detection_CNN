@@ -1,0 +1,11 @@
+{
+  "out": "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/filter_v2/runs/iter04_aug/cnn.pt",
+  "width": 40,
+  "depth": 3,
+  "in_ch": 3,
+  "k": 96,
+  "epochs": 30,
+  "best_val_auc": 0.9577781110837325,
+  "n_train": 289252,
+  "n_pos": 9052
+}

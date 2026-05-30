@@ -1,0 +1,15 @@
+{
+  "out": "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/filter_v2/runs/iter08_d4aug_cos60/cnn.pt",
+  "width": 40,
+  "depth": 4,
+  "in_ch": 3,
+  "k": 96,
+  "epochs": 60,
+  "best_val_auc": 0.9629664170443141,
+  "n_train": 289252,
+  "n_pos": 9052,
+  "aux_dim": 0,
+  "aux_idx": [],
+  "aux_mean": [],
+  "aux_std": []
+}
