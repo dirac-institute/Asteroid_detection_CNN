@@ -1,4 +1,0 @@
-# overnight experimental scratch -- don't track
-cutouts/
-runs/*/cnn.pt
-runs/*/cnn_postproc_v2.pt
