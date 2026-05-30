@@ -1,0 +1,8 @@
+iter00_sanity	/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/filter_v2/runs/iter00_sanity/cnn.pt	40	3	48	3	12		0.9532	0.5315	0.8103	111.08	49.99	false	748
+iter01_k96	/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/filter_v2/runs/iter01_k96/cnn.pt	40	3	96	3	30		0.9570	0.6217	0.8103	113.69	49.99	false	3415
+iter03_hnm	/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/filter_v2/runs/iter03_hnm/cnn.pt	40	3	96	3	30	experiments/filter_v2/runs/iter01_k96/cnn.pt	0.9472	0.4141	0.8103	138.12	49.99	false	3459
+iter04_aug	/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/filter_v2/runs/iter04_aug/cnn.pt	40	3	96	3	30		0.9578	0.5689	0.8103	114.47	49.99	false	3209
+iter05_aux	/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/filter_v2/runs/iter05_aux/cnn.pt	40	3	96	3	30		0.9557	0.5546	0.8103	121.96	49.99	false	3147
+iter06_d4	/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/filter_v2/runs/iter06_d4/cnn.pt	40	4	96	3	30		0.9603	0.5644	0.8103	102.75	49.99	false	3654
+iter07_d4aug	/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/filter_v2/runs/iter07_d4aug/cnn.pt	40	4	96	3	30		0.9627	0.6066	0.8103	100.04	49.99	false	3639
+iter08_d4aug_cos60	/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/experiments/filter_v2/runs/iter08_d4aug_cos60/cnn.pt	40	4	96	3	60		0.9630	0.5990	0.8103	95.12	49.99	false	6330
