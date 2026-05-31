@@ -21,8 +21,8 @@ panel, so it overlaps behind the GPU). The small width-40 cutout CNN scores on t
 segmentation model. ``build_detection_catalog_multigpu`` shards panels across all GPUs. The output is independent
 of worker/GPU count (rows sorted by ``image_id``).
 
-    python -m ADCNN.inference.catalog --h5 DATA_DIFFIM/test_5sigma/test.h5 \
-        --panels DATA_DIFFIM/test_5sigma/panels.csv --n-gpus 4 --out detections.csv
+    python -m ADCNN.inference.catalog --h5 DATA_DIFFIM/test/test.h5 \
+        --panels DATA_DIFFIM/test/panels.csv --n-gpus 4 --out detections.csv
 """
 from __future__ import annotations
 
@@ -43,7 +43,8 @@ import pandas as pd
 from ADCNN.inference.cnn_postproc import CNN_DEFAULT_THR
 
 __all__ = ["InferenceConfig", "build_detection_catalog",
-           "build_detection_catalog_multigpu", "CATALOG_COLUMNS"]
+           "build_detection_catalog_multigpu", "panel_to_catalog_rows",
+           "CATALOG_COLUMNS", "MF_LEN_OFFSET", "MF_LEN_SLOPE"]
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -88,7 +89,7 @@ DEFAULT_CONFIG = InferenceConfig()
 PROGRESS_S = 20.0  # heartbeat interval (s) for the per-shard progress print
 
 # segmentation model's segmentation/matched-filter over-extends trail ends ("ends bloom"): the raw mf_length is
-# biased, mf_length ≈ MF_LEN_SLOPE*L_true + MF_LEN_OFFSET (≈0.887*L + 33.4 px, fit on test_5sigma).
+# biased, mf_length ≈ MF_LEN_SLOPE*L_true + MF_LEN_OFFSET (≈0.887*L + 33.4 px, fit on test).
 # The emitted `length` INVERTS this to the physical trail length (median residual ~0px vs truth),
 # so eval parameter-recovery is unbiased and HelioLinC gets the true length. Single source of
 # truth: downstream consumers read the corrected `length` directly (no re-correction).
@@ -96,10 +97,15 @@ MF_LEN_OFFSET = 33.4
 MF_LEN_SLOPE = 0.887
 
 
-def _panel_to_catalog(pid: int, prob, img, agg, rl, cnn,
-                      config: InferenceConfig) -> Optional[pd.DataFrame]:
-    """Stage 2 for one panel: segmentation candidates -> cutout-CNN score -> keep score>=cnn_thr
-    -> public schema. Returns the per-panel catalog slice, or None if no detection survives."""
+def panel_to_catalog_rows(pid: int, prob, img, agg, rl, cnn,
+                          config: InferenceConfig) -> Optional[pd.DataFrame]:
+    """Stage 2 for one panel: candidate extraction -> cutout-CNN score -> keep score>=cnn_thr
+    -> public schema. Returns the per-panel catalog slice, or None if no detection survives.
+
+    This is the single primitive used by both the disk-h5 engine
+    (:func:`build_detection_catalog`) and the live-Butler stream
+    (:mod:`ADCNN.inference.stream_real_inference`).
+    """
     from ADCNN.inference.features import extract_panel_candidates
     from ADCNN.inference.cnn_postproc import apply_cnn
     cand, _ = extract_panel_candidates(prob[None], img[None], real_labels=rl[None],
@@ -157,7 +163,7 @@ def _worker_init(cnn_pt: str, config: InferenceConfig) -> None:
 
 
 def _worker(args):
-    return _panel_to_catalog(*args, _CNN, _CONFIG)
+    return panel_to_catalog_rows(*args, _CNN, _CONFIG)
 
 
 def _iter_panel_outputs(model, h5_path, panel_ids, device, config: InferenceConfig,
@@ -226,7 +232,7 @@ def build_detection_catalog(h5_path, seg_ckpt, cnn_pt, *, config: InferenceConfi
     if n_workers <= 1:
         cnn = _load_filter(cnn_pt, config)
         for pid, prob, img, agg, rl in panels:
-            r = _panel_to_catalog(pid, prob, img, agg, rl, cnn, config)
+            r = panel_to_catalog_rows(pid, prob, img, agg, rl, cnn, config)
             if r is not None:
                 parts.append(r)
             n[0] += 1; tick()

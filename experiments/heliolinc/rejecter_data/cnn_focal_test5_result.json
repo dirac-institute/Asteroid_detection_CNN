@@ -1,9 +1,0 @@
-{
-  "threshold": 0.0695,
-  "test_recall": 0.953,
-  "test_fp_removed": 0.561,
-  "test_fp_kept": 49375,
-  "test_nfp": 112355,
-  "test_sub5_recall": 0.931,
-  "test_auc": 0.932
-}

@@ -18,15 +18,15 @@
 #
 # The detector is scored at its CALIBRATED operating point — the threshold in
 # ``models/<RUN_NAME>_cnn_postproc.json``, set by ``train_end_to_end`` to make the deduplicated
-# 5sigma-stack ∪ ADCNN union hit ``FPP_BUDGET`` FP/panel on val2.
+# 5sigma-stack ∪ ADCNN union hit ``FPP_BUDGET`` FP/panel on cnn_val.
 #
 #   sbatch --dependency=afterok:<train_jobid> ADCNN/pipelines/slurm/eval_end_to_end.slurm
-#   RUN_NAME=seg_v2 SETS="test test_real" sbatch ADCNN/pipelines/slurm/eval_end_to_end.slurm
+#   RUN_NAME=seg SETS="test test_real" sbatch ADCNN/pipelines/slurm/eval_end_to_end.slurm
 set -eo pipefail
 
 REPO="${ADCNN_REPO:-/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN}"
 DATA_ROOT="${DATA_ROOT:-$REPO/DATA}"
-RUN_NAME="${RUN_NAME:-seg_v2}"
+RUN_NAME="${RUN_NAME:-seg}"
 MODELS_DIR="${MODELS_DIR:-$REPO/models}"
 SETS="${SETS:-test test_real}"
 SIGMAS="${SIGMAS:-5,4,3}"

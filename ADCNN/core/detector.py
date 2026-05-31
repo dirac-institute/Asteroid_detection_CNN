@@ -1,4 +1,4 @@
-"""segmentation model (reg2, deployed): UNet + orientation head + Hough-like line aggregator.
+"""Segmentation model: UNet + orientation head + Hough-like line aggregator.
 
 The aggregator is an explicit "vote along a thin oriented line" operator. A plain
 UNet can suppress background but cannot integrate sub-noise per-pixel evidence along
@@ -39,7 +39,8 @@ def _line_kernel(length: int, angle_deg: float) -> np.ndarray:
     The kernel sums to 1 (true average over the line).
     """
     L = int(length)
-    assert L % 2 == 1, "kernel length must be odd"
+    if L % 2 != 1:
+        raise ValueError(f"kernel length must be odd, got {L}")
     k = np.zeros((L, L), dtype=np.float32)
     c = L // 2
     dx = math.cos(math.radians(angle_deg))

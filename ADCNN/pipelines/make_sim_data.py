@@ -10,21 +10,21 @@ The five sets come from ONE deterministic panel partition (cached in ``<save-pat
 so they never share a (visit,detector) panel:
 
     train  (+ val)   stage-1 segmentation training  (val  -> model selection)
-    train2 (+ val2)  stage-2 cutout-CNN training     (val2 -> FP-filter threshold)
+    cnn_train (+ cnn_val)  stage-2 cutout-CNN training     (cnn_val -> FP-filter threshold)
     test             held-out evaluation
 
 Build everything (defaults: realistic trails, SNR 2-8, trail length 6-60 px, 20 injections/panel,
 seed 2026):
 
     python -m ADCNN.pipelines.make_sim_data --save-path DATA_DIFFIM --realistic-trail \\
-        --n-train 1500 --n-val 150 --n-train2 500 --n-val2 100 --n-test 300 \\
+        --n-train 1500 --n-val 150 --n-cnn_train 500 --n-cnn_val 100 --n-test 300 \\
         --mag-mode snr --mag-min 2 --mag-max 8 --parallel 90
 
 Levers — build only some groups (the partition still covers all five, so partial builds stay
 consistent with a full build):
 
     --sets train          # build train + val only
-    --sets train2         # build train2 + val2 only
+    --sets cnn_train         # build cnn_train + cnn_val only
     --sets test           # build test only
     --sets test --test-sigmas 5 4 3   # ONE gzip'd test.{h5,csv} labelled at each sigma (build once)
 

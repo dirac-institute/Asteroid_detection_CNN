@@ -1,0 +1,23 @@
+#!/bin/bash
+#SBATCH --partition=ampere
+#SBATCH --account=kipac:kipac
+#SBATCH --gres=gpu:a100:4
+#SBATCH --exclude=sdfampere017
+#SBATCH -c 32
+#SBATCH --mem=128G
+#SBATCH -t 2:30:00
+#SBATCH -J neo1_detect
+#SBATCH -o %x_%j.log
+#SBATCH --requeue
+#SBATCH --open-mode=append
+set -euo pipefail
+# ampere is PREEMPTIBLE; discover_stream now writes detections incrementally + a .done log, so a
+# preempted+requeued run RESUMES the remaining panels instead of losing everything.
+source "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/ADCNN/pipelines/heliolinc/neo_pipeline/config.sh"
+eval "$TORCH_ENV"
+cd "$REPO"
+# Stage 1: stream butler diffims -> ADCNN + focal-cutout CNN (GPU) -> sky detections + de-biased trail endpoints.
+python ADCNN/pipelines/heliolinc/discover_stream.py --n-gpus "$N_GPUS" \
+  --cnn-thr "$CNN_THR" \
+  --manifest "$MANIFEST" --out "$RUN/adcnn_dets.csv"
+echo "NEO STAGE1 DETECT DONE"

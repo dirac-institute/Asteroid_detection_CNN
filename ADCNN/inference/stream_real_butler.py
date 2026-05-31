@@ -1,12 +1,13 @@
-"""Butler-side producer for the streaming test_real pipeline.
+"""Butler-side producer for the real-data streaming inference pipeline.
 
-Runs in the LSST stack env (loadLSST + setup lsst_distrib). For each (visit, detector) in the
-fast-mover seed catalog, FIRST tries to fetch the PRE-BUILT diffim ``difference_image`` from
-the DP2 reprocessing (stored in stage4 collections, ~2 s/panel). If that's missing for a
-panel, falls back to AlardLupton subtract from PVI+template (~113 s/panel). Either way, emits
-one pickled message ``{visit, detector, image, t_butler_s, t_subtract_s}`` to stdout.
+Runs in the LSST stack env (``loadLSST.sh`` + ``setup lsst_distrib``). For each
+(visit, detector) in the seed catalog, FIRST fetches the DRP-prebuilt diffim
+(``difference_image`` in the DP2 stage4 reprocessing collection, ~2 s/panel). If the
+prebuilt is missing AND ``--allow-fallback`` is set, runs AlardLupton subtract from
+PVI+template on the fly (~50× slower, off by default in v1.0). Either way, emits one
+pickled message ``{visit, detector, image, t_butler_s, t_subtract_s, source}`` to stdout.
 
-Pipe into ``stream_real_inference.py`` running in the asteroid_cnn env.
+Pipe into ``ADCNN.inference.stream_real_inference`` running in the torch env.
 """
 from __future__ import annotations
 import argparse
@@ -110,15 +111,16 @@ def _run_one(args):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--real-csv", default=str(REPO / "DATA/sv_fast_movers_for_karlo_fast_with_pixels_rerun.csv"))
+    ap.add_argument("--real-csv", default=str(REPO / "DATA/real_fast_movers.csv"))
     ap.add_argument("--repo", default=DEF_REPO)
     ap.add_argument("--diffim-collection", default=DEF_DIFFIM_COLLECTION)
     ap.add_argument("--diffim-type", default=DEF_DIFFIM_TYPE)
     ap.add_argument("--stage2", default=DEF_STAGE2)
     ap.add_argument("--stage3", default=DEF_STAGE3)
     ap.add_argument("--skymap", default=DEF_SKYMAP)
-    ap.add_argument("--no-fallback", action="store_true",
-                    help="skip AlardLupton fallback for panels missing the prebuilt diffim")
+    ap.add_argument("--allow-fallback", action="store_true",
+                    help="run AlardLupton subtract on the fly for panels missing the prebuilt "
+                         "diffim (~50× slower than the prebuilt path; off by default)")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--shard", default=None,
@@ -136,10 +138,31 @@ def main():
         shard_tag = ""
     if a.limit:
         panels = panels[: a.limit]
-    print(f"[butler] {len(panels)} panels, workers={a.workers}, fallback={not a.no_fallback}{shard_tag}", file=sys.stderr, flush=True)
+    print(f"[butler] {len(panels)} panels, workers={a.workers}, "
+          f"fallback={a.allow_fallback}{shard_tag}", file=sys.stderr, flush=True)
+
+    # Startup probe: confirm the diffim collection is reachable and non-empty before any work runs.
+    try:
+        probe_butler = _get_butler(a.repo, a.diffim_collection)
+        n_probe = sum(1 for _ in zip(range(1),
+                                     probe_butler.registry.queryDatasets(a.diffim_type, limit=1)))
+        if n_probe == 0:
+            print(f"[butler] WARNING: collection {a.diffim_collection!r} contains no "
+                  f"{a.diffim_type!r} datasets — every panel will fall through to the "
+                  "AlardLupton path." if a.allow_fallback else
+                  f"[butler] FATAL: collection {a.diffim_collection!r} contains no "
+                  f"{a.diffim_type!r} datasets and --allow-fallback was not given.",
+                  file=sys.stderr, flush=True)
+            if not a.allow_fallback:
+                sys.exit(2)
+    except Exception as e:
+        print(f"[butler] WARNING: collection probe failed ({type(e).__name__}: {e}); "
+              "continuing — each panel will discover the missing data on its own.",
+              file=sys.stderr, flush=True)
 
     out = sys.stdout.buffer
-    args = [(v, d, a.repo, a.diffim_collection, a.diffim_type, a.stage2, a.stage3, a.skymap, not a.no_fallback)
+    args = [(v, d, a.repo, a.diffim_collection, a.diffim_type, a.stage2, a.stage3, a.skymap,
+             a.allow_fallback)
             for v, d in panels]
     if a.workers <= 1:
         for x in args:

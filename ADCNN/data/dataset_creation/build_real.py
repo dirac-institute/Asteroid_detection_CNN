@@ -17,7 +17,7 @@ Two CLI subcommands (run inside the LSST stack env, ``setup lsst_distrib``)::
 template_coadd) and writes ``manifest.csv`` (asteroid panels first, then
 N_EMPTY no-asteroid panels for the FP measurement). ``build`` consumes the
 manifest and produces ``test.h5`` / ``test.csv`` / ``panels.csv`` byte-
-compatible with the synthetic ``test_5sigma`` sets so the same evaluation
+compatible with the synthetic ``test`` sets so the same evaluation
 path (the ``Evaluation/Evaluation_Real`` notebook) applies.
 
 Key correctness notes
