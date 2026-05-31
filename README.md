@@ -1,5 +1,9 @@
 # ADCNN — Asteroid-Trail Detection in LSST Difference Images
 
+Rendered evaluation notebooks (always available; GitHub's notebook viewer is occasionally flaky on large notebooks):
+[`Evaluation.ipynb`](https://nbviewer.org/github/dirac-institute/Asteroid_detection_CNN/blob/heliolinc-discovery/Evaluation/Evaluation.ipynb)
+· [`Evaluation_Real.ipynb`](https://nbviewer.org/github/dirac-institute/Asteroid_detection_CNN/blob/heliolinc-discovery/Evaluation/Evaluation_Real.ipynb)
+
 Two-stage detector for asteroid trails in LSST difference images, plus downstream linking
 for discovery of new objects:
 
