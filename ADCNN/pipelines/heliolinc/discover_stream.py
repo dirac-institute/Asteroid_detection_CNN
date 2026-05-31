@@ -148,7 +148,9 @@ def run_shard(gpu_id, rows, seg_ckpt, cnn_model, thr, prefetch, out_csv, n_worke
             img, wcs, mjd = data
             rl = np.zeros(img.shape, dtype=np.uint16)
             prob, sin, cos, agg = predict_panel_overlap_3ch_full(model, img, rl, device=dev)
-            pending.append((pool.submit(_worker, (i, prob, img, sin, cos, agg, rl)), rows[i], wcs, mjd))
+            # panel_to_catalog_rows(pid, prob, img, agg, rl, cnn, config): the v1.0 signature uses
+            # the Hough aggregator `agg` directly (sin/cos are not passed through).
+            pending.append((pool.submit(_worker, (i, prob, img, agg, rl)), rows[i], wcs, mjd))
             if len(pending) >= 2 * max(2, n_workers):   # backpressure: bound RAM + queue depth
                 drain()
             now = time.time()

@@ -41,6 +41,7 @@ plots/
 
 # Vendored HelioLinC3D build (built from source, not redistributed)
 ADCNN/pipelines/heliolinc/heliolinc2/
+external/
 
 # HelioLinC run outputs (multi-GB, regenerable)
 ADCNN/pipelines/heliolinc/run_*/
