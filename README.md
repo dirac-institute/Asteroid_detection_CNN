@@ -1,63 +1,137 @@
-# ADCNN — Asteroid Trail Detection in LSST Difference Images
+# ADCNN — Asteroid-Trail Detection in LSST Difference Images
 
-Two-stage detector for asteroid trails in LSST difference images, plus linking to
-discover/confirm asteroids:
+Two-stage detector for asteroid trails in LSST difference images:
 
 ```
-Butler diffim → segmentation model (segmentation + orientation) → candidates → focal-loss cutout-CNN 2nd stage
-              → scored detections → (RA,Dec,MJD) → HelioLinC linking → new/confirmed asteroids
+Butler diffim → segmentation model (UNet + orientation + Hough aggregator)
+              → candidate components + matched-filter measurement
+              → focal-loss cutout-CNN false-positive filter
+              → detection catalog (measured trail geometry + routing keys)
 ```
 
-## Deployed model
-The production model is **reg2**: the segmentation model (`UNetResSEOrientHough`, half-width)
-trained with `lambda_orient=0` + dropout 0.15 + weight-decay 1e-4 + intensity-augmentation +
-D4 augmentation, plus a **focal-loss cutout-CNN** second-stage false-positive filter. The
-segmentation stage reaches **96.0% objectwise recall on test_5sigma** (real fire@truth 77%);
-the cutout-CNN stage removes ~56% of false positives at 95% recall (test_5sigma). Weights
-live in `models/`:
-- `models/segmentation_model.pt` — the TorchScript segmentation model (stage 1)
-- `models/cnn_postproc.pt` — the focal-loss cutout-CNN false-positive filter (stage 2)
+## Deployed models
 
-## Entry points (`ADCNN/pipelines/`)
-| Command | Purpose |
+The production checkpoints live in `models/`:
+
+| file | role |
 |---|---|
-| `python -m ADCNN.pipelines.make_sim_data`    | build SIMULATED (injected-trail) train/test diffim datasets from the Butler |
-| `python -m ADCNN.pipelines.make_real_data`   | build the REAL-asteroid test diffim dataset from the Butler |
-| `python -m ADCNN.pipelines.train_end_to_end` | train the full detector: segmentation model (reg2 recipe) + cutout-CNN stage-2 |
-| `python -m ADCNN.pipelines.run_inference`    | run segmentation model + cutout CNN on one diffim h5 → detection catalog CSV |
-| `python -m ADCNN.pipelines.make_eval_catalogs` | run the optimized multi-GPU engine on the eval test sets → catalogs + metrics |
+| `models/segmentation_model.pt` | TorchScript segmentation model (stage 1) |
+| `models/cnn_postproc.pt`       | focal-loss cutout-CNN false-positive filter (stage 2) |
+| `models/cnn_postproc.json`     | architecture sidecar + calibrated CNN threshold |
 
-Run each with `--help`. Butler entries use the `lsst_distrib` env; train/inference use
-the `asteroid_cnn` (torch) env.
+Stage 1 reaches **96.0 % object-wise recall on the simulated 5σ test set**; stage 2 cuts
+~56 % of stage-1 false positives at 95 % recall. The combined 5σ-stack + ADCNN detector is
+calibrated to **100 FP/panel** on the calibration set
+(`ADCNN.training.cnn_postproc.calibrate_combined_threshold`).
+
+## Entry points (`python -m ADCNN.pipelines.<name>`)
+
+| command | purpose |
+|---|---|
+| `make_sim_data`      | build the simulated injected-trail train / val / test datasets from the Butler |
+| `make_real_data`     | build the real-asteroid test diffim dataset from the Butler |
+| `train_end_to_end`   | train the segmentation model, then the focal cutout CNN, and persist both with a sidecar JSON |
+| `make_eval_catalogs` | score the test sets with the deployed models, emit detection catalogs and metrics |
+
+Single-h5 inference:
+
+```bash
+python -m ADCNN.inference.catalog --h5 <test.h5> --panels <panels.csv> --n-gpus 4 --out detections.csv
+```
+
+Real-data streaming (Butler → catalog, no panels written to disk) — two-env pipeline,
+producer in the LSST stack env, consumer in the torch env:
+
+```bash
+python -m ADCNN.inference.stream_real_butler --workers 6 \
+  | python -m ADCNN.inference.stream_real_inference --out test_real_detections.csv
+```
+
+Butler entries (`make_sim_data`, `make_real_data`, `stream_real_butler`) need the LSST stack
+env (`loadLSST.sh` + `setup lsst_distrib`); training and inference need the `asteroid_cnn`
+torch env.
 
 ## Inference engine + catalog evaluation
+
 `ADCNN.inference.catalog.build_detection_catalog[_multigpu]` is the end-to-end engine:
-images → segmentation model → candidates → trail measurement + 48² cutout → cutout-CNN → one CSV
-row per detection (measured trail geometry `x,y,beta,length` + flux + `score`, plus
-visit/detector/band routing keys for HelioLinC). It is optimized to use the whole GPU node — GPU
-inference with parallel CPU prep (`ADCNN_PREP_WORKERS`), pipelined across all GPUs, candidate
-features + the cutout CNN in a process pool — reaching **~1.0–1.4 s/panel images→catalog on 4×A100** (a full ~189-detector visit in
-~3–4 min; profiled 7.3→1.4 s/panel, all safe/accuracy-preserving). Evaluation is then pure
-catalog analysis: `ADCNN.evaluation.catalog_match.evaluate_catalog(measured, truth)` does
-trail-overlap matching (any-pixel-overlap criterion, all-trails denominator, fixed pre-chosen
-`tol_px`) → TP/FP/FN + the flagged truth catalog for the `evaluation.plots` completeness/
-histograms. No training and no threshold tuning happen at evaluation time.
+images → segmentation → candidates → matched-filter measurement → 96² cutout → cutout CNN →
+one CSV row per detection with measured trail geometry (`x, y, beta, length`), brightness
+(`flux`), the raw NN peak (`nn_pmax`), and the stage-2 CNN `score`, plus routing keys
+(`visit / detector / band` joined from `panels.csv`) for downstream linking.
+
+On 4 × A100 with parallel CPU prep + batched tile inference, the engine reaches
+**~1.0–1.4 s / panel** (images → catalog), i.e. a full ~189-detector LSST visit in 3–4 min.
+
+Evaluation is then pure catalog analysis:
+`ADCNN.evaluation.catalog_match.evaluate_catalog(measured, truth)` does trail-overlap
+matching (any-pixel-overlap criterion, all-trails denominator, fixed `tol_px`)
+→ TP / FP / FN + the flagged truth catalog for the completeness and histogram plots in
+`Evaluation/Evaluation.ipynb` and `Evaluation/Evaluation_Real.ipynb`.
 
 ## Package layout
-- `ADCNN/core/`       — `model.py` (UNetResSE backbone), `detector.py` (segmentation model), `losses.py` (AFTL + orientation)
-- `ADCNN/data/`       — `dataset.py`, `preprocessing.py` (3-channel build / MAD-sigma / orientation maps);
-                        `dataset_creation/` (`simulate`, `build_real`, `butler_tasks`, `photometry`, `realistic_trail`)
-- `ADCNN/training/`   — `train.py` (segmentation model trainer), `cnn_postproc.py` (stage-2 cutout-CNN trainer), `ema.py`
-- `ADCNN/inference/`  — `predict.py` (sliding-window segmentation model), `candidates.py`, `matched_filter.py`,
-                        `features.py` (candidate feature extraction), `cnn_postproc.py` (stage-2 FP-filter CNN apply),
-                        `catalog.py` (images→catalog engine), `export.py`
-- `ADCNN/evaluation/` — `detection.py` (object-level metrics), `geometry.py` (mask/component primitives),
-                        `catalog_match.py` (trail-overlap matching), `plots.py` (notebook viz),
-                        `architecture.py` (paper architecture figures)
-- `models/`           — deployed weights (above)
-- `Evaluation/`       — `Evaluation.ipynb` (synthetic) + `Evaluation_Real.ipynb` (real), evaluating `models/`
-- `experiments/heliolinc/` — HelioLinC linking suite + the ADCNN→HelioLinC bridge + `PIPELINE_DESIGN.md`
 
-## Branches
-- `diffim` — this production diffim pipeline (current).
-- `direct_image` — the earlier direct-image detection phase (archived).
+```
+ADCNN/
+├── core/                 model architectures
+│   ├── model.py           UNet-ResSE backbone
+│   ├── detector.py        segmentation model (UNet + orientation + Hough aggregator)
+│   └── losses.py          masked Asymmetric Focal Tversky + orientation MSE
+├── data/                 dataset loading + preprocessing
+│   ├── dataset.py         3-channel diffim random-crop Dataset + concat wrapper
+│   ├── preprocessing.py   MAD-sigma, local-std, orientation-map builders
+│   └── dataset_creation/  Butler-side builders (simulated injections + real-asteroid set)
+├── training/             trainers
+│   ├── train.py           stage-1 segmentation trainer
+│   ├── cnn_postproc.py    stage-2 cutout-CNN trainer + combined-FPP threshold calibration
+│   └── ema.py             EMA over weights
+├── inference/            inference primitives + the end-to-end engine
+│   ├── predict.py         sliding-window segmentation
+│   ├── candidates.py      connected-component candidate extractor
+│   ├── matched_filter.py  per-candidate matched-filter geometry + SNR
+│   ├── features.py        candidate features + injection-overlap labelling
+│   ├── cnn_postproc.py    focal cutout CNN: build / load / score
+│   ├── catalog.py         end-to-end h5 -> detection catalog (multi-GPU)
+│   ├── export.py          TorchScript exporter
+│   ├── stream_real_butler.py     producer half of the real-data stream
+│   ├── stream_real_inference.py  consumer half of the real-data stream
+│   └── build_real_eval_catalog.py join stream output to truth -> per-sighting eval CSV
+├── evaluation/           catalog-based evaluation + plots
+│   ├── catalog_match.py   trail-overlap matching + dedup
+│   ├── geometry.py        mask + component primitives
+│   ├── plots.py           notebook visualisations
+│   └── architecture.py    paper architecture figures
+└── pipelines/            CLI entry points + SLURM submission wrappers
+    ├── make_sim_data.py
+    ├── make_real_data.py
+    ├── train_end_to_end.py
+    ├── make_eval_catalogs.py
+    └── slurm/             SLURM scripts (data build, train, eval)
+
+models/                  deployed weights + sidecar
+Evaluation/              Evaluation.ipynb (simulated) + Evaluation_Real.ipynb (real)
+DATA/                    inputs (Butler manifests + real-asteroid truth + forced-photometry CSVs)
+DATA_DIFFIM/             built diffim h5/csv datasets (not tracked)
+```
+
+## Reproducing v1.0
+
+```bash
+# Stage A — build the simulated dataset family + the real-data test set
+python -m ADCNN.pipelines.make_sim_data --save-path DATA_DIFFIM/
+python -m ADCNN.pipelines.make_real_data --save-path DATA_DIFFIM/test_real/
+
+# Stage B — train the deployed two-stage detector
+python -m ADCNN.pipelines.train_end_to_end --run-name seg \
+    --data-sources DATA_DIFFIM/train.h5:DATA_DIFFIM/train.csv \
+    --val-h5  DATA_DIFFIM/val.h5  --val-csv  DATA_DIFFIM/val.csv \
+    --cnn-train-h5 DATA_DIFFIM/cnn_train.h5 --cnn-train-csv DATA_DIFFIM/cnn_train.csv \
+    --cnn-val-h5  DATA_DIFFIM/cnn_val.h5   --cnn-val-csv  DATA_DIFFIM/cnn_val.csv
+
+# Stage C — evaluate on the simulated + real test sets
+python -m ADCNN.pipelines.make_eval_catalogs --sets test test_real
+
+# Stage D — render the notebooks
+jupyter nbconvert --to notebook --execute --inplace Evaluation/*.ipynb
+```
+
+SLURM wrappers for the same pipeline live under `ADCNN/pipelines/slurm/`.

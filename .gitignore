@@ -7,14 +7,12 @@ __pycache__/
 # Claude Code local state
 .claude/
 
-# PyCharm
+# Editors
 .idea/
+.vscode/
 
 # macOS
 .DS_Store
-
-# VS Code
-.vscode/
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
@@ -29,42 +27,19 @@ dist/
 venv/
 .env/
 
-# Project data
+# Project data (raw inputs + built diffim datasets)
 DATA/
+DATA_DIFFIM/
 *.h5
-
-# Model checkpoints
-checkpoints/
-
-# Diffim experiment outputs (NPZ shards, logs, plots)
-experiments/diffim/**/runs/
-experiments/diffim_runs/
-experiments/diffim_pilot/
 *.npz
 
-# Diffim data and miscellaneous run-time artefacts
-DATA_DIFFIM/
+# Training run outputs (checkpoints, logs, scratch artefacts)
+runs/
+checkpoints/
 plots/
-folders.txt
-mrakovci
-
-# Notebook scratch
-Notebooks/Untitled*.ipynb
-Notebooks/Untitled*.ipynb.*
-DATA_DIFFIM_realistic/
-DATA_DIFFIM_tiles/
-DATA_DIFFIM_stream_buffer/
-DATA_DIFFIM_realistic_big2/
-experiments/heliolinc/heliolinc2/
-experiments/heliolinc/run_*/
-# renamed Butler-derived discovery datasets + per-run outputs (multi-GB, regenerable from the manifest)
-experiments/heliolinc/NEO_*/
-# FP-budget Monte-Carlo outputs (multi-GB; findings recorded in memory fp-budget-derivation)
-experiments/heliolinc/fp_budget*/
-# abandoned rejecter experiment scratch (models/parquets/plots; see memory fp-rejecter-1b-result)
-experiments/heliolinc/rejecter_data/
-experiments/heliolinc/rb_*.csv
-# generated eval catalogs
-Evaluation/catalogs_thr0/
-# all run logs (anywhere)
 *.log
+
+# User scratch + nested unrelated checkouts (LSST tutorial-notebooks etc.)
+mrakovci/
+Evaluation/catalogs_thr0/
+Evaluation/tmp_stream_*/

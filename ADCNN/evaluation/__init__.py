@@ -1,23 +1,22 @@
-"""Evaluation utilities for asteroid detection.
+"""Evaluation utilities for the ADCNN detector.
 
-Catalog-based evaluation (the production path) lives in ``catalog_match`` — match a measured
-detection catalog against a truth catalog and compute object-level metrics:
+Catalog-based evaluation is the production path: match a measured detection catalog
+against a truth catalog and compute object-level metrics.
 
-    from ADCNN.evaluation.catalog_match import evaluate_catalog, match_pairs
+    from ADCNN.evaluation import evaluate_catalog, match_trail_catalogs
 
-``detection`` provides the mask-based object-level confusion (``objectwise_confusion``,
-``combined_objectwise_confusion_separate``) and the notebook plot helpers
-(``print_confusion_matrix``, ``plot_detect_hist``, ``plot_completeness_2d``).
-``geometry`` holds the shared mask/component primitives. (Per-pixel inference statistics —
-pixelwise confusion, pixel AUC, threshold/ROC/FROC scans, map-based parameter recovery — were
-removed once evaluation moved to the catalog approach.)
+The plot helpers (``print_confusion_matrix``, ``plot_detect_hist``, ``plot_completeness_2d``)
+are the notebook visualisations used by ``Evaluation/Evaluation.ipynb`` and
+``Evaluation/Evaluation_Real.ipynb``.
 """
 from .geometry import label_components, create_disk_mask, create_line_mask
-from .detection import objectwise_confusion, combined_objectwise_confusion_separate
-from .catalog_match import evaluate_catalog, match_pairs, match_trail_catalogs
+from .catalog_match import (evaluate_catalog, match_pairs, match_trail_catalogs,
+                            stack_sigma_catalog, dedup_within_panel, dedup_cross_catalog)
+from .plots import plot_detect_hist, print_confusion_matrix, plot_completeness_2d
 
 __all__ = [
     "label_components", "create_disk_mask", "create_line_mask",
-    "objectwise_confusion", "combined_objectwise_confusion_separate",
     "evaluate_catalog", "match_pairs", "match_trail_catalogs",
+    "stack_sigma_catalog", "dedup_within_panel", "dedup_cross_catalog",
+    "plot_detect_hist", "print_confusion_matrix", "plot_completeness_2d",
 ]

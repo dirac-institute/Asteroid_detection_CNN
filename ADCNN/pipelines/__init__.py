@@ -1,12 +1,14 @@
 """End-to-end entry points for the ADCNN diffim asteroid-trail pipeline.
 
-  make_sim_data      ALL simulated (injected-trail) sets — train/val, train2/val2, test — from
-                     one deterministic panel partition (Butler); levers to build only some
-  make_real_data     real-asteroid test diffim dataset from the Butler
-  train_end_to_end   train the segmentation model detector (reg2 recipe) then the focal cutout CNN 2nd stage
-  run_inference      run segmentation model + cutout CNN on diffim panels -> scored candidate detections
-  make_eval_catalogs build detection catalogs on the test sets + catalog-based evaluation metrics
+  make_sim_data           build the simulated injected-trail train/val/test sets from the Butler
+  make_real_data          build the real-asteroid test diffim set from the Butler
+  train_end_to_end        train the segmentation model + the focal cutout-CNN second stage
+  make_eval_catalogs      score the test sets with the deployed models -> detection catalogs + metrics
 
 Each is runnable as ``python -m ADCNN.pipelines.<name> --help``.
-The deployed models live in the top-level ``models/`` directory.
+
+The end-to-end inference engine is ``ADCNN.inference.catalog``; for a single h5 -> CSV run,
+``python -m ADCNN.inference.catalog`` is the direct CLI.
+
+Deployed weights live in the top-level ``models/`` directory.
 """

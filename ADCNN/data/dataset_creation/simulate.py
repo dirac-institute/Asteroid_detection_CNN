@@ -2,11 +2,11 @@
 
 ONE deterministic entry point produces every set used by the two-stage detector:
     train  (+ val)   stage-1 segmentation training  (val -> model selection)
-    train2 (+ val2)  stage-2 cutout-CNN training     (val2 -> FP-filter threshold)
+    cnn_train (+ cnn_val)  stage-2 cutout-CNN training     (cnn_val -> FP-filter threshold)
     test             held-out evaluation
 A single panel universe is selected for the --where region, partitioned ONCE into these
 five mutually-disjoint sets (seeded shuffle -> contiguous slices), and cached in
-``<save-path>/split.json``. Each requested set (``--sets train train2 test``) is then injected
+``<save-path>/split.json``. Each requested set (``--sets train cnn_train test``) is then injected
 with the SAME validated per-panel core. Determinism: a fixed ``--seed`` fixes the panel
 selection, the partition, AND each panel's injections (seeded by seed,visit,detector), so every
 rerun selects the same panels and injects identical trails. A panel that fails to subtract is
@@ -1030,11 +1030,11 @@ def select_good_refs_random_check(
 # the test set) stay consistent with a full build.
 # ======================================================================================
 
-# train and train2 each carry a held-out val set for evaluation:
-#   val  -> stage-1 segmentation-model selection ;  val2 -> stage-2 CNN threshold.
+# train and cnn_train each carry a held-out val set for evaluation:
+#   val  -> stage-1 segmentation-model selection ;  cnn_val -> stage-2 CNN threshold.
 # The fixed order makes the partition a deterministic sequence of contiguous slices.
-_SET_ORDER = ("train", "val", "train2", "val2", "test")
-_GROUPS = {"train": ("train", "val"), "train2": ("train2", "val2"), "test": ("test",)}
+_SET_ORDER = ("train", "val", "cnn_train", "cnn_val", "test")
+_GROUPS = {"train": ("train", "val"), "cnn_train": ("cnn_train", "cnn_val"), "test": ("test",)}
 
 
 def _partition(keys, sizes, seed):
@@ -1232,7 +1232,7 @@ def gather_shards(save_path, name, cleanup=True):
 def main():
     ap = argparse.ArgumentParser(
         description="Build the simulated (injected-trail) diffim datasets — train(+val), "
-                    "train2(+val2), test — from one deterministic panel partition. See module docstring.",
+                    "cnn_train(+cnn_val), test — from one deterministic panel partition. See module docstring.",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     # --- Butler / region (needs stage3=template_coadd + stage2=PVI/sources) ---
     ap.add_argument("--repo", type=str, default="dp2_prep")
@@ -1250,13 +1250,13 @@ def main():
     ap.add_argument("--save-path", default="../DATA/",
                     help="root dir; writes <set>.h5/<set>.csv per set + split.json")
     ap.add_argument("--sets", nargs="+", choices=list(_GROUPS), default=list(_GROUPS),
-                    help="which groups to BUILD now: train -> {train,val}; train2 -> {train2,val2}; "
+                    help="which groups to BUILD now: train -> {train,val}; cnn_train -> {cnn_train,cnn_val}; "
                          "test -> {test}. The partition always covers all five sets (cached in "
                          "split.json), so building only a subset stays consistent with a full build.")
     ap.add_argument("--n-train", type=int, default=1500, help="stage-1 segmentation training panels")
     ap.add_argument("--n-val", type=int, default=150, help="held-out val for stage-1 model selection")
-    ap.add_argument("--n-train2", type=int, default=500, help="stage-2 cutout-CNN training panels")
-    ap.add_argument("--n-val2", type=int, default=100, help="held-out val2 for the stage-2 CNN threshold")
+    ap.add_argument("--n-cnn-train", type=int, default=500, help="stage-2 cutout-CNN training panels")
+    ap.add_argument("--n-cnn-val", type=int, default=100, help="held-out cnn_val for the stage-2 CNN threshold")
     ap.add_argument("--n-test", type=int, default=300, help="held-out evaluation panels")
     ap.add_argument("--repartition", action="store_true",
                     help="re-select the panel universe + rewrite split.json. Otherwise an existing "
@@ -1282,7 +1282,7 @@ def main():
                          "(stack_detection_<s>sigma per sigma).")
     ap.add_argument("--multi-sigma-sets", nargs="*", default=["test"],
                     help="sets that get the per-sigma stack-detection labelling from --test-sigmas "
-                         "(default: test, the eval benchmark). Add val2 to also label the FP-filter "
+                         "(default: test, the eval benchmark). Add cnn_val to also label the FP-filter "
                          "threshold set, so the combined 5sigma+ADCNN operating point can be calibrated "
                          "on it (the residual real_labels_<s>sigma plane it needs).")
     ap.add_argument("--realistic-trail", action="store_true", default=False,
@@ -1306,7 +1306,7 @@ def main():
                          "--only-sets name (renumbering image_id), then EXIT. No Butler/build. Run after a "
                          "sharded build to recombine each small set into the single file the trainer reads.")
     ap.add_argument("--only-sets", nargs="*", default=None,
-                    help="build exactly these set NAMES (train/val/train2/val2/test), overriding the "
+                    help="build exactly these set NAMES (train/val/cnn_train/cnn_val/test), overriding the "
                          "--sets group expansion. For per-set parallel jobs.")
     ap.add_argument("--n-shards", type=int, default=1,
                     help="split the built set into this many strided shards across array tasks; this task "
@@ -1335,8 +1335,8 @@ def main():
         print("GATHER DONE", flush=True)
         return
     coll = args.collections if len(args.collections) > 1 else args.collections[0]
-    sizes = {"train": args.n_train, "val": args.n_val, "train2": args.n_train2,
-             "val2": args.n_val2, "test": args.n_test}
+    sizes = {"train": args.n_train, "val": args.n_val, "cnn_train": args.n_cnn_train,
+             "cnn_val": args.n_cnn_val, "test": args.n_test}
     # Over-allocate the panel universe by ADCNN_ALLOC_HEADROOM so that panels which can't be built (no
     # overlapping template / too few kernel sources, ~20%) don't leave a set short; the build then CAPS
     # each set at its target count, so the on-disk size stays bounded. Set the headroom to 1.0 to disable
@@ -1444,7 +1444,7 @@ def main():
         out_name = f"{name}.shard{sh}" if nsh > 1 else name
         tgt = int(math.ceil(sizes[name] / nsh)) if nsh > 1 else sizes[name]   # per-shard build-to-target cap
         dataids = [{"instrument": "LSSTCam", "visit": int(v), "detector": int(d)} for (v, d) in panels]
-        # Multi-sigma sets (default: test; opt val2 in via --multi-sigma-sets) are labelled at every
+        # Multi-sigma sets (default: test; opt cnn_val in via --multi-sigma-sets) are labelled at every
         # --test-sigmas in one build -> compressed h5 (shared images/masks + real_labels_<s>sigma) +
         # csv (stack_detection_<s>sigma per sigma). The sparse per-sigma planes pack ~10x, so the test
         # set is compressed even on the single-sigma path. Every other set is a plain single-sigma build.

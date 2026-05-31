@@ -1,19 +1,17 @@
-"""Diffim NN training entry point — trains the segmentation model (UNetResSEOrientHough) detector.
+"""Diffim NN training entry point — trains the segmentation model (UNetResSEOrientHough).
 
-Training shape (defaults match the deployed "reg2" model):
+Training shape (defaults reproduce the deployed segmentation checkpoint):
   - 3-channel input: signed MAD-normalised diffim, log1p local-std, real_labels binary
   - UNetResSEOrientHough: UNet-ResSE backbone + orientation aux head + LineAggregator
-  - random-crop sampler over per-injection anchors (`stk_balance` biases toward
+  - random-crop sampler over per-injection anchors (``--stk-balance`` biases toward
     LSST-stack-missed positives, the regime the second stage must recover)
-  - loss: masked Asymmetric Focal Tversky + small BCE anchor + masked orientation MSE
-  - EMA over weights (exclude agg_alpha via --ema-exclude agg_alpha)
+  - loss: masked Asymmetric Focal Tversky + small BCE anchor + (optional) orientation MSE
+  - EMA over weights (exclude ``agg_alpha`` via ``--ema-exclude agg_alpha``)
 
-The reg2 recipe that produced models/segmentation_model.pt: lambda_orient=0 +
---dropout 0.15 + --wd 1e-4 + --intensity-aug + --augment, half-width backbone
-(--widths 24 48 96 192 384), trained on the realistic-trail diffim set via
---data-sources. The canonical launch is ADCNN/pipelines/train_end_to_end.py.
+The canonical launch is ``ADCNN/pipelines/train_end_to_end.py``, which fixes every flag of
+the published recipe.
 
-CLI:  python -m ADCNN.training.train --run-name <name> [flags]
+    CLI:  python -m ADCNN.training.train --run-name <name> [flags]
 """
 from __future__ import annotations
 
@@ -122,9 +120,9 @@ def main():
                          "checkpoint is already saved, so the exported model is unchanged — this only "
                          "skips the non-improving tail). <=0 disables (run the full --epochs).")
     ap.add_argument("--batch-size", type=int, default=24,
-                    help="reg2 used 24. Kept modest because the line aggregator is the "
-                         "GPU-memory hotspot (3 multi-scale convs at full resolution).")
-    ap.add_argument("--lr", type=float, default=3e-4)  # reg2
+                    help="Kept modest because the line aggregator is the GPU-memory hotspot "
+                         "(3 multi-scale convs at full resolution).")
+    ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--wd", type=float, default=1e-5)
     ap.add_argument("--n-pos-anchors-per-epoch", type=int, default=1800)
     ap.add_argument("--n-neg-anchors-per-epoch", type=int, default=600)
@@ -135,35 +133,31 @@ def main():
     ap.add_argument("--aftl-gamma", type=float, default=1.3)
     ap.add_argument("--aftl-bce-anchor", type=float, default=0.1)
     ap.add_argument("--lambda-orient", type=float, default=0.0,
-                    help="Weight of the orientation aux-loss. reg2 uses 0.0 (the aux head pulls the shared backbone off segmentation; dropping it lifted real fire@truth 71->77%%).")
+                    help="Weight of the orientation aux-loss (default 0; the aux head "
+                         "competes with segmentation on the shared backbone).")
     ap.add_argument("--kernel-lens", type=int, nargs="+", default=[11, 21, 41])
     ap.add_argument("--n-angles", type=int, default=12)
     ap.add_argument("--widths", type=int, nargs="+", default=[24, 48, 96, 192, 384],
-                    help="UNet channel widths per level. Default = the production reg2 "
-                         "model (half-width, 4x cheaper than the original full-width net).")
+                    help="UNet channel widths per level (default reproduces the deployed model).")
     ap.add_argument("--num-workers", type=int, default=6)
     ap.add_argument("--seed", type=int, default=2026)
-    ap.add_argument("--ema-decay", type=float, default=0.999)  # reg2
+    ap.add_argument("--ema-decay", type=float, default=0.999)
     ap.add_argument("--orient-cache-size", type=int, default=24,
                     help="Panels cached in the orientation-map cache (per worker).")
     ap.add_argument("--ema-exclude", nargs="*", default=[],
                     help="Parameter names to exclude from EMA tracking (e.g. agg_alpha).")
     ap.add_argument("--data-sources", nargs="*", default=None,
-                    help="Train on multiple full-panel h5 datasets (no merge) via "
-                         "DiffimConcatDataset. Each arg is 'h5path:csvpath'. Val uses "
-                         "--data-h5/--data-csv (realistic val panels). For 'much more data'.")
+                    help="Train on multiple full-panel h5 datasets via DiffimConcatDataset. "
+                         "Each arg is 'h5path:csvpath'. Val uses --data-h5 / --data-csv.")
     ap.add_argument("--intensity-aug", action="store_true",
-                    help="Train-set intensity+noise augmentation (vary effective SNR/"
-                         "background) on top of --augment. Data-like regularizer for the "
-                         "faint-trail regime.")
+                    help="Train-set intensity+noise augmentation (vary effective SNR / "
+                         "background); regularises the faint-trail regime.")
     ap.add_argument("--dropout", type=float, default=0.0,
-                    help="Spatial dropout p (bottleneck + pre-head). 0 = off (default, "
-                         "identical to before). ~0.1-0.2 regularizes the post-ep10 overfit.")
+                    help="Spatial dropout p (bottleneck + pre-head). 0 = off.")
     ap.add_argument("--augment", action="store_true",
-                    help="Enable D4 dihedral augmentation (flips + 90deg rotations "
-                         "with sin2b/cos2b orientation-label transform) on the TRAIN "
-                         "set. Trails are orientation-agnostic so this is label-"
-                         "preserving; counters the no-augmentation overfitting.")
+                    help="D4 dihedral augmentation (flips + 90deg rotations with sin2b/cos2b "
+                         "orientation-label transform). Trails are orientation-agnostic so "
+                         "this is label-preserving.")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--init-from", default="",
                     help="Trainable checkpoint (last.pt/best.pt) to "
@@ -271,7 +265,7 @@ def main():
         p_drop=args.dropout,
     ).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    log(f"model params: {n_params/1e6:.2f} M  device={device}")  # reg2 = widths 24 48 96 192 384
+    log(f"model params: {n_params/1e6:.2f} M  device={device}")
     log(f"kernel_lens={args.kernel_lens} n_angles={args.n_angles}")
 
     _init_ck = None

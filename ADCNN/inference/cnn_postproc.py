@@ -1,18 +1,12 @@
-"""Stage-2 FALSE-POSITIVE filter — focal-loss cutout CNN.
+"""Stage-2 false-positive filter — focal-loss cutout CNN.
 
-Stage 1 is the segmentation model (``predict`` + ``candidates``); stage 2 rejects false
-positives. For each segmentation candidate this scores a 96x96 3-channel cutout
+For each stage-1 segmentation candidate this scores a ``k x k`` 3-channel cutout
 ``[diffim/sigma, seg_prob, seg_agg]`` with a small conv net (``depth`` blocks, widths
-w, 2w, ...) and keeps detections whose score >= the deployed threshold.
+``w, 2w, 4w, ...``) and keeps detections whose score meets the deployed threshold.
 
-Why a cutout CNN (and not the legacy 72-feature RandomForest): the CNN sees the raw local
-diffim context the hand-built features summarised, so it separates faint trails from
-residual/artefact false positives better. Trained on the train2 cutout dataset (focal loss,
-``ADCNN.training.cnn_postproc``).
-
-Architecture is sidecar-driven: ``load_cnn(path)`` reads the matching ``.json`` next to the
-``.pt`` for ``width / depth / k / aux_dim`` so a single inference module supports any trained
-size without code edits. The deployed defaults below match the shipped checkpoint.
+The architecture is sidecar-driven: ``load_cnn(path)`` reads the matching ``.json`` next
+to the ``.pt`` for ``width / depth / k`` so a single inference module supports any
+trained size. Defaults below match the shipped checkpoint.
 """
 from __future__ import annotations
 
@@ -22,23 +16,22 @@ from pathlib import Path
 import numpy as np
 
 
-# Default operating point (override per call via the sidecar's "threshold" entry). Do NOT tune
-# this on the eval set — it's the combined 5sigma+ADCNN FP/panel-budget operating point set on
-# val2 by ``ADCNN.training.cnn_postproc.calibrate_combined_threshold`` and persisted in the
-# sidecar. The value below is the fallback when the sidecar is absent.
+# Default operating point — set by the combined-FPP-budget calibration on the calibration
+# set in ``ADCNN.training.cnn_postproc.calibrate_combined_threshold`` and persisted in the
+# sidecar JSON. The literal below is the fallback when the sidecar is absent.
 CNN_DEFAULT_THR = 0.6
 CUTOUT_K = 96          # cutout side length (px); shipped CNN cache + training defaults to 96.
 NET_WIDTH = 40         # base conv width; matches the deployed checkpoint.
-NET_DEPTH = 4          # number of conv blocks (depth-4 was the FP-budget breakthrough).
+NET_DEPTH = 4          # number of conv blocks.
+SCORE_BATCH = 512      # forward micro-batch for `apply_cnn`.
+CLIP_SIGMA = 20.0      # diffim cutout clip range (in units of MAD-sigma); matches training.
 
 
-def build_net(width: int = NET_WIDTH, depth: int = NET_DEPTH, in_ch: int = 3, k: int = CUTOUT_K,
-              aux_dim: int = 0):
+def build_net(width: int = NET_WIDTH, depth: int = NET_DEPTH, in_ch: int = 3, k: int = CUTOUT_K):
     """The stage-2 cutout classifier: ``depth`` conv blocks (widths ``w, 2w, 4w, ...``) ->
     AdaptiveAvgPool2d(1) -> Dropout -> Linear. Fully convolutional w.r.t. ``k``, so larger
-    cutouts work with no code change. If ``aux_dim > 0`` a small MLP on the candidate catalog
-    features is concatenated before the head (kept for compatibility; deployed shape is
-    aux_dim=0). The architecture is defined here ONCE; training imports it from this module.
+    cutouts work with no code change. The architecture is defined here ONCE; training imports
+    it from this module.
     """
     import torch
     import torch.nn as nn
@@ -56,47 +49,42 @@ def build_net(width: int = NET_WIDTH, depth: int = NET_DEPTH, in_ch: int = 3, k:
         c = w
     layers += [nn.AdaptiveAvgPool2d(1), nn.Flatten()]
     backbone = nn.Sequential(*layers)
-    aux_head = None
-    head_in = c
-    if aux_dim > 0:
-        aux_head = nn.Sequential(
-            nn.Linear(aux_dim, 32), nn.ReLU(), nn.BatchNorm1d(32),
-            nn.Linear(32, 32), nn.ReLU(), nn.BatchNorm1d(32))
-        head_in = c + 32
-    head = nn.Sequential(nn.Dropout(0.3), nn.Linear(head_in, 1))
+    head = nn.Sequential(nn.Dropout(0.3), nn.Linear(c, 1))
 
     class Net(nn.Module):
         def __init__(s):
             super().__init__()
             s.backbone = backbone
-            s.aux_head = aux_head
             s.head = head
 
-        def forward(s, x, aux=None):
-            z = s.backbone(x)
-            if s.aux_head is not None:
-                if aux is None:
-                    raise ValueError("model was built with aux_dim>0 but aux was not provided")
-                z = torch.cat([z, s.aux_head(aux)], dim=1)
-            return s.head(z).squeeze(1)
+        def forward(s, x):
+            return s.head(s.backbone(x)).squeeze(1)
     return Net()
 
 
 def load_cnn(path: str, device: str = "cpu"):
-    """Load the focal cutout CNN. The architecture (width / depth / k / aux_dim) is read from
-    the sidecar JSON next to ``path``; missing keys fall back to the module defaults so the
-    legacy depth=3 / k=48 checkpoint still loads."""
+    """Load the focal cutout CNN. The architecture (``width / depth / k``) is read from the
+    sidecar JSON next to ``path``; missing keys fall back to the module defaults."""
     import torch
     p = Path(path); sc = p.with_suffix(".json")
     info = json.loads(sc.read_text()) if sc.exists() else {}
     net = build_net(width=int(info.get("width", NET_WIDTH)),
                     depth=int(info.get("depth", NET_DEPTH)),
                     in_ch=int(info.get("in_ch", 3)),
-                    k=int(info.get("k", CUTOUT_K)),
-                    aux_dim=int(info.get("aux_dim", 0))).to(device)
+                    k=int(info.get("k", CUTOUT_K))).to(device)
     net.load_state_dict(torch.load(str(p), map_location=device, weights_only=True))
     net.eval()
     return net
+
+
+def read_threshold(path: str, default: float = CNN_DEFAULT_THR) -> float:
+    """Read the calibrated CNN threshold from the sidecar JSON next to ``path``; fall back
+    to ``default`` (== ``CNN_DEFAULT_THR``) when the sidecar is absent or missing the entry.
+    """
+    sc = Path(path).with_suffix(".json")
+    if not sc.exists():
+        return float(default)
+    return float(json.loads(sc.read_text()).get("threshold", default))
 
 
 def _cutout(arr: np.ndarray, x: float, y: float, k: int = CUTOUT_K) -> np.ndarray:
@@ -113,8 +101,8 @@ def _cutout(arr: np.ndarray, x: float, y: float, k: int = CUTOUT_K) -> np.ndarra
 
 def make_cutouts(cand_df, img, prob, agg, *, k: int = CUTOUT_K) -> np.ndarray:
     """Build the (N, 3, k, k) cutout stack [diffim/sigma, seg_prob, seg_agg] for each candidate.
-    The diffim channel is normalised by the panel MAD-sigma and clipped to [-20, 20] (matches
-    training in ``ADCNN.training.cnn_postproc``)."""
+    The diffim channel is normalised by the panel MAD-sigma and clipped to ``[-CLIP_SIGMA, +CLIP_SIGMA]``
+    (matches training in ``ADCNN.training.cnn_postproc``)."""
     img = np.asarray(img, np.float32)
     prob = np.asarray(prob, np.float32)
     agg = np.asarray(agg, np.float32)
@@ -129,8 +117,9 @@ def make_cutouts(cand_df, img, prob, agg, *, k: int = CUTOUT_K) -> np.ndarray:
                   _cutout(prob, r.x_centroid, r.y_centroid, k),
                   _cutout(agg, r.x_centroid, r.y_centroid, k)])
         for _, r in cand_df.iterrows()]).astype(np.float32)
-    # scrub NaN/inf to finite before the model sees them; no-op on clean sim data.
-    return np.clip(np.nan_to_num(X, nan=0.0, posinf=20.0, neginf=-20.0), -20, 20)
+    # Scrub NaN/inf to finite before the model sees them; no-op on clean sim data.
+    return np.clip(np.nan_to_num(X, nan=0.0, posinf=CLIP_SIGMA, neginf=-CLIP_SIGMA),
+                   -CLIP_SIGMA, CLIP_SIGMA)
 
 
 def apply_cnn(cand_df, cnn, img, prob, agg, *, thr: float | None = None,
@@ -145,7 +134,8 @@ def apply_cnn(cand_df, cnn, img, prob, agg, *, thr: float | None = None,
     X = make_cutouts(out, img, prob, agg, k=k)
     with torch.no_grad():
         s = torch.sigmoid(torch.cat([
-            cnn(torch.tensor(X[i:i + 512]).to(device)) for i in range(0, len(X), 512)])).cpu().numpy()
+            cnn(torch.tensor(X[i:i + SCORE_BATCH]).to(device))
+            for i in range(0, len(X), SCORE_BATCH)])).cpu().numpy()
     out[score_col] = s
     if thr is not None:
         out = out[out[score_col] >= thr].reset_index(drop=True)

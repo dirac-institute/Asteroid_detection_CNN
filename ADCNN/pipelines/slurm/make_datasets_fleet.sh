@@ -4,11 +4,11 @@
 # build is evenly split over the nodes with no single-node straggler holding the gate.
 #
 #   1. PLAN  (1 task)        : select + partition the universe -> split.json (--plan-only)
-#   2. BUILD (5 arrays)      : train/val/train2/val2/test, each an array of ceil(size/PANELS_PER_SHARD)
+#   2. BUILD (5 arrays)      : train/val/cnn_train/cnn_val/test, each an array of ceil(size/PANELS_PER_SHARD)
 #                             shards -> <set>.shard<k>.{h5,csv}, all running in parallel
-#   3. GATHER (1 task)       : concat the small sets' shards -> val/train2/val2/test.{h5,csv}
+#   3. GATHER (1 task)       : concat the small sets' shards -> val/cnn_train/cnn_val/test.{h5,csv}
 #                             (train is read straight from its shards via --data-sources, no concat)
-#   4. TRAIN (afterok 2+3)   : stage-1 on all train.shard*.h5 + stage-2 CNN on train2/val2
+#   4. TRAIN (afterok 2+3)   : stage-1 on all train.shard*.h5 + stage-2 CNN on cnn_train/cnn_val
 #   5. EVAL  (afterok 4)     : not-worse gate vs the deployed model + notebook plots
 #
 #   bash ADCNN/pipelines/slurm/make_datasets_fleet.sh
@@ -16,7 +16,7 @@
 set -eo pipefail
 REPO="${ADCNN_REPO:-/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN}"
 cd "$REPO"
-RUN_NAME="${RUN_NAME:-seg_v2}"
+RUN_NAME="${RUN_NAME:-seg}"
 SLURM="ADCNN/pipelines/slurm/make_datasets.slurm"
 PANELS_PER_SHARD="${PANELS_PER_SHARD:-150}"   # ~equal shard wall-time; sets #shards per set
 SKIP_TRAIN="${SKIP_TRAIN:-}"                  # =1 -> build+gather only, don't submit train/eval
@@ -42,10 +42,10 @@ PLAN=$(sbatch --parsable --partition="$BUILD_PARTITION" --cpus-per-task=16 --mem
 echo "plan        : $PLAN  (partition=$BUILD_PARTITION, ~$PANELS_PER_SHARD panels/shard)"
 
 # one array per set
-declare -A SIZEOF=( [train]=$N_TRAIN [val]=$N_VAL [train2]=$N_TRAIN2 [val2]=$N_VAL2 [test]=$N_TEST )
+declare -A SIZEOF=( [train]=$N_TRAIN [val]=$N_VAL [cnn_train]=$N_TRAIN2 [cnn_val]=$N_VAL2 [test]=$N_TEST )
 declare -A ARR
 BUILD_DEPS=""
-for s in train val train2 val2 test; do
+for s in train val cnn_train cnn_val test; do
   n=$(nshards "${SIZEOF[$s]}")
   J=$(sbatch --parsable $BUILD_OPTS --dependency=afterok:$PLAN --array=0-$((n-1)) \
       --job-name=adcnn-$s --export=ALL,N_SHARDS="$n",ONLY_SETS="$s" "$SLURM")
@@ -55,11 +55,11 @@ for s in train val train2 val2 test; do
 done
 
 # gather the small sets' shards into single files (train stays sharded, read via --data-sources)
-GATHER=$(GATHER=1 ONLY_SETS="val train2 val2 test" sbatch --parsable \
-         --dependency=afterok:${ARR[val]}:${ARR[train2]}:${ARR[val2]}:${ARR[test]} \
+GATHER=$(GATHER=1 ONLY_SETS="val cnn_train cnn_val test" sbatch --parsable \
+         --dependency=afterok:${ARR[val]}:${ARR[cnn_train]}:${ARR[cnn_val]}:${ARR[test]} \
          --partition="$BUILD_PARTITION" --cpus-per-task=4 --mem=32G --time=01:00:00 \
          --job-name=adcnn-gather "$SLURM")
-echo "gather      : $GATHER  (val/train2/val2/test shards -> single files)"
+echo "gather      : $GATHER  (val/cnn_train/cnn_val/test shards -> single files)"
 
 if [ -n "$SKIP_TRAIN" ]; then
   echo "$PLAN ${BUILD_DEPS#:} $GATHER" > /tmp/adcnn_fleet_jobs.txt

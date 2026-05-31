@@ -196,7 +196,7 @@ def trace_seg(model, in_ch, tile=128):
                 out_ch=head[1], head_hw=(head[2], head[3]), block=block, hough=hough)
 
 
-def trace_cnn(net, k=48):
+def trace_cnn(net, k=96):
     """Forward-trace the filter CNN; return ordered conv-stack stages + the head."""
     import torch
     stages, hs = [], []
@@ -208,14 +208,16 @@ def trace_cnn(net, k=48):
             stages.append(dict(i=idx, kinds=kinds, c=s[1], h=s[2] if len(s) > 2 else 1))
         return hook
 
-    for idx, blk in enumerate(net.f):
+    # Hook each conv block inside `backbone` (the trailing AdaptiveAvgPool2d + Flatten are skipped).
+    conv_blocks = [m for m in net.backbone.children() if isinstance(m, torch.nn.Sequential)]
+    for idx, blk in enumerate(conv_blocks):
         hs.append(blk.register_forward_hook(mk(idx)))
     with torch.no_grad():
         net(torch.zeros(1, 3, k, k))
     for h in hs:
         h.remove()
-    lin = next((c for c in net.h.modules() if isinstance(c, torch.nn.Linear)), None)
-    return dict(k=k, in_ch=3, stages=stages, head=[type(c).__name__ for c in net.h.children()],
+    lin = next((c for c in net.head.modules() if isinstance(c, torch.nn.Linear)), None)
+    return dict(k=k, in_ch=3, stages=stages, head=[type(c).__name__ for c in net.head.children()],
                 out_features=int(lin.out_features) if lin else 1)
 
 
@@ -538,8 +540,7 @@ def plot_system(seg_spec=None, cnn_spec=None, savepath=None):
         ("48² cutout\n×3", PALETTE["cnn"], True, False),
         ("focal cutout\nCNN filter", PALETTE["cnn"], False, True),
         ("score ≥ 0.63", PALETTE["keep"], False, False),
-        ("Veres fit\nx,y,L,θ,SNR,mag", PALETTE["head"], False, False),
-        ("HelioLinC\nlinking → tracks", PALETTE["bottleneck"], False, False),
+        ("detection catalog", PALETTE["head"], False, False),
     ]
     x = 0.0; dx = 1.74; bw, bh = 1.44, 1.2; prev = None
     for i, (label, col, has_img, emph) in enumerate(stages):

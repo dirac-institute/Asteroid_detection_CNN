@@ -1,24 +1,22 @@
-"""Train the stage-2 false-positive filter — the focal-loss cutout CNN.
+"""Train the stage-2 false-positive filter -- the focal-loss cutout CNN.
 
-Pipeline stage 2: the segmentation model emits many candidate components per panel (asteroid
-trails + residual/artefact false positives). The cutout CNN scores a ``CUTOUT_K x CUTOUT_K x 3``
+The segmentation model emits many candidate components per panel (asteroid trails +
+residual / artefact false positives). The cutout CNN scores a ``CUTOUT_K x CUTOUT_K x 3``
 patch ``[diffim/sigma, seg_prob, seg_agg]`` per candidate and rejects FP while keeping trails.
-Replaces the legacy 72-feature RandomForest.
 
-Training is leakage-safe: cutouts are built by running the trained segmentation model on
-held-out panels (never the test set); candidates are labelled by overlap with the injected
-truth (:func:`ADCNN.inference.features.label_candidates_by_injection_overlap`); a focal CNN is
-fit; the operating threshold is set by the COMBINED 5sigma+ADCNN FP-budget on val2 -- the
-deployed system reports the deduplicated UNION of (5sigma-stack) ∪ (ADCNN), and the cut here
-is the score at which that union's FP/panel == ``FPP_BUDGET``.
+Training is leakage-safe: cutouts are built by running the trained segmentation model on a
+held-out CNN-training set (never the eval test set); candidates are labelled by overlap with
+the injected truth (:func:`ADCNN.inference.features.label_candidates_by_injection_overlap`);
+a focal CNN is fit; the operating threshold is set by the combined 5σ-stack + ADCNN
+FP-budget on the calibration set -- the deployed system reports the deduplicated union
+(5σ-stack) ∪ (ADCNN), and the cut here is the score at which that union's FP/panel equals
+``FPP_BUDGET``.
 
-Default recipe (matches the deployed checkpoint, learned via the overnight filter-v2
-investigation):
+Default recipe (matches the shipped checkpoint):
   - architecture: ``ADCNN.inference.cnn_postproc.build_net`` at width=40, depth=4, k=96.
   - 60 epochs, focal loss, cosine LR with 3-ep warmup, random rot/flip augmentation.
-  - DataParallel across all visible GPUs for the train step.
-  - Best-val-AUC checkpoint saved (NOT the last epoch — that one overfits and roughly doubles
-    the FP/panel at the same recall).
+  - DataParallel across all visible GPUs.
+  - Best-val-AUC checkpoint saved.
 """
 from __future__ import annotations
 
@@ -39,11 +37,12 @@ HOLDOUT_FRAC = 0.10        # panel-disjoint holdout used for the diagnostic AUC
 FP_CAP = 600               # max false-positive cutouts kept per panel (class balance)
 
 # ---- operating point (the COMBINED detector) ----
-# ADCNN complements the classical 5sigma stack: the deployed system reports the DEDUPLICATED
-# UNION of (5sigma-stack) ∪ (ADCNN). FPP_BUDGET is the false-positives-per-panel that union is
-# allowed; ``calibrate_combined_threshold`` sets ADCNN's score cut on val2 so the union hits it.
-# val2 must carry ``real_labels_5sigma`` + ``stack_detection_5sigma`` -- build it with
-# ``make_sim_data --multi-sigma-sets val2 --test-sigmas 5``.
+# ADCNN complements the classical 5σ stack: the deployed system reports the deduplicated
+# union (5σ-stack) ∪ (ADCNN). FPP_BUDGET is the false-positives-per-panel that union is
+# allowed; ``calibrate_combined_threshold`` sets ADCNN's score cut on the calibration set so
+# the union hits it. The calibration set must carry ``real_labels_5sigma`` and
+# ``stack_detection_5sigma`` -- build it with
+# ``make_sim_data --multi-sigma-sets <set> --test-sigmas 5``.
 FPP_BUDGET = 100.0
 DEDUP_TOL_PX = 20.0
 STACK_SIGMA = 5
@@ -85,8 +84,13 @@ def panel_cutouts(model, img, rl, panel_cat, *, pid: int = 0, k: int = CUTOUT_K,
 # ---------------------------------------------------------------------------
 # Focal-loss training (DataParallel, cosine LR, augmentation)
 # ---------------------------------------------------------------------------
-def _focal_loss_fn(pw, gamma: float = 2.0):
-    """pos_weight-balanced focal BCE (the deployed recipe)."""
+FOCAL_GAMMA = 2.0
+SCORE_BATCH = 512
+CLIP_SIGMA = 20.0
+
+
+def _focal_loss_fn(pw, gamma: float = FOCAL_GAMMA):
+    """pos_weight-balanced focal BCE."""
     import torch
     import torch.nn.functional as F
 
@@ -125,14 +129,15 @@ def train_cnn(X, y, panel=None, *, width: int = NET_WIDTH, depth: int = NET_DEPT
               gpus: int = 1, augment: bool = True, cosine_lr: bool = True):
     """Fit the focal cutout CNN on cutouts ``X(N,3,k,k)`` with labels ``y(N)``. The held-out
     set is used only for a diagnostic AUC (the operating threshold comes from
-    :func:`calibrate_combined_threshold`). Pass an explicit ``X_holdout``/``y_holdout`` (the
-    val2 cutouts) for AUC on dedicated panels; otherwise a panel-disjoint slice of the train
-    cutouts is held out. ``gpus`` > 1 wraps in DataParallel. Returns ``(net, info)``."""
+    :func:`calibrate_combined_threshold`). Pass an explicit ``X_holdout``/``y_holdout``
+    (cutouts on dedicated calibration panels) for AUC on those; otherwise a panel-disjoint
+    slice of the train cutouts is held out. ``gpus`` > 1 wraps in DataParallel.
+    Returns ``(state_dict, info)``."""
     import torch
     import torch.nn as nn
     from sklearn.metrics import roc_auc_score
 
-    X = np.clip(np.asarray(X, np.float32), -20, 20)
+    X = np.clip(np.asarray(X, np.float32), -CLIP_SIGMA, CLIP_SIGMA)
     y = np.asarray(y, np.float32)
     in_ch, k = X.shape[1], X.shape[2]
     dev = torch.device(device if torch.cuda.is_available() else "cpu")
@@ -141,9 +146,9 @@ def train_cnn(X, y, panel=None, *, width: int = NET_WIDTH, depth: int = NET_DEPT
 
     if X_holdout is not None and len(X_holdout):
         Xtr, ytr = X, y
-        Xho = np.clip(np.asarray(X_holdout, np.float32), -20, 20)
+        Xho = np.clip(np.asarray(X_holdout, np.float32), -CLIP_SIGMA, CLIP_SIGMA)
         yho = np.asarray(y_holdout, np.float32)
-        holdout_src = "val2"
+        holdout_src = "external"
     else:
         if panel is not None and len(np.unique(panel)) > 1:
             pans = np.unique(panel); rng.shuffle(pans)
@@ -179,18 +184,19 @@ def train_cnn(X, y, panel=None, *, width: int = NET_WIDTH, depth: int = NET_DEPT
 
     def score(Xa):
         net.eval()
-        T = torch.tensor(np.clip(Xa, -20, 20)).to(dev)
+        T = torch.tensor(np.clip(Xa, -CLIP_SIGMA, CLIP_SIGMA)).to(dev)
         with torch.no_grad():
-            return torch.sigmoid(torch.cat([net(T[k:k + 512]) for k in range(0, len(T), 512)])).cpu().numpy()
+            return torch.sigmoid(torch.cat([net(T[i:i + SCORE_BATCH])
+                                            for i in range(0, len(T), SCORE_BATCH)])).cpu().numpy()
 
     best_auc = -1.0
     best_state = None
     for ep in range(epochs):
         net.train(); perm = torch.randperm(N)
         ep_loss = 0.0; nbatch = 0
-        for kk in range(0, N, batch_size):
-            b = perm[kk:kk + batch_size]
-            opt.zero_grad()
+        for bi in range(0, N, batch_size):
+            b = perm[bi:bi + batch_size]
+            opt.zero_grad(set_to_none=True)
             x = Xt[b].to(dev)
             if augment:
                 x = _aug_batch(x)
@@ -206,12 +212,12 @@ def train_cnn(X, y, panel=None, *, width: int = NET_WIDTH, depth: int = NET_DEPT
             if auc > best_auc:
                 best_auc = auc
                 raw_sd = (net.module.state_dict() if hasattr(net, "module") else net.state_dict())
-                best_state = {kk: v.detach().cpu().clone() for kk, v in raw_sd.items()}
+                best_state = {pn: v.detach().cpu().clone() for pn, v in raw_sd.items()}
         print(msg, flush=True)
 
     # Use best-AUC checkpoint, falling back to the final state if no val was scored.
     final_sd = (net.module.state_dict() if hasattr(net, "module") else net.state_dict())
-    state = best_state if best_state is not None else {kk: v.detach().cpu() for kk, v in final_sd.items()}
+    state = best_state if best_state is not None else {pn: v.detach().cpu() for pn, v in final_sd.items()}
     info = {"width": int(width), "depth": int(depth), "in_ch": int(in_ch), "k": int(k),
             "epochs": int(epochs), "n_train": int(N), "n_pos_train": int(npos),
             "n_holdout": int(len(yho)), "holdout_src": holdout_src,
@@ -294,7 +300,7 @@ def combined_fpp_threshold(adcnn_cat: "pd.DataFrame", stack_cat: "pd.DataFrame",
 def calibrate_combined_threshold(seg_ckpt, cnn_pt, h5_path, csv_path, panel_ids, *,
                                  budget: float = FPP_BUDGET, tol_px: float = DEDUP_TOL_PX,
                                  sigma: int = STACK_SIGMA, device: str = "cuda") -> tuple[float, dict]:
-    """Run the two-stage detector at ``cnn_thr=0.0`` on a calibration set (val2), build the
+    """Run the two-stage detector at ``cnn_thr=0.0`` on a calibration set (cnn_val), build the
     stack's per-sigma catalog from ``real_labels_<sigma>sigma`` + ``stack_detection_<sigma>sigma``,
     then call :func:`combined_fpp_threshold`. Returns ``(threshold, diag)``. Requires the set
     to carry the per-sigma stack plane + column (build with
@@ -316,8 +322,8 @@ def calibrate_combined_threshold(seg_ckpt, cnn_pt, h5_path, csv_path, panel_ids,
 def _cutouts_for_panels(model, h5_path, csv_path, panel_ids, *, fp_cap, device, k=CUTOUT_K):
     """Build labelled cutouts ``(X, y, panel)`` for the given panels of an h5/csv. The truth
     catalog image_ids are remapped into the 0..N stacking order so the panel-id passed to
-    ``panel_cutouts`` matches the injection-overlap labelling. Used by ``train_cnn_from_val``
-    for both the training pool and the val2 AUC pool."""
+    ``panel_cutouts`` matches the injection-overlap labelling. Used by ``train_cnn_with_calibration``
+    for both the training pool and the cnn_val AUC pool."""
     cat = pd.read_csv(csv_path)
     remap = {orig: i for i, orig in enumerate(panel_ids)}
     cat = cat[cat["image_id"].isin(remap)].copy()
@@ -338,21 +344,21 @@ def _cutouts_for_panels(model, h5_path, csv_path, panel_ids, *, fp_cap, device, 
     return np.concatenate(Xs), np.concatenate(ys), np.concatenate(pans)
 
 
-def train_cnn_from_val(seg_ckpt, train_h5, train_csv, train_panel_ids, out_pt, *,
+def train_cnn_with_calibration(seg_ckpt, train_h5, train_csv, train_panel_ids, out_pt, *,
                        thr_h5=None, thr_csv=None, thr_panel_ids=None,
                        fp_cap: int = FP_CAP, epochs: int = EPOCHS,
                        fpp_budget: float = FPP_BUDGET, gpus: int = 1,
                        device: str = "cuda"):
     """Full stage-2 CNN training: load the TorchScript segmentation model, build labelled
     cutouts on ``train_panel_ids`` (in-memory), fit the focal CNN, save the state_dict, then
-    calibrate the operating threshold by the COMBINED 5sigma+ADCNN FP-budget on val2.
+    calibrate the operating threshold by the COMBINED 5sigma+ADCNN FP-budget on cnn_val.
 
-    When a threshold set is given (``thr_h5``/``thr_csv``/``thr_panel_ids``, the val2 set),
-    :func:`calibrate_combined_threshold` runs the two-stage detector at ``cnn_thr=0`` on val2,
+    When a threshold set is given (``thr_h5``/``thr_csv``/``thr_panel_ids``, the cnn_val set),
+    :func:`calibrate_combined_threshold` runs the two-stage detector at ``cnn_thr=0`` on cnn_val,
     builds the 5sigma-stack catalog, and binary-searches the ADCNN score cut so the
     deduplicated union has ``fp_per_panel == fpp_budget`` -- that is the threshold written to
-    the sidecar. val2 MUST carry ``real_labels_5sigma`` + ``stack_detection_5sigma``
-    (rebuild with ``make_sim_data --multi-sigma-sets val2 --test-sigmas 5``); without them the
+    the sidecar. cnn_val MUST carry ``real_labels_5sigma`` + ``stack_detection_5sigma``
+    (rebuild with ``make_sim_data --multi-sigma-sets cnn_val --test-sigmas 5``); without them the
     calibration is skipped and only the AUC diagnostic is reported."""
     import json
     import torch
@@ -362,7 +368,7 @@ def train_cnn_from_val(seg_ckpt, train_h5, train_csv, train_panel_ids, out_pt, *
     X, y, panel = _cutouts_for_panels(model, train_h5, train_csv, train_panel_ids,
                                       fp_cap=fp_cap, device=dev)
     if not len(X):
-        raise RuntimeError("train_cnn_from_val: no candidates extracted on the train panels")
+        raise RuntimeError("train_cnn_with_calibration: no candidates extracted on the train panels")
     print(f"[cnn-train] train pool: {len(y)} cutouts ({int((y == 1).sum())} pos) over "
           f"{len(np.unique(panel))} panels", flush=True)
 
@@ -370,7 +376,7 @@ def train_cnn_from_val(seg_ckpt, train_h5, train_csv, train_panel_ids, out_pt, *
     if thr_h5:
         Xho, yho, _ = _cutouts_for_panels(model, thr_h5, thr_csv, thr_panel_ids,
                                           fp_cap=fp_cap, device=dev)
-        print(f"[cnn-train] val2 AUC pool: {len(yho)} cutouts ({int((yho == 1).sum())} pos)", flush=True)
+        print(f"[cnn-train] cnn_val AUC pool: {len(yho)} cutouts ({int((yho == 1).sum())} pos)", flush=True)
 
     state, info = train_cnn(X, y, panel, epochs=epochs, device=dev,
                             X_holdout=Xho, y_holdout=yho, gpus=gpus)
@@ -378,7 +384,7 @@ def train_cnn_from_val(seg_ckpt, train_h5, train_csv, train_panel_ids, out_pt, *
     sidecar = Path(out_pt).with_suffix(".json")
     sidecar.write_text(json.dumps(info, indent=2))
 
-    # Combined-FPP operating point on val2 (sets the sidecar 'threshold').
+    # Combined-FPP operating point on cnn_val (sets the sidecar 'threshold').
     if thr_h5:
         del X, y, panel, Xho, yho   # free train-pool RAM before the calibration GPU pass.
         try:

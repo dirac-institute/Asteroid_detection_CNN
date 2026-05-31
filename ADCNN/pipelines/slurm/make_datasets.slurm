@@ -12,7 +12,7 @@
 # Build the simulated (injected-trail) diffim datasets on one node:
 #
 #   train  (+ val)   stage-1 segmentation training   (val  -> model selection)
-#   train2 (+ val2)  stage-2 cutout-CNN training      (val2 -> FP-filter threshold)
+#   cnn_train (+ cnn_val)  stage-2 cutout-CNN training      (cnn_val -> FP-filter threshold)
 #   test             held-out evaluation
 #
 # A single panel universe is selected for --where, partitioned ONCE into the five disjoint sets
@@ -21,8 +21,8 @@
 #
 # Build only some groups with SETS (the partition still covers all five and split.json is reused, so
 # partial builds stay consistent with a full one):
-#   SETS="train"            # train + val           SETS="train2"   # train2 + val2
-#   SETS="test"             # test                  SETS="train train2 test"  (default)
+#   SETS="train"            # train + val           SETS="cnn_train"   # cnn_train + cnn_val
+#   SETS="test"             # test                  SETS="train cnn_train test"  (default)
 #
 # CPU-bound (~minutes/panel: two AlardLupton subtractions + two DIA detects). For a large train set,
 # spread the build across nodes with the job array (see make_datasets_fleet.sh) or raise --time.
@@ -36,7 +36,7 @@ REPO="${ADCNN_REPO:-/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CN
 # ---- knobs (override via env) ---------------------------------------------------------------
 DATA_ROOT="${DATA_ROOT:-$REPO/DATA}"
 WHERE="${WHERE:-instrument='LSSTCam' AND day_obs>=20250801 AND day_obs<=20250921 AND band in ('u','g','r','i','z','y')}"
-SETS="${SETS:-train train2 test}"     # which groups to build now
+SETS="${SETS:-train cnn_train test}"     # which groups to build now
 SEED="${SEED:-2026}"
 # Set sizes. train is the large stage-1 set (~0.11 GB/panel uncompressed); test is gzip'd (~10x
 # smaller) and labelled at every TEST_SIGMAS in a single build. ~20% of selected panels can't be built
@@ -49,7 +49,7 @@ N_VAL2="${N_VAL2:-100}"
 N_TEST="${N_TEST:-300}"
 SIGMA="${SIGMA:-5}"                   # stack-detection sigma (train family + val)
 TEST_SIGMAS="${TEST_SIGMAS:-5 4 3}"  # label the multi-sigma sets at each of these in one build (real_labels_/stack_detection_<s>sigma)
-MULTI_SIGMA_SETS="${MULTI_SIGMA_SETS:-test}"  # which sets get the per-sigma labelling (add val2 to calibrate the combined op-point)
+MULTI_SIGMA_SETS="${MULTI_SIGMA_SETS:-test}"  # which sets get the per-sigma labelling (add cnn_val to calibrate the combined op-point)
 # Skip the per-panel pre-validation when selecting the universe: it is slow, and unbuildable panels are
 # simply dropped at build time anyway (absorbed by the over-allocation above). Set SKIP_PREVAL= to re-enable.
 SKIP_PREVAL="${SKIP_PREVAL:-1}"
@@ -62,7 +62,7 @@ SHARD="${SHARD:-${SLURM_ARRAY_TASK_ID:-0}}"  # which shard this task builds (the
 PARALLEL="${PARALLEL:-${SLURM_CPUS_PER_TASK:-32}}"
 # --- contamination guards (avoid real asteroids; keep the real test set disjoint) ---
 MIN_ECLIPTIC_LAT="${MIN_ECLIPTIC_LAT:-20}"   # only inject into fields >20 deg off the ecliptic (no main-belt)
-EXCLUDE_CSV="${EXCLUDE_CSV:-$REPO/DATA/sv_fast_movers_for_karlo_fast_with_pixels_rerun.csv}"  # real (visit,detector) to exclude
+EXCLUDE_CSV="${EXCLUDE_CSV:-$REPO/DATA/real_fast_movers.csv}"  # real (visit,detector) to exclude
 
 export PYTHONHASHSEED=0
 # One thread per worker: the build runs one process per CPU, so nested BLAS/OpenMP/numexpr parallelism
@@ -77,7 +77,7 @@ cd "$REPO"
 python3 -u -m ADCNN.pipelines.make_sim_data \
   --save-path "$DATA_ROOT" --where "$WHERE" --seed "$SEED" \
   --sets $SETS \
-  --n-train "$N_TRAIN" --n-val "$N_VAL" --n-train2 "$N_TRAIN2" --n-val2 "$N_VAL2" --n-test "$N_TEST" \
+  --n-train "$N_TRAIN" --n-val "$N_VAL" --n-cnn_train "$N_TRAIN2" --n-cnn_val "$N_VAL2" --n-test "$N_TEST" \
   --stack-detection-threshold "$SIGMA" --test-sigmas $TEST_SIGMAS --multi-sigma-sets $MULTI_SIGMA_SETS \
   --min-ecliptic-lat "$MIN_ECLIPTIC_LAT" \
   --exclude-pairs-csv "$EXCLUDE_CSV" \

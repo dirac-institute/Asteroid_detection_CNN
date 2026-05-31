@@ -1,23 +1,18 @@
-"""Realistic asteroid-trail renderer for source injection.
+"""Realistic asteroid-trail renderer for LSST source injection.
 
-LSST's stock `make_galsim_trail` renders a trail as a perfectly uniform,
-infinitely-thin, perfectly-straight `galsim.Box(L, 1e-6)` convolved with the PSF.
-The sim-to-real diagnostic (experiments/explore_simreal_gap) showed this is too
-idealized: real trail-candidates have systematically lower line-coherence features
-(oriented-aggregator mean, matched-filter SNR, integrated logit, elongation) than
-these clean injections, so a stage-2 filter trained on them rejects real trails.
+Renders an injected asteroid trail as a sum of PSF point-components along the path with:
 
-This module renders a trail as a sum of PSF point-components along the path with:
-  - a non-uniform LIGHT CURVE (rotational modulation) along the trail,
-  - TAPERED ends (acceleration / partial-detection at the extremities),
-  - a slight CURVATURE (parabolic lateral deflection).
-GalSim convolves the components with the PSF and the injection engine applies the
-same WCS transform + flux convention as the stock trail, so this is a drop-in
-replacement installed by monkeypatching `inject_engine.make_galsim_trail`.
+  - a non-uniform light curve (rotational modulation) along the trail,
+  - tapered ends (acceleration / partial-detection at the extremities),
+  - a slight curvature (parabolic lateral deflection).
 
-All morphology parameters are drawn from PHYSICAL priors (light-curve amplitudes,
-mild curvature) seeded per-injection — they are NOT fit to the real test set, so
-training on the resulting synthetic data introduces no test leakage.
+GalSim convolves the components with the PSF; the injection engine applies the same WCS
+transform and flux convention as the stock renderer. This is a drop-in replacement
+installed by monkey-patching ``lsst.source.injection.inject_engine.make_galsim_trail``.
+
+All morphology parameters are drawn from physical priors (light-curve amplitudes, mild
+curvature) seeded per-injection -- they are NOT fit to the real test set, so training on
+the resulting synthetic data introduces no test leakage.
 """
 from __future__ import annotations
 import numpy as np

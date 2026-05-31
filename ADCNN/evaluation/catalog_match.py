@@ -227,7 +227,7 @@ def stack_sigma_catalog(h5_path, csv_path, panel_ids: Iterable[int], *, sigma: i
       * real-residual centroids (FP side): per-label centroids from the h5
         ``real_labels_<sigma>sigma`` plane; point-like (length=0, beta=0).
 
-    The set's h5 is indexed by ``image_id`` (val2.h5, test.h5 are both 0..N contiguous), so
+    The set's h5 is indexed by ``image_id`` (cnn_val.h5, test.h5 are both 0..N contiguous), so
     `panel_ids` index both the h5 dataset and the csv ``image_id`` column directly.
 
     Used by both the FP-budget calibration (:func:`ADCNN.training.cnn_postproc.combined_fpp_threshold`)

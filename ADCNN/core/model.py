@@ -1,9 +1,8 @@
-"""UNet-ResSE backbone — the feature extractor under the segmentation model diffim detector.
+"""UNet-ResSE backbone — feature extractor under the segmentation diffim detector.
 
 A residual squeeze-and-excite U-Net. ``UNetResSEOrientHough`` (in ``detector.py``)
 wraps this backbone with ``out_ch=3`` (segmentation logit + orientation sin2β/cos2β)
-plus a Hough-style line aggregator. The block implementations below are kept exactly
-as the deployed reg2 weights were trained against — do not alter their arithmetic.
+plus a Hough-style line aggregator.
 """
 import torch
 import torch.nn as nn
@@ -80,7 +79,7 @@ class Up(nn.Module):
 class UNetResSE(nn.Module):
     """Residual squeeze-excite U-Net backbone (5 levels).
 
-    In segmentation model/reg2: ``in_ch=3`` (signed diffim, local-std, DIA mask), ``out_ch=3``
+    In the deployed configuration: ``in_ch=3`` (signed diffim, local-std, DIA mask), ``out_ch=3``
     (seg logit + orientation sin2β/cos2β), ``widths=(24,48,96,192,384)``. Spatial
     dropout is applied at the bottleneck and pre-head; ``p_drop=0`` → Identity
     (byte-identical to the un-regularised net).
