@@ -1,0 +1,12 @@
+{
+  "_doc": "Calibrated linkage false-alarm-rate (FPP) operating point for same-night discovery. Produced by calibrate_link_fpp.py via a cross-epoch-permutation Monte Carlo of false linkages vs ADCNN score floor; lambda_FP is expected FALSE tracks/night.",
+  "sigma": 3,
+  "sigma_kind": "one-sided",
+  "target_far_per_night": 1.35e-3,
+  "discovery_tier": "3+visit",
+  "score_min": 0.80,
+  "scaling": "lambda_FP ~ rho^2.0 (2-visit), ~rho^3.5 (3-visit)",
+  "calibration_basis": "pooled 11 night-fields (run_2v_0706 + run_band x10); 3-visit: S=0.70 lambda_FP=0.002, S=0.80 0/660 trials (predicted ~3e-5), NY2 recovered",
+  "two_visit_note": "2-visit CANNOT reach 3 sigma at this FP density (S* ~ 0.97 where real NEOs are lost; caps ~2 sigma). 2visit tracks are candidate-grade only.",
+  "cadence_note": "3-visit discovery requires fields with >=3 same-night revisits; spread-out fields recover 0 (cadence-gated, not algorithm-limited)."
+}

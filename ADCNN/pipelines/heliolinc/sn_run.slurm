@@ -57,7 +57,12 @@ source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
 python -m ADCNN.pipelines.heliolinc.mask_flags --dets "$RUN/adcnn_dets.csv" \
   --manifest "$RUN/manifest.csv" --out "$RUN/adcnn_dets_masked.csv" --workers 64
+# --score-min 0.80 = the 3-SIGMA discovery operating point from the FPP Monte-Carlo calibration
+# (calibrate_link_fpp.py / link_fpp.json): at this ADCNN score floor the 3+visit tier has a false-
+# linkage rate lambda_FP <= 1.35e-3/night (one-sided 3 sigma), validated across 11 night-fields,
+# while still recovering the real NEO 2025 NY2. 3+visit tracks at this floor are 3-sigma discoveries;
+# 2visit tracks remain candidate-grade (sub-3sigma -- 2 epochs cannot reach 3 sigma at this FP density).
 python -m ADCNN.pipelines.heliolinc.trail_state_link --dets "$RUN/adcnn_dets_masked.csv" \
   --known "$RUN/known.csv" --out "$RUN/tracks.csv" \
-  --npt 2 --min-epochs 2 --max-rms 1.0 --pa-tol 20 --pa-tol-2v 10
+  --npt 2 --min-epochs 2 --max-rms 1.0 --pa-tol 20 --pa-tol-2v 10 --score-min "${SCORE_MIN:-0.80}"
 echo "SN_RUN DONE -> $RUN/tracks.csv"

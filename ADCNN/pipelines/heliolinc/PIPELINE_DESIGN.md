@@ -60,9 +60,27 @@ RUN=$PWD/ADCNN/pipelines/heliolinc/run_<night> DAY=20250706 TRACTS=8731 \
   orbit code is correct (recovers NY2's a~1.09 AU, e~0.07 orbit) **but on raw ADCNN output 2-visit
   false-linkage ~= signal (~375/night)** — the FP density is too high. Thinning it makes 2-visit
   defensible (ADCNN score>=0.9 -> null 0.3/night, NY2 kept); the stack real/bogus path does NOT help
-  (it misses fast trails / flags them bogus). **The FP-density reduction is an open problem, deliberately
-  deferred** (see memory `two-visit-not-defensible`). The score knob is exposed but OFF by default
-  (`--score-2v-min`, `--score-min`), leaving ADCNN at its full-recall val2 threshold.
+  (it misses fast trails / flags them bogus). See memory `two-visit-not-defensible`.
+
+## FPP-calibrated operating point (the ADCNN score floor as a function of significance)
+
+The ADCNN score floor is set from a **false-alarm-rate budget**, not by hand. `calibrate_link_fpp.py`
+Monte-Carlos the false-linkage rate `lambda_FP` (false tracks/night) vs the score floor, using a
+**cross-epoch-permutation null** (each visit gets an independent random rigid sky offset -> destroys real
+cross-visit objects, preserves the real FP structure), then extrapolates `lambda_FP(S)` to the requested
+false-alarm rate. One-sided **3 sigma = lambda_FP <= 1.35e-3/night**.
+
+Result (calibrated, pooled over 11 night-fields; persisted in `link_fpp.json`):
+
+| tier | `lambda_FP ~` | S* for 3 sigma | real NEO at S* |
+|---|---|---|---|
+| 2-visit | `rho^2.0` | ~0.97 | **lost** (caps ~2 sigma) |
+| **3-visit** | `rho^3.5` | **~0.80** | **NY2 recovered** |
+
+**=> The defensible 3-sigma same-night discovery operating point is the 3+visit tier at ADCNN
+`--score-min 0.80`** (wired into `sn_run.slurm`; override with `SCORE_MIN=`). 2-visit cannot reach 3 sigma
+at this FP density, so 2visit tracks are candidate-grade only. **Cost = cadence:** 3-visit needs fields
+with >=3 same-night revisits (dense-cadence fields like NY2's; the spread-out band recovers 0).
 
 ## Validating a NEW candidate (before calling it real)
 
@@ -82,6 +100,7 @@ object. A short single-night arc is a candidate for follow-up, **not** a determi
 | `trail_state_link.py`   | **canonical linker** — single-night (pos, trail-velocity) clustering + physical_check + crossmatch |
 | `orbit_check.py`        | per-candidate bound-orbit test (Method of Herget + Lambert) for the 2-visit tier |
 | `validate_candidate.py` | randomized-trail null test + per-object recovery report for a night |
+| `calibrate_link_fpp.py` | MC calibration of the ADCNN score floor to a 3-sigma linkage FPP budget -> `link_fpp.json` |
 | `sn_detect.slurm`       | Stage-1 ADCNN SLURM job (ampere, resumable) |
 | `sn_run.slurm`          | **canonical orchestrator** — manifest -> detect (resubmit through preemption) -> known -> mask -> link |
 | `butler_diasource_catalog.py` | (auxiliary) stack diaSources + real/bogus reliability, for the deferred FP-density work |
