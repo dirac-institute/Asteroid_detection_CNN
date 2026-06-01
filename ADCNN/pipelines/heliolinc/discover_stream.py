@@ -1,13 +1,15 @@
-"""Step 2 (asteroid_cnn, GPU): STREAM difference_image FITS straight from the Butler datastore
-into the two-stage detector and emit a HelioLinC detection catalog -- no intermediate dataset,
-no big files, bounded memory.
+"""Stage 1 of the same-night NEO pipeline (asteroid_cnn, GPU): STREAM difference_image FITS straight
+from the Butler datastore into the two-stage ADCNN detector and emit the detection catalog -- no
+intermediate dataset, no big files, bounded memory.
 
-Given the manifest of FITS paths (butler_manifest.py), the panels are sharded across the visible
+Given the manifest of FITS paths (build_manifest.py), the panels are sharded across the visible
 GPUs. Each GPU process prefetches FITS with a small thread pool (astropy reads image HDU 1 + WCS +
 MJD directly -- validated bit-identical to the lsst stack, WCS agree to 0.001") so disk I/O hides
-behind the GPU, then runs segmentation model -> focal-cutout CNN stage-2 filter on each panel and
-converts kept detections (x,y) -> (RA,Dec) via the panel's own WCS. Output: adcnn_dets.csv
-[detid, mjd, ra, dec, mag, band, obscode, visit, detector, x, y, score] + colformat.txt.
+behind the GPU, then runs segmentation model -> focal-cutout CNN stage-2 filter (op-point read from
+the val2-calibrated cnn_postproc.json sidecar) on each panel and converts kept detections (x,y) ->
+(RA,Dec) via the panel's own WCS, with trail endpoints (ra0,dec0,ra1,dec1) for the linker. Output:
+adcnn_dets.csv [detid,mjd,ra,dec,mag,band,obscode,visit,detector,x,y,score,length,len_db,mf_snr,
+ra0,dec0,ra1,dec1,beta,...] + colformat.txt. Next: build_known_catalog -> mask_flags -> trail_state_link.
 """
 from __future__ import annotations
 import argparse
@@ -122,9 +124,8 @@ def run_shard(gpu_id, rows, seg_ckpt, cnn_model, thr, prefetch, out_csv, n_worke
             sky0 = wcs.all_pix2world(np.stack([xy[:, 0] - hdx, xy[:, 1] - hdy], 1), 0)
             sky1 = wcs.all_pix2world(np.stack([xy[:, 0] + hdx, xy[:, 1] + hdy], 1), 0)
             out = pd.DataFrame(dict(
-                # mag is NOT set here: the GPU streaming detector has no PhotoCalib. The calibrated AB
-                # magnitude (+ SNR) is MEASURED downstream in veres_measure_catalog (which loads the
-                # difference_image.photoCalib). NaN = not-yet-measured, never a placeholder value.
+                # mag is NOT set here: the GPU streaming detector has no PhotoCalib. NaN = not measured
+                # (the linker does not need magnitudes; mf_snr below is the per-detection significance).
                 mjd=mjd, ra=sky[:, 0], dec=sky[:, 1], mag=np.nan,
                 band=(str(r["band"])[:1] if str(r["band"]).lower() not in ("nan", "") else "r"),
                 obscode=OBSCODE, visit=int(r["visit"]), detector=int(r["detector"]),
@@ -170,16 +171,20 @@ def main():
     ap.add_argument("--manifest", default=str(REPO / "ADCNN/pipelines/heliolinc/run_disco/manifest.csv"))
     ap.add_argument("--seg-model", default=str(REPO / "models/segmentation_model.pt"))
     ap.add_argument("--cnn", default=str(REPO / "models/cnn_postproc.pt"), help="focal-cutout CNN model")
-    ap.add_argument("--cnn-thr", type=float, default=None, help="CNN operating point (default cnn_postproc.CNN_DEFAULT_THR)")
+    ap.add_argument("--cnn-thr", type=float, default=None, help="CNN operating point (default = val2-calibrated 'threshold' in the cnn_postproc.json sidecar)")
     ap.add_argument("--prefetch", type=int, default=6, help="FITS reads in flight per GPU (bounds memory)")
     ap.add_argument("--n-gpus", type=int, default=0, help="0 = all visible")
     ap.add_argument("--out", default=str(REPO / "ADCNN/pipelines/heliolinc/run_disco/adcnn_dets.csv"))
     ap.add_argument("--limit", type=int, default=0, help="first N panels only (smoke test)")
     a = ap.parse_args()
 
-    from ADCNN.inference.cnn_postproc import CNN_DEFAULT_THR
-    cnn_model = a.cnn; thr = a.cnn_thr if a.cnn_thr is not None else CNN_DEFAULT_THR
-    print(f"[discover] stage-2 filter = focal-cutout CNN ({Path(cnn_model).name}) @ thr {thr}", flush=True)
+    # Operating point comes from the val2 calibration persisted in the model sidecar JSON
+    # (cnn_postproc.json -> "threshold", the combined-FPP-budget op-point), NOT a hardcoded constant.
+    from ADCNN.inference.cnn_postproc import read_threshold
+    cnn_model = a.cnn
+    thr = a.cnn_thr if a.cnn_thr is not None else read_threshold(cnn_model)
+    print(f"[discover] stage-2 filter = focal-cutout CNN ({Path(cnn_model).name}) @ thr {thr} "
+          f"({'override' if a.cnn_thr is not None else 'val2-calibrated sidecar'})", flush=True)
 
     man = pd.read_csv(a.manifest)
     if a.limit:
