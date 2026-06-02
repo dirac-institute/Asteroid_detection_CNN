@@ -1,5 +1,20 @@
 # Same-night 2-visit vs 3-visit NEO linking — 3σ purity threshold
 
+> ⚠️ **CORRECTION (2026-06-02, units/method audit).** The 2-visit FP rates below were estimated by the
+> **null Monte Carlo** (`calibrate_link_fpp.py`, per-visit rigid sky offset). A direct, permutation-free
+> count on the real off-ecliptic field shows the null MC **OVERESTIMATES** the FP rate: with the full
+> recall-safe stack (Δt window + orbit 0.25 + collinearity 0.30 + mask), the real data yields **0 false
+> 2-tracks across all 11 adjacent pairs at every score 0.80–0.97** (keeping 16–17 real), whereas the
+> null MC predicted ~4.8 false at S=0.80 (P(0|4.8)=0.008 → not chance). Cause: real diffim FP are
+> **spatially correlated across visits** (recurring subtraction residuals at the same sky positions);
+> in real data they form *zero-motion* pairs the velocity/collinearity cuts reject, but the rigid shift
+> slides them into *moving*, check-passing pairs that don't exist in reality. **Consequence: every
+> "gap to 3σ" number derived from the null MC (the 130× and the per-pair 3.7×/S*≈0.99) is unreliable —
+> too pessimistic.** The honest status: 0 false / 11 real pairs only bounds λ ≲ 0.27/pair (95% CL),
+> ~200× above the 1.35×10⁻³ budget — under-powered. Measuring λ at the 3σ level requires counting false
+> 2-tracks on a LARGE real off-ecliptic FP substrate (~2000+ pairs), not the Monte Carlo. The null-MC
+> tables are retained below only as (inflated) upper bounds; do not cite their thresholds as the answer.
+
 Measured on real off-ecliptic LSST difference images (48k genuine false positives, zero real
 asteroids → every false link is unambiguous), with an injected fast-NEO population whose same-night
 apparition counts follow the **operational** Rubin cadence (rubin_sim OpSim `baseline_v2.0_1yr.db`
