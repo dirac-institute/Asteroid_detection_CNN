@@ -12,8 +12,19 @@
 > tracklet as a real orbit. **3σ at full faint S=0.80 completeness is not reachable by detection/linking
 > cuts.** The only faint-preserving path is reducing the ADCNN faint-FP *density* (λ∝ρ², needs ~√336≈18×
 > density cut — beyond the faint-trail/noise overlap ceiling, see fp-rejecter-1b memory) or a 3rd epoch.
-> [Overnight run accumulating 10 off-ecliptic fields (~1039 pairs) to firm up the floor + assess the
-> detector-density lever; numbers above are field 0 only so far.]
+> **Detector faint-FP-density lever — CAPPED (assessed).** A gradient-boosted classifier on ALL available
+> detection features (score, len_db, length, mf_snr, beta, beta_nn, nn_pmax) separates faint (mf_snr<8,
+> score≥0.80) real-NEO vs FP detections at AUC=0.894 — but at 95% faint-real recall it reduces faint-FP
+> density only **1.5×** (vs the ~18× needed for λ∝ρ² to reach 3σ). At SNR 2–4 a real NEO trail and a
+> noise/residual trail are pixel-similar; the cutout CNN already extracts the separable signal (the SCORE
+> is the strongest feature: faint real med 0.95 vs faint FP 0.84). So no detector improvement on single-epoch
+> cutouts reaches 18×. Corollary: the best faint discriminator is the ADCNN *score* (not SNR — faint real
+> NEOs score high on trail morphology even at low SNR); climbing the score is the faint-preserving way to
+> trade completeness for purity, but 3σ still needs score ≫0.80 → a completeness cost.
+> [Overnight run accumulating 10 off-ecliptic fields (~1039 pairs) to firm up the floor; numbers above are
+> field 0 (94 pairs) so far. VERDICT forming: 3σ at full faint S=0.80 completeness is not achievable by any
+> detection/linking method — both the linking floor (132–336×) and the detector-density lever (1.5× vs 18×)
+> fall far short; the certifying information is not in 2 same-night faint points → a 3rd epoch is required.]
 
 > ⚠️ **STATUS (2026-06-02, direct real-data measurement).** The 2-visit FP rates below were first
 > estimated by the **null Monte Carlo** (`calibrate_link_fpp.py`). I briefly claimed the null MC
