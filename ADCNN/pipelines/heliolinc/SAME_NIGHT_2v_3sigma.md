@@ -1,19 +1,16 @@
 # Same-night 2-visit vs 3-visit NEO linking — 3σ purity threshold
 
-> ⚠️ **CORRECTION (2026-06-02, units/method audit).** The 2-visit FP rates below were estimated by the
-> **null Monte Carlo** (`calibrate_link_fpp.py`, per-visit rigid sky offset). A direct, permutation-free
-> count on the real off-ecliptic field shows the null MC **OVERESTIMATES** the FP rate: with the full
-> recall-safe stack (Δt window + orbit 0.25 + collinearity 0.30 + mask), the real data yields **0 false
-> 2-tracks across all 11 adjacent pairs at every score 0.80–0.97** (keeping 16–17 real), whereas the
-> null MC predicted ~4.8 false at S=0.80 (P(0|4.8)=0.008 → not chance). Cause: real diffim FP are
-> **spatially correlated across visits** (recurring subtraction residuals at the same sky positions);
-> in real data they form *zero-motion* pairs the velocity/collinearity cuts reject, but the rigid shift
-> slides them into *moving*, check-passing pairs that don't exist in reality. **Consequence: every
-> "gap to 3σ" number derived from the null MC (the 130× and the per-pair 3.7×/S*≈0.99) is unreliable —
-> too pessimistic.** The honest status: 0 false / 11 real pairs only bounds λ ≲ 0.27/pair (95% CL),
-> ~200× above the 1.35×10⁻³ budget — under-powered. Measuring λ at the 3σ level requires counting false
-> 2-tracks on a LARGE real off-ecliptic FP substrate (~2000+ pairs), not the Monte Carlo. The null-MC
-> tables are retained below only as (inflated) upper bounds; do not cite their thresholds as the answer.
+> ⚠️ **STATUS (2026-06-02, direct real-data measurement).** The 2-visit FP rates below were first
+> estimated by the **null Monte Carlo** (`calibrate_link_fpp.py`). I briefly claimed the null MC
+> *overestimated* (run_test2 gave 0 false 2-tracks over 11 pairs) — **that was an under-powered fluke**
+> (11 pairs, an unusually clean tract). The **direct, permutation-free count on a fresh off-ecliptic
+> field** (tract 2876, |ecl_lat|=43°, **94 same-night pairs**, full recall-safe stack) gives REAL false
+> 2-tracks: λ/pair = **1.15 (S0.80), 0.34 (0.85), 0.021 (0.90), 0 (0.95; 95% UL 0.032)** — **consistent
+> with the null MC within ~2×, not far below.** So the null MC was approximately right. **Both methods
+> agree: 2-visit is ~24–53× over the 1.35×10⁻³ budget at S=0.90–0.95 — not reachable.** The per-pair
+> null-MC table below stands as roughly correct (the deep-field-night "130×" framing remains the wrong
+> *unit* — use per-pair). Measurement is being firmed up on 6 off-ecliptic fields (560 pairs) via
+> `count_realfp.py` to tighten the S=0.95 upper limit; lesson recorded: never conclude from one ~10-pair field.
 
 Measured on real off-ecliptic LSST difference images (48k genuine false positives, zero real
 asteroids → every false link is unambiguous), with an injected fast-NEO population whose same-night
