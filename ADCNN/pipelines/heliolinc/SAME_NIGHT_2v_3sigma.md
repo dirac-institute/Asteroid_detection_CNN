@@ -43,3 +43,20 @@ is the residual, NOT the orbital elements, which the short arc leaves degenerate
 `--score-2v-min ~0.90` (purity ≈0.85, λ≈0.5/field-night — clean on a single field but ~370× over 3σ).
 
 Turning the 56% pair pool into **defensible** discoveries requires multi-night tracklet→track linking.
+
+## Why no per-pair FP cut reaches 3σ (FP-cleaning study, 2026-06-02)
+Tested every recall-safe per-pair lever. Best new one: **4-endpoint collinearity** (a pair = 4 trail
+endpoints; a real mover's two trail segments lie on ONE line, perp-RMS ~0.08″ vs FP ~0.69″) → `perp<0.30″`
+keeps ~100% of real pairs and cuts FP ~3×. Brightness/SNR consistency adds ~2× but costs recall (off by
+default). LSST mask planes only ~1.3× (residual FP are *unmasked* subtraction noise). Orbital elements don't
+separate (short-arc degeneracy).
+
+**Decisive diagnosis — the FP-rate exponent falls as cuts stack:** λ_FP ∝ ρ^1.34 → 1.15 → 0.96 → **0.84**.
+A ρ² population is random coincidences (removable by thinning); a ρ^~1 population is a near-fixed
+**structured-artifact** set (unmasked subtraction-residual over-detections that are *locally* valid tracklets:
+collinear, consistent velocity, bound orbit). Per-pair physics cannot remove them — and the only handle that
+could (stationarity: a real NEO moves away, an artifact recurs at the same sky position) needs *other*
+same-night visits, which operational WFD doesn't have (2 visits/night). So the information that certifies a
+real heliocentric orbit vs a coincidental/structured alignment is **not in two same-night points** — it's in
+the third (triplet, or a second night). Best recall-safe stack cuts FP ~5× at full recall, still ~130× over
+3σ at S=0.95. **3σ purity on a pure same-night pair is not achievable by detection/linking cleverness.**

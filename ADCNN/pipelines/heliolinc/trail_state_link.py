@@ -114,7 +114,8 @@ def link(dets, *, exptime_s=30.0, tref=None, pos_tol_deg=0.017, vel_frac=0.30, v
 
 def physical_check(dets, members, exptime_s=30.0, pa_tol_deg=20.0, speed_frac=0.5,
                    lin_rms_arcsec=1.0, min_epochs=2, epoch_gap_s=120.0, pa_tol_2v_deg=10.0,
-                   orbit_check_2v=True, orbit_rate_tol=0.5, score_2v_min=0.0, max_arc_2v_min=None):
+                   orbit_check_2v=True, orbit_rate_tol=0.5, score_2v_min=0.0, max_arc_2v_min=None,
+                   perp_collinear_2v_arcsec=None, snr_frac_2v=None):
     """Defensible physical consistency of a candidate track (rejects chance/trail-angle-coincidence
     false links that pass position clustering). Requires:
       1. >= min_epochs DISTINCT time epochs (merge sub-epoch_gap snaps — back-to-back snaps are one).
@@ -201,6 +202,25 @@ def physical_check(dets, members, exptime_s=30.0, pa_tol_deg=20.0, speed_frac=0.
         sa, sb = np.hypot(ax, ay), np.hypot(bx, by)
         if abs(sa - sb) > speed_frac * max(sa, sb, 0.3):
             return False, f"trails disagree speed ({sa:.2f} vs {sb:.2f})", n_ep
+        # 5b. 4-ENDPOINT COLLINEARITY (position-coincidence, the rho-scaling discriminator the angle/
+        #     speed checks miss): a real mover's two trail segments lie on ONE trajectory line, so all
+        #     four trail endpoints are collinear to sub-arcsec; two chance FP trails are merely parallel
+        #     (random perpendicular offset). RMS perpendicular distance of the 4 endpoints from their
+        #     best-fit line. (Real p90 ~0.19"; FP p10 ~0.19" -> ~10x FP cut at ~90% recall.)
+        if perp_collinear_2v_arcsec is not None:
+            c0 = np.cos(np.radians(g.dec.mean()))
+            P = np.array([[(ra - g.ra.mean()) * c0 * 3600.0, (dec - g.dec.mean()) * 3600.0]
+                          for _, r in g.iterrows() for ra, dec in ((r.ra0, r.dec0), (r.ra1, r.dec1))])
+            P = P - P.mean(0)
+            perp = float(np.sqrt(np.mean((P @ np.linalg.svd(P)[2][1])**2)))
+            if perp > perp_collinear_2v_arcsec:
+                return False, f"non-collinear trails (perp {perp:.2f}\")", n_ep
+        # 5c. BRIGHTNESS consistency (independent of geometry): a real object has ~constant flux over the
+        #     ~20-min pair; FP members have uncorrelated SNR. |dSNR|/min(SNR).
+        if snr_frac_2v is not None and "mf_snr" in g.columns:
+            s1, s2 = float(g.mf_snr.iloc[0]), float(g.mf_snr.iloc[-1])
+            if abs(s1 - s2) > snr_frac_2v * max(min(s1, s2), 1e-3):
+                return False, f"SNR inconsistent ({s1:.1f} vs {s2:.1f})", n_ep
     # 6. 2-visit BOUND-ORBIT test (the non-circular discriminator): the two trailed tracklets must be
     #    reproduced by ONE bound, physically-plausible heliocentric orbit (Method of Herget + Lambert,
     #    using the trail velocities as the constraint). A chance FP pair admits no such orbit.
@@ -268,6 +288,8 @@ def main():
     ap.add_argument("--score-2v-min", type=float, default=0.0, help="min ADCNN score for BOTH members of a 2-visit link (purity/recall dial; set ~0.90 for a clean candidate stream; 3+visit tier unaffected)")
     ap.add_argument("--max-arc-2v-min", type=float, default=40.0, help="2-visit Δt window (min): only pair within the scheduler pair gap; the single strongest 2v FP cut (purity 0.28->0.71). None to disable")
     ap.add_argument("--orbit-rate-tol", type=float, default=0.25, help="2-visit bound-orbit velocity-residual tol (frac of trail speed); 0.25 is the purity/recall knee (0.5 was too loose). Tighter=purer")
+    ap.add_argument("--perp-collinear-2v", type=float, default=0.30, help="2-visit 4-trail-endpoint COLLINEARITY RMS tol (arcsec): real movers' two trail segments lie on ONE line (~0.08), FP merely parallel; recall-safe ~3x FP cut. None to disable")
+    ap.add_argument("--snr-frac-2v", type=float, default=None, help="2-visit brightness consistency |dSNR|/min; OFF by default (costs recall). ~0.6 for extra purity")
     ap.add_argument("--min-epochs", type=int, default=2, help="distinct time epochs (snaps merged); 2 enables 2-visit linking")
     ap.add_argument("--tol-arcsec", type=float, default=5.0)
     ap.add_argument("--tol-day", type=float, default=0.02)
@@ -300,7 +322,8 @@ def main():
             ok, info, n_ep = physical_check(dn, members, a.exptime, pa_tol_deg=a.pa_tol,
                                             lin_rms_arcsec=a.max_rms, min_epochs=a.min_epochs,
                                             pa_tol_2v_deg=a.pa_tol_2v, score_2v_min=a.score_2v_min,
-                                            max_arc_2v_min=a.max_arc_2v_min, orbit_rate_tol=a.orbit_rate_tol)
+                                            max_arc_2v_min=a.max_arc_2v_min, orbit_rate_tol=a.orbit_rate_tol,
+                                            perp_collinear_2v_arcsec=a.perp_collinear_2v, snr_frac_2v=a.snr_frac_2v)
             if not ok:
                 continue
             npass += 1

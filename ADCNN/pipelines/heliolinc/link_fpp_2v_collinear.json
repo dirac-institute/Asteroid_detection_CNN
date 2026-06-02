@@ -1,0 +1,81 @@
+{
+  "target_far": 0.00135,
+  "sigma": "3 (one-sided)",
+  "fit_slope": 0.9613115683217294,
+  "rho_star": 6.364951822563105,
+  "S_star": 0.95,
+  "npt": 2,
+  "min_epochs": 2,
+  "table": [
+    {
+      "score": 0.65,
+      "dets_per_night": 29315.0,
+      "lambda_fp": 6.75,
+      "lambda_err": 1.0648608225625409,
+      "nreal": 8,
+      "known_recovered": 15,
+      "new": 5,
+      "ny2": false
+    },
+    {
+      "score": 0.7,
+      "dets_per_night": 18365.0,
+      "lambda_fp": 2.814814814814815,
+      "lambda_err": 0.3067940883412377,
+      "nreal": 27,
+      "known_recovered": 19,
+      "new": 3,
+      "ny2": false
+    },
+    {
+      "score": 0.75,
+      "dets_per_night": 10749.0,
+      "lambda_fp": 1.2666666666666666,
+      "lambda_err": 0.12283607836269309,
+      "nreal": 120,
+      "known_recovered": 21,
+      "new": 0,
+      "ny2": false
+    },
+    {
+      "score": 0.8,
+      "dets_per_night": 5766.0,
+      "lambda_fp": 0.6083333333333333,
+      "lambda_err": 0.07270228996436286,
+      "nreal": 240,
+      "known_recovered": 21,
+      "new": 0,
+      "ny2": false
+    },
+    {
+      "score": 0.85,
+      "dets_per_night": 2914.0,
+      "lambda_fp": 0.525,
+      "lambda_err": 0.05995769185042129,
+      "nreal": 400,
+      "known_recovered": 22,
+      "new": 0,
+      "ny2": false
+    },
+    {
+      "score": 0.9,
+      "dets_per_night": 1464.0,
+      "lambda_fp": 0.315,
+      "lambda_err": 0.04160848067594395,
+      "nreal": 400,
+      "known_recovered": 18,
+      "new": 0,
+      "ny2": false
+    },
+    {
+      "score": 0.95,
+      "dets_per_night": 619.0,
+      "lambda_fp": 0.115,
+      "lambda_err": 0.021635798331089123,
+      "nreal": 400,
+      "known_recovered": 5,
+      "new": 0,
+      "ny2": false
+    }
+  ]
+}
