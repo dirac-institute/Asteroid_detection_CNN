@@ -1,5 +1,20 @@
 # Same-night 2-visit vs 3-visit NEO linking — 3σ purity threshold
 
+> 🌙 **OVERNIGHT FAINT-FLOOR (2026-06-02, NO SNR cut — faint low-SNR fast movers are the target).**
+> Direct real-data measurement (off-ecliptic field 0, 94 same-night pairs), S=0.80, full faint completeness:
+> - floor-B (recurrence veto only, TP-safe, full recall): **λ=0.319/pair = 336× over** 1.35e-3.
+> - floor-E (recurrence + tight geometry + brightness, ~half recall): **λ=0.096/pair = 132× over**.
+> An `SNR≥5` cut zeroes the FP but is NOT faint-free: 12% of injected detections at S=0.80 have SNR<5
+> (down to 1.3 — ADCNN's sub-5σ regime), and **31/231 two-visit-recoverable objects have an SNR<5 member**
+> → SNR≥5 discards faint movers. (A transient "config G = 0 FP, 0 real lost" was a low-recall artifact:
+> the linker wasn't recovering the faint pairs anyway.) Faint FP (SNR 2–4) and faint real movers (SNR 1.3–5)
+> OVERLAP in every measurable per-detection/per-pair feature → 2 same-night points cannot certify a faint
+> tracklet as a real orbit. **3σ at full faint S=0.80 completeness is not reachable by detection/linking
+> cuts.** The only faint-preserving path is reducing the ADCNN faint-FP *density* (λ∝ρ², needs ~√336≈18×
+> density cut — beyond the faint-trail/noise overlap ceiling, see fp-rejecter-1b memory) or a 3rd epoch.
+> [Overnight run accumulating 10 off-ecliptic fields (~1039 pairs) to firm up the floor + assess the
+> detector-density lever; numbers above are field 0 only so far.]
+
 > ⚠️ **STATUS (2026-06-02, direct real-data measurement).** The 2-visit FP rates below were first
 > estimated by the **null Monte Carlo** (`calibrate_link_fpp.py`). I briefly claimed the null MC
 > *overestimated* (run_test2 gave 0 false 2-tracks over 11 pairs) — **that was an under-powered fluke**
