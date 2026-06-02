@@ -32,8 +32,14 @@ Extrapolate the λ∝ρ fit to the budget → required FP density ρ\*, then map
 ρ(S) ≈ exp(25.0 − 20.8·S):
 
 - **3-visit:  S\* ≈ 0.78**  — achievable, full recall. **(shipped discovery tier.)**
-- **2-visit:  ρ\* ≈ 7.4 FP dets/field → S\* ≈ 1.10**  — **ABOVE the score ceiling of 1.0 →
-  UNREACHABLE.** No score threshold delivers 3σ purity on pairs.
+- **2-visit (per WFD pair — the operational unit, corrected):  S\* ≈ 0.99 — REACHABLE.** Measured per
+  single 2-visit pair (not per 12-visit deep-field night, which inflated λ ~11×): λ/pair = 0.44 (S0.80),
+  0.047 (0.90), 0.020 (0.95), 0.005 (0.97); λ∝ρ^1.40 → crosses 1.35×10⁻³ at S≈0.99. The gap at S=0.97 is
+  only **~3.7×**, not 130×. **So the FP floor is not the blocker — 3σ purity on a pure pair IS reachable.**
+  THE BINDING CONSTRAINT IS RECALL: recovered objects collapse (14→10→3→1 over S=0.80→0.90→0.95→0.97), so
+  at S≈0.99 the stream is 3σ-pure but recovers ~0% (only the brightest trails score ≥0.99 on both members).
+  The lever that now matters is ADCNN per-detection score on FAINT trails, not more FP cuts. (Collinearity,
+  shipped, buys real score headroom: S=0.95 reaches 15× vs ~100× without it.)
 
 ## What ships for 2-visit
 A purified **candidate / alert stream**, not a 3σ-confirmed tier. Best levers (defaults in
