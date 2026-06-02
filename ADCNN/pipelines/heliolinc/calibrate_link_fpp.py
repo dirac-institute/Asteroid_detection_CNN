@@ -31,7 +31,7 @@ sys.path.insert(0, "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CN
 from ADCNN.pipelines.heliolinc.trail_state_link import link, physical_check, crossmatch
 
 PC = dict(pa_tol_deg=20.0, lin_rms_arcsec=1.0, min_epochs=2, pa_tol_2v_deg=10.0,
-          orbit_check_2v=True, score_2v_min=0.0)
+          orbit_check_2v=True, score_2v_min=0.0, max_arc_2v_min=None)
 NPT = 2  # min detections (distinct visits) per track; set from --npt in main()
 
 
@@ -96,6 +96,8 @@ def main():
     ap.add_argument("--min-epochs", type=int, default=None, help="distinct epochs (default = --npt)")
     ap.add_argument("--target-far", type=float, default=1.35e-3, help="false tracks/night budget (3sigma one-sided=1.35e-3)")
     ap.add_argument("--len-db-min", type=float, default=6.0)
+    ap.add_argument("--max-arc-min", type=float, default=None, help="2-visit Δt window (min); cap the pair arc to the scheduler pair gap (~30). None=no cap")
+    ap.add_argument("--orbit-rate-tol", type=float, default=0.5, help="2-visit bound-orbit velocity-residual tolerance (frac of trail speed); tighter=purer (0.5 loose default, ~0.2 strong)")
     ap.add_argument("--art-frac-max", type=float, default=0.3)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--mc-target-events", type=int, default=60, help="aim for ~this many false events to size realizations")
@@ -105,8 +107,9 @@ def main():
     rng = np.random.default_rng(a.seed)
     global NPT, PC
     NPT = a.npt
-    PC = {**PC, "min_epochs": (a.min_epochs if a.min_epochs is not None else a.npt)}
-    print(f"[fpp] tier: npt={NPT} min_epochs={PC['min_epochs']}", flush=True)
+    PC = {**PC, "min_epochs": (a.min_epochs if a.min_epochs is not None else a.npt),
+          "max_arc_2v_min": a.max_arc_min, "orbit_rate_tol": a.orbit_rate_tol}
+    print(f"[fpp] tier: npt={NPT} min_epochs={PC['min_epochs']} max_arc_2v_min={PC['max_arc_2v_min']} orbit_rate_tol={PC['orbit_rate_tol']}", flush=True)
 
     # load all night-fields
     fields = []  # (label, dets_df, known_df)

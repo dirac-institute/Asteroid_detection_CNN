@@ -53,7 +53,7 @@ def main():
     ap.add_argument("--out-inject", required=True, help="per-sighting injection catalog csv")
     ap.add_argument("--out-truth", required=True, help="objID-level truth csv")
     ap.add_argument("--n-objects", type=int, default=300)
-    ap.add_argument("--rate-min", type=float, default=0.5, help="deg/day (log-uniform)")
+    ap.add_argument("--rate-min", type=float, default=1.0, help="deg/day (log-uniform); >=1 = the trailed regime the pipeline keeps")
     ap.add_argument("--rate-max", type=float, default=8.0)
     ap.add_argument("--mag-min", type=float, default=20.0)
     ap.add_argument("--mag-max", type=float, default=24.5)
@@ -86,6 +86,15 @@ def main():
                 return p, float(x), float(y)
         return None, None, None
 
+    # REAL same-night apparition-count distribution for FAST (>=1 deg/day) NEOs, measured by Sorcha
+    # (Granvik orbits x real DP2 cadence): ~half of fast-NEO apparition-nights are SINGLE (no chance of
+    # any link), ~22% exactly 2 (only 2-sighting can recover), ~21% are >=3 (3-sighting possible). We
+    # impose this per object as a contiguous same-night sub-window of k real visits -> the cadence cap
+    # is modelled, so completeness reflects "some asteroids are only ever seen twice".
+    KDIST_K = np.array([1, 2, 3, 4, 5, 6])
+    KDIST_P = np.array([0.50, 0.22, 0.15, 0.05, 0.03, 0.05]); KDIST_P /= KDIST_P.sum()
+    nv = len(visits)
+
     inj_rows, truth_rows = [], []
     dt_sub = a.exptime / 86400.0  # for beta (intra-exposure motion direction in pixel frame)
     for oid in range(a.n_objects):
@@ -97,9 +106,15 @@ def main():
         vx = rate*np.cos(pa)/cd; vy = rate*np.sin(pa)  # deg/day in (ra, dec)
         mag = float(rng.uniform(a.mag_min, a.mag_max))
         trail_px = rate * a.exptime/86400.0 / (PIXSCALE/3600.0)  # deg/exposure -> px
+        # sample this object's same-night apparition count k (cadence cap), then a contiguous window of
+        # k real visits; the object is only present (injected) during those k epochs.
+        k = int(rng.choice(KDIST_K, p=KDIST_P)); k = min(k, nv)
+        s = int(rng.integers(0, nv - k + 1))
+        obj_visits = visits[s:s + k]
+        t0o = vmjd[obj_visits[0]]
         oid_s = f"SNEO{oid:05d}"; n_sight = 0
-        for v in visits:
-            t = vmjd[v]; ra = sra + vx*(t - t0); dec = sdec + vy*(t - t0)
+        for v in obj_visits:
+            t = vmjd[v]; ra = sra + vx*(t - t0o); dec = sdec + vy*(t - t0o)
             p, x, y = panel_for(v, ra, dec)
             if p is None:
                 continue
@@ -112,8 +127,8 @@ def main():
                                  trail_length=float(trail_px), beta=beta, mag=mag))
             n_sight += 1
         truth_rows.append(dict(objID=oid_s, rate_degday=rate, pa_deg=float(np.degrees(pa)),
-                               mag=mag, trail_px=float(trail_px), n_sightings=n_sight,
-                               ra0=sra, dec0=sdec))
+                               mag=mag, trail_px=float(trail_px), k_observable=int(len(obj_visits)),
+                               n_sightings=n_sight, ra0=sra, dec0=sdec))
     inj = pd.DataFrame(inj_rows); truth = pd.DataFrame(truth_rows)
     Path(a.out_inject).parent.mkdir(parents=True, exist_ok=True)
     inj.to_csv(a.out_inject, index=False); truth.to_csv(a.out_truth, index=False)

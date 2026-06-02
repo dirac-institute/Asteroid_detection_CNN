@@ -114,7 +114,7 @@ def link(dets, *, exptime_s=30.0, tref=None, pos_tol_deg=0.017, vel_frac=0.30, v
 
 def physical_check(dets, members, exptime_s=30.0, pa_tol_deg=20.0, speed_frac=0.5,
                    lin_rms_arcsec=1.0, min_epochs=2, epoch_gap_s=120.0, pa_tol_2v_deg=10.0,
-                   orbit_check_2v=True, orbit_rate_tol=0.5, score_2v_min=0.0):
+                   orbit_check_2v=True, orbit_rate_tol=0.5, score_2v_min=0.0, max_arc_2v_min=None):
     """Defensible physical consistency of a candidate track (rejects chance/trail-angle-coincidence
     false links that pass position clustering). Requires:
       1. >= min_epochs DISTINCT time epochs (merge sub-epoch_gap snaps — back-to-back snaps are one).
@@ -145,6 +145,14 @@ def physical_check(dets, members, exptime_s=30.0, pa_tol_deg=20.0, speed_frac=0.
         return False, f"only {n_ep} distinct epochs", n_ep
     two_visit = (n_ep == 2)
     pa_tol = pa_tol_2v_deg if two_visit else pa_tol_deg
+    # 2-visit Δt WINDOW: real same-night pairs are the SHORT scheduler pair gap (~20-40 min); chance FP
+    # pairs predominantly span much longer arcs (linking non-adjacent visits). Capping the arc to the
+    # pair gap is the single strongest 2v FP filter (purity 0.28->0.71) at ~no recall cost, and matches
+    # the cadence (the WFD pair IS the tracklet). No-op for the 3+visit tier.
+    if two_visit and max_arc_2v_min is not None:
+        arc_min = (t.max() - t.min()) * SOLARDAY / 60.0
+        if arc_min > max_arc_2v_min:
+            return False, f"2v arc {arc_min:.0f}min>{max_arc_2v_min}", n_ep
     # 2-visit FP-density control: a 2-epoch link is only as clean as its members. The ADCNN stage-2
     # score is a trained real/bogus for TRAILED sources (a faint fast NEO still scores high — its trail
     # is distinctive); requiring BOTH members above score_2v_min thins the chance-pair pool ~density^2
@@ -257,7 +265,9 @@ def main():
     ap.add_argument("--max-rms", type=float, default=1.0, help="arcsec; LINEAR motion fit RMS (physical_check, >=3 epochs)")
     ap.add_argument("--pa-tol", type=float, default=20.0, help="deg; trail PA vs motion PA agreement (>=3 epochs)")
     ap.add_argument("--pa-tol-2v", type=float, default=10.0, help="deg; TIGHTER trail-PA tol for 2-visit tier + trail-vs-trail agreement")
-    ap.add_argument("--score-2v-min", type=float, default=0.0, help="min ADCNN score for BOTH members of a 2-visit link (tunable FP-density knob, OFF by default; 3+visit tier unaffected)")
+    ap.add_argument("--score-2v-min", type=float, default=0.0, help="min ADCNN score for BOTH members of a 2-visit link (purity/recall dial; set ~0.90 for a clean candidate stream; 3+visit tier unaffected)")
+    ap.add_argument("--max-arc-2v-min", type=float, default=40.0, help="2-visit Δt window (min): only pair within the scheduler pair gap; the single strongest 2v FP cut (purity 0.28->0.71). None to disable")
+    ap.add_argument("--orbit-rate-tol", type=float, default=0.25, help="2-visit bound-orbit velocity-residual tol (frac of trail speed); 0.25 is the purity/recall knee (0.5 was too loose). Tighter=purer")
     ap.add_argument("--min-epochs", type=int, default=2, help="distinct time epochs (snaps merged); 2 enables 2-visit linking")
     ap.add_argument("--tol-arcsec", type=float, default=5.0)
     ap.add_argument("--tol-day", type=float, default=0.02)
@@ -289,7 +299,8 @@ def main():
         for ti, members in enumerate(tracks):
             ok, info, n_ep = physical_check(dn, members, a.exptime, pa_tol_deg=a.pa_tol,
                                             lin_rms_arcsec=a.max_rms, min_epochs=a.min_epochs,
-                                            pa_tol_2v_deg=a.pa_tol_2v)
+                                            pa_tol_2v_deg=a.pa_tol_2v, score_2v_min=a.score_2v_min,
+                                            max_arc_2v_min=a.max_arc_2v_min, orbit_rate_tol=a.orbit_rate_tol)
             if not ok:
                 continue
             npass += 1
