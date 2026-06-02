@@ -34,8 +34,15 @@ def main():
     ap.add_argument("--max-arc-min", type=float, default=30.0)
     ap.add_argument("--len-db-min", type=float, default=6.0)
     ap.add_argument("--recur-max", type=int, default=None, help="recurrence veto: drop dets recurring at the same sky pos in >= this many other visits (TP-safe; 2 is strong). None=off")
+    ap.add_argument("--snr-min", type=float, default=None, help="mf_snr floor (5 = standard detection; trades faint completeness for purity)")
+    ap.add_argument("--orbit-rate-tol", type=float, default=0.25)
+    ap.add_argument("--perp", type=float, default=0.30, help="collinearity tol (arcsec)")
+    ap.add_argument("--dsnr", type=float, default=None, help="brightness-consistency |dSNR|/min tol (snr_frac_2v)")
     a = ap.parse_args()
     PC["max_arc_2v_min"] = a.max_arc_min
+    PC["orbit_rate_tol"] = a.orbit_rate_tol
+    PC["perp_collinear_2v_arcsec"] = a.perp
+    PC["snr_frac_2v"] = a.dsnr
     files = sorted(glob.glob(f"{a.dir}/adcnn_dets_masked_*.csv"))
     out = [f"[realfp] {len(files)} field-nights"]
     # total same-night adjacent pairs (gap <= max_arc) across fields
@@ -46,6 +53,8 @@ def main():
         if a.recur_max is not None:
             d = add_recurrence(d)
             d = d[d.recur < a.recur_max].reset_index(drop=True)   # TP-safe: real >=1deg/day movers have recur==0
+        if a.snr_min is not None:
+            d = d[d.mf_snr >= a.snr_min].reset_index(drop=True)
         vis = sorted(d.visit.unique())
         mj = {v: d[d.visit == v].mjd.median() for v in vis}
         npair = sum(1 for i in range(len(vis) - 1) if (mj[vis[i + 1]] - mj[vis[i]]) * 1440 <= a.max_arc_min)
