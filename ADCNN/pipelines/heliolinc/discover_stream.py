@@ -74,7 +74,7 @@ def _prefetch(paths, workers):
             nxt += 1
 
 
-def run_shard(gpu_id, rows, seg_ckpt, cnn_model, thr, prefetch, out_csv, n_workers=8, feat_out=None):
+def run_shard(gpu_id, rows, seg_ckpt, cnn_model, thr, prefetch, out_csv, n_workers=8, feat_out=None, inject_map=None):
     """Stream FITS -> segmentation model (GPU) -> feature + stage-2 focal-cutout-CNN PROCESS POOL (CPU) -> sky catalog.
     The stage-2 filter is the focal-cutout CNN (models/cnn_postproc.pt) -- the SAME engine + operating
     point as make_eval_catalogs, so detection is identical across eval and discovery. The GPU runs segmentation model
@@ -147,6 +147,12 @@ def run_shard(gpu_id, rows, seg_ckpt, cnn_model, thr, prefetch, out_csv, n_worke
                 rr = rows[i]; donef.write(f'{int(rr["visit"])},{int(rr["detector"])}\n'); donef.flush()
                 continue
             img, wcs, mjd = data
+            if inject_map is not None:                 # pilot: add synthetic trails into the real diffim
+                rr = rows[i]
+                rws = inject_map.get((int(rr["visit"]), int(rr["detector"])))
+                if rws:
+                    from ADCNN.pipelines.heliolinc.inject_trails import add_trails
+                    img = add_trails(np.array(img, copy=True), rws)
             rl = np.zeros(img.shape, dtype=np.uint16)
             prob, sin, cos, agg = predict_panel_overlap_3ch_full(model, img, rl, device=dev)
             # panel_to_catalog_rows(pid, prob, img, agg, rl, cnn, config): the v1.0 signature uses
@@ -176,7 +182,13 @@ def main():
     ap.add_argument("--n-gpus", type=int, default=0, help="0 = all visible")
     ap.add_argument("--out", default=str(REPO / "ADCNN/pipelines/heliolinc/run_disco/adcnn_dets.csv"))
     ap.add_argument("--limit", type=int, default=0, help="first N panels only (smoke test)")
+    ap.add_argument("--inject", default=None, help="inject.csv (objID,visit,detector,x,y,trail_length,beta,mag): add synthetic trails into each panel before detection (test2 injection-recovery)")
     a = ap.parse_args()
+    inject_map = None
+    if a.inject:
+        from ADCNN.pipelines.heliolinc.inject_trails import load_inject_map
+        inject_map = load_inject_map(a.inject)
+        print(f"[discover] INJECT mode: {sum(len(v) for v in inject_map.values())} synthetic trails over {len(inject_map)} panels", flush=True)
 
     # Operating point comes from the val2 calibration persisted in the model sidecar JSON
     # (cnn_postproc.json -> "threshold", the combined-FPP-budget op-point), NOT a hardcoded constant.
@@ -203,11 +215,11 @@ def main():
     feat_pqs = [None for _ in range(n_gpus)]   # legacy run_shard arg; feature-dump not used in CNN path
 
     if n_gpus == 1:
-        run_shard(0, shards[0], a.seg_model, cnn_model, thr, a.prefetch, shard_csvs[0], n_workers, feat_pqs[0])
+        run_shard(0, shards[0], a.seg_model, cnn_model, thr, a.prefetch, shard_csvs[0], n_workers, feat_pqs[0], inject_map)
     else:
         ctx = torch.multiprocessing.get_context("spawn")
         procs = [ctx.Process(target=run_shard,
-                             args=(g, shards[g], a.seg_model, cnn_model, thr, a.prefetch, shard_csvs[g], n_workers, feat_pqs[g]))
+                             args=(g, shards[g], a.seg_model, cnn_model, thr, a.prefetch, shard_csvs[g], n_workers, feat_pqs[g], inject_map))
                  for g in range(n_gpus) if shards[g]]
         for p in procs:
             p.start()
