@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np, pandas as pd, sys
 sys.path.insert(0, "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
 from ADCNN.pipelines.heliolinc.trail_state_link import link, physical_check
+from ADCNN.pipelines.heliolinc.recurrence import add_recurrence
 
 PC = dict(pa_tol_deg=20.0, lin_rms_arcsec=1.0, min_epochs=2, pa_tol_2v_deg=10.0, orbit_check_2v=True,
           orbit_rate_tol=0.25, max_arc_2v_min=30.0, perp_collinear_2v_arcsec=0.30)
@@ -32,6 +33,7 @@ def main():
     ap.add_argument("--scores", nargs="+", type=float, default=[0.80, 0.85, 0.90, 0.95])
     ap.add_argument("--max-arc-min", type=float, default=30.0)
     ap.add_argument("--len-db-min", type=float, default=6.0)
+    ap.add_argument("--recur-max", type=int, default=None, help="recurrence veto: drop dets recurring at the same sky pos in >= this many other visits (TP-safe; 2 is strong). None=off")
     a = ap.parse_args()
     PC["max_arc_2v_min"] = a.max_arc_min
     files = sorted(glob.glob(f"{a.dir}/adcnn_dets_masked_*.csv"))
@@ -41,6 +43,9 @@ def main():
     for f in files:
         d = pd.read_csv(f)
         d = d[(d.len_db >= a.len_db_min) & (d.get("art_frac", 0) < 0.3)].reset_index(drop=True)
+        if a.recur_max is not None:
+            d = add_recurrence(d)
+            d = d[d.recur < a.recur_max].reset_index(drop=True)   # TP-safe: real >=1deg/day movers have recur==0
         vis = sorted(d.visit.unique())
         mj = {v: d[d.visit == v].mjd.median() for v in vis}
         npair = sum(1 for i in range(len(vis) - 1) if (mj[vis[i + 1]] - mj[vis[i]]) * 1440 <= a.max_arc_min)
