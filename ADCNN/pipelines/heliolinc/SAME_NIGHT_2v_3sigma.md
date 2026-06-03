@@ -1,9 +1,11 @@
 # Same-night 2-visit vs 3-visit NEO linking — 3σ purity threshold
 
 > 🌙 **OVERNIGHT FAINT-FLOOR (2026-06-02, NO SNR cut — faint low-SNR fast movers are the target).**
-> Direct real-data measurement (off-ecliptic field 0, 94 same-night pairs), S=0.80, full faint completeness:
-> - floor-B (recurrence veto only, TP-safe, full recall): **λ=0.319/pair = 336× over** 1.35e-3.
-> - floor-E (recurrence + tight geometry + brightness, ~half recall): **λ=0.096/pair = 132× over**.
+> Direct real-data measurement (off-ecliptic, **2 fields pooled, 208 same-night pairs** so far), S=0.80,
+> full faint completeness (field-to-field FP varies a lot: field 0 dirty 0.32/pair, field 1 clean 0.03):
+> - floor-B (recurrence veto only, TP-safe, full recall): **λ=0.159/pair = 164× over** 1.35e-3.
+> - floor-E (recurrence + tight geometry + brightness, ~half recall): **λ=0.048/pair = 65× over**.
+> - At S=0.90 (costs ~25% completeness): 0 false / 208 pairs → 95% UL **1.4e-2 = 11× over**.
 > An `SNR≥5` cut zeroes the FP but is NOT faint-free: 12% of injected detections at S=0.80 have SNR<5
 > (down to 1.3 — ADCNN's sub-5σ regime), and **31/231 two-visit-recoverable objects have an SNR<5 member**
 > → SNR≥5 discards faint movers. (A transient "config G = 0 FP, 0 real lost" was a low-recall artifact:
