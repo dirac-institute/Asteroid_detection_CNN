@@ -1,5 +1,20 @@
 # Same-night 2-visit vs 3-visit NEO linking — 3σ purity threshold
 
+> ✅ **SHIPPED 2-visit linker (2026-06-03): chord seeding + combined orbit-fit χ² gate.** Two non-ML
+> architecture changes, both measured on real DP2 off-ecliptic FP + injected NEOs (S=0.80, full faint
+> completeness, NO SNR cut):
+> 1. **Chord seeding** (`--seed-2v chord`): seed 2-visit pairs on the precise position chord, verify with
+>    the trail — vs the old trail-velocity tref-clustering that scatters ~80% of real pairs. **4× recall,
+>    ~10× lower FP** (λ 0.023 → 0.0023/pair).
+> 2. **Combined χ² gate** (`--chi2-2v-max 3.0`): replace the independent AND-thresholds with one weighted
+>    orbit-fit χ² (Mahalanobis; scatters `CHI2_SIG_2V` from real pairs). **+2.5× completeness at fixed λ**:
+>    at λ=0.0023/pair, C(of detected pairs) 0.139 → **0.351**; χ²≤2.5 gives **0 false / 439 real pairs** at
+>    C=0.325. Frontier: χ² {2.5:C0.33/λ0, 3.0:0.35/0.0023, 4.0:0.43/0.0046, 6.0:0.57/0.016}.
+> Also `--pos-tol-3v 0.05` (~2× the 3-visit recall, zero purity cost). All shipped in sn_run.slurm.
+> Net: 2-visit at S=0.80 full faint completeness now ~0.35 of detected pairs at λ≈0.0023 (~1.7× over 3σ
+> point est.) — vs 0.035/0.023 before. The honest analysis below (cadence/detection ceilings, the
+> SNR-overlap, the lossy-seeder floor) remains valid context.
+
 > 🟢 **UPDATE (2026-06-03): CHORD SEEDER re-opens 2-visit 3σ at FULL FAINT completeness.** The overnight
 > floor below (97×/31× over) was measured with the *trail-velocity tref-clustering* seeder, which scatters
 > ~80% of real pairs beyond the cluster radius AND manufactures FP. Replacing the **seeding** with the
