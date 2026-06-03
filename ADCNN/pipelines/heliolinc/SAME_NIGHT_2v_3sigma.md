@@ -9,10 +9,10 @@
 > 2. **Combined χ² gate** (`--chi2-2v-max 3.0`): replace the independent AND-thresholds with one weighted
 >    orbit-fit χ² (Mahalanobis; scatters `CHI2_SIG_2V` from real pairs). **+2.5× completeness at fixed λ**:
 >    at λ=0.0023/pair, C(of detected pairs) 0.139 → **0.351**; χ²≤3.0 (shipped) gives **0 false 2-tracks
->    over **999 real off-ecliptic pairs (9 fields) → λ point est. 0, 95% UL 3.0e-3 = 2.2× over 3σ** (0 false
->    links across all 999; clean monotonic 5×@439→4×@556→3×@673→2.7×@826→2.2×@999). A *definitive* ≤1.35e-3
->    (true 3σ) needs ~2200 pairs with 0 false -> build more off-ecliptic fields (build_realfp_manifests
->    --min-visits lower). Frontier: χ² {3.0:C0.35, 4.0:0.43, 6.0:0.57}.
+>    over **1032 real off-ecliptic pairs (10 fields, all built) → λ point est. 0, 95% UL 2.9e-3 = 2.2× over
+>    3σ** (PINNED 2026-06-03; 0 false links across all 1032; clean monotonic 5×@439→4×@556→3×@673→2.7×@826→
+>    2.2×@999→2.2×@1032). A *definitive* ≤1.35e-3 (true 3σ) needs ~2200 pairs with 0 false -> build more
+>    off-ecliptic fields (build_realfp_manifests --min-visits lower). Frontier: χ² {3.0:C0.35, 4.0:0.43, 6.0:0.57}.
 > Also `--pos-tol-3v 0.05` (~2× the 3-visit recall, zero purity cost). All shipped in sn_run.slurm.
 > Net: 2-visit at S=0.80 full faint completeness now ~0.35 of detected pairs at λ≈0.0023 (~1.7× over 3σ
 > point est.) — vs 0.035/0.023 before. The honest analysis below (cadence/detection ceilings, the
