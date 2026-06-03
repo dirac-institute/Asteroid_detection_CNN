@@ -1,5 +1,19 @@
 # Same-night 2-visit vs 3-visit NEO linking — 3σ purity threshold
 
+> 🟢 **UPDATE (2026-06-03): CHORD SEEDER re-opens 2-visit 3σ at FULL FAINT completeness.** The overnight
+> floor below (97×/31× over) was measured with the *trail-velocity tref-clustering* seeder, which scatters
+> ~80% of real pairs beyond the cluster radius AND manufactures FP. Replacing the **seeding** with the
+> precise **position chord** (`chord_seed_pairs`, then the same `physical_check`) gives, on real data,
+> S=0.80, no SNR cut:
+> - **completeness 0.035 → 0.139 (4×)** (injected fast NEOs, of detected pairs);
+> - **FP rate λ 0.023 → 0.0023/pair** = **1.7× over** the 1.35×10⁻³ budget (point est.; 95% UL 8× from
+>   1 false / 439 real off-ecliptic pairs).
+> So the "not achievable" verdict below is **superseded for the seeding question** — 2-visit at full faint
+> completeness is now within ~2× of 3σ (and the point estimate is borderline). Confirming λ≤1.35×10⁻³
+> needs more real-FP pairs (the remaining fields). Wired in: `trail_state_link --seed-2v chord` (default),
+> `count_realfp --seed chord`. The analysis below remains valid as the *lossy-seeder* floor and the
+> detector-density/SNR results.
+
 > 🌙 **OVERNIGHT FAINT-FLOOR (2026-06-02, NO SNR cut — faint low-SNR fast movers are the target).**
 > Direct real-data measurement (off-ecliptic, **5 fields pooled, 439 same-night pairs**), S=0.80,
 > full faint completeness (field-to-field FP varies: field 0 dirty 0.32/pair, field 1 clean 0.03):
