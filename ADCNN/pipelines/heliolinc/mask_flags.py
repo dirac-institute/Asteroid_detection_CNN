@@ -97,7 +97,15 @@ def main():
     mcols = [c for c in fl.columns if c.startswith("m_")]
     fl["art_frac"] = fl[mcols].max(axis=1) if mcols else 0.0
     out = d.merge(fl, on="detid", how="left")
+    # a FITS that failed to read leaves its dets with no flag row -> NaN; treat unmeasured as NO artifact
+    # (0.0) so a mask-read failure can NEVER silently drop a real detection downstream (the linker's
+    # `art_frac < cut` is False for NaN, which would drop it). TP-safe: unchecked dets pass the mask cut.
+    nmiss = int(out.art_frac.isna().sum())
+    for c in mcols + ["art_frac"]:
+        out[c] = out[c].fillna(0.0)
     out.to_csv(a.out, index=False)
+    if nmiss:
+        print(f"[mask] WARNING: {nmiss} dets had no mask (FITS read fail) -> art_frac=0 (kept)", flush=True)
     print(f"[mask] wrote {len(out)} -> {a.out}", flush=True)
     print(f"[mask] planes found: {[c[2:] for c in mcols]}", flush=True)
     print(f"[mask] dets with ANY artifact on trail (art_frac>0): {int((out.art_frac>0).sum())} "

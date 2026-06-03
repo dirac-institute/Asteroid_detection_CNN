@@ -380,6 +380,7 @@ def main():
     ap.add_argument("--pos-tol-3v", type=float, default=0.05, help="3+visit cluster radius (deg); 0.05 ~doubles 3v recall vs 0.017 at zero purity cost (physical_check is the gate)")
     ap.add_argument("--rate-min", type=float, default=0.3, help="chord seeder min apparent rate (deg/day)")
     ap.add_argument("--rate-max", type=float, default=10.0, help="chord seeder max apparent rate (deg/day)")
+    ap.add_argument("--recur-max", type=int, default=None, help="TP-safe stationarity veto: drop detections recurring at the same sky position in >= this many other same-night visits (residuals recur; a >=1deg/day mover never does). 2 is strong. Needs many visits/night (dense fields); ~no-op for a WFD pair. None=off")
     ap.add_argument("--min-epochs", type=int, default=2, help="distinct time epochs (snaps merged); 2 enables 2-visit linking")
     ap.add_argument("--tol-arcsec", type=float, default=5.0)
     ap.add_argument("--tol-day", type=float, default=0.02)
@@ -388,7 +389,7 @@ def main():
     d = pd.read_csv(a.dets)
     n0 = len(d)
     if "art_frac" in d and a.art_frac_max > 0:
-        d = d[d.art_frac < a.art_frac_max]
+        d = d[d.art_frac.fillna(0.0) < a.art_frac_max]   # NaN (unmeasured mask) -> keep, never silently drop
     if "len_db" in d and a.len_db_min > 0:
         d = d[d.len_db >= a.len_db_min]
     if "score" in d and a.score_min > 0:
@@ -405,6 +406,10 @@ def main():
     rows = []
     for night, dn in d.groupby("night"):
         dn = dn.reset_index(drop=True)
+        if a.recur_max is not None:
+            from ADCNN.pipelines.heliolinc.recurrence import add_recurrence
+            dn = add_recurrence(dn)
+            dn = dn[dn.recur < a.recur_max].reset_index(drop=True)   # TP-safe (real movers have recur==0)
         if a.seed_2v == "chord":
             # 3+visit via (looser) trail-velocity clustering; 2-visit via precise position-chord seeding
             _, clus = link(dn, exptime_s=a.exptime, npt=3, pos_tol_deg=a.pos_tol_3v,
@@ -434,10 +439,15 @@ def main():
             rms, speed = fit_residual(dn, members, a.exptime)
             obj, frac = crossmatch(dn, members, known, a.tol_arcsec, a.tol_day)
             g = dn.iloc[members]
+            # numeric orbit-fit columns for ranking the (candidate-grade) 2-visit stream
+            if n_ep == 2:
+                c2, ci = pair_chi2(g, a.exptime); chi2v, av, ev = c2, ci["a"], ci["e"]
+            else:
+                chi2v, av, ev = np.nan, np.nan, np.nan
             rows.append(dict(night=int(night), ndet=len(members), nvisit=g.visit.nunique(),
                              n_epochs=n_ep, tier=("2visit" if n_ep == 2 else "3+visit"),
                              arc_hr=(g.mjd.max() - g.mjd.min()) * 24, rms_arcsec=rms, speed_degday=speed,
-                             ra=g.ra.mean(), dec=g.dec.mean(), check=info,
+                             chi2=chi2v, a_au=av, ecc=ev, ra=g.ra.mean(), dec=g.dec.mean(), check=info,
                              match_obj=obj, match_frac=frac, status="CONFIRMED" if obj else "NEW"))
         print(f"  night {night}: {len(dn)} dets -> {len(cand)} candidates, {npass} passed", flush=True)
     T = pd.DataFrame(rows)
@@ -451,8 +461,10 @@ def main():
               f"{int((T.status=='CONFIRMED').sum())} CONFIRMED ({len(conf)} known objs) | {len(new)} NEW", flush=True)
         print(f"[trail-link] confirmed: {', '.join(conf[:30])}", flush=True)
         if len(new):
-            print(f"[trail-link] NEW candidates (tier, speed deg/day, arc hr, ndet, rms\"):", flush=True)
-            print(new.sort_values(['n_epochs','ndet'], ascending=False)[['ra','dec','tier','speed_degday','arc_hr','ndet','nvisit','rms_arcsec']].head(20).to_string(index=False), flush=True)
+            # rank: 3+visit (confirmed-grade) first, then 2visit candidates by ascending orbit-fit chi2
+            new = new.sort_values(['n_epochs', 'chi2'], ascending=[False, True])
+            print(f"[trail-link] NEW candidates (best first; 3+visit are 3-sigma, 2visit are follow-up candidates):", flush=True)
+            print(new[['ra','dec','tier','speed_degday','arc_hr','chi2','a_au','ecc','nvisit','match_frac']].head(20).to_string(index=False), flush=True)
     else:
         print("[trail-link] no tracks", flush=True)
 
