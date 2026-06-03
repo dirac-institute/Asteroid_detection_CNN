@@ -1,11 +1,12 @@
 # Same-night 2-visit vs 3-visit NEO linking — 3σ purity threshold
 
 > 🌙 **OVERNIGHT FAINT-FLOOR (2026-06-02, NO SNR cut — faint low-SNR fast movers are the target).**
-> Direct real-data measurement (off-ecliptic, **4 fields pooled, 322 same-night pairs** so far), S=0.80,
+> Direct real-data measurement (off-ecliptic, **5 fields pooled, 439 same-night pairs**), S=0.80,
 > full faint completeness (field-to-field FP varies: field 0 dirty 0.32/pair, field 1 clean 0.03):
-> - floor-B (recurrence veto only, TP-safe, full recall): **λ=0.124/pair = 125× over** 1.35e-3.
-> - floor-E (recurrence + tight geometry + brightness, ~half recall): **λ=0.031/pair = 42× over**.
-> - At S=0.90 (costs ~25% completeness): 0 false / 322 pairs → 95% UL **9.3e-3 = 7× over**.
+> - floor-B (recurrence veto only, TP-safe, full recall): **λ=0.098/pair = 97× over** 1.35e-3.
+> - floor-E (recurrence + tight geometry + brightness, ~half recall): **λ=0.023/pair = 31× over**.
+> - At S=0.90 (costs ~25% completeness): 0 false / 439 pairs → 95% UL **6.8e-3 = 5× over**.
+> λ converged across the pooling (floor-E 65×→49×→42×→31× over 2→3→4→5 fields).
 > An `SNR≥5` cut zeroes the FP but is NOT faint-free: 12% of injected detections at S=0.80 have SNR<5
 > (down to 1.3 — ADCNN's sub-5σ regime), and **31/231 two-visit-recoverable objects have an SNR<5 member**
 > → SNR≥5 discards faint movers. (A transient "config G = 0 FP, 0 real lost" was a low-recall artifact:
@@ -23,10 +24,25 @@
 > cutouts reaches 18×. Corollary: the best faint discriminator is the ADCNN *score* (not SNR — faint real
 > NEOs score high on trail morphology even at low SNR); climbing the score is the faint-preserving way to
 > trade completeness for purity, but 3σ still needs score ≫0.80 → a completeness cost.
-> [Overnight run accumulating 10 off-ecliptic fields (~1039 pairs) to firm up the floor; numbers above are
-> field 0 (94 pairs) so far. VERDICT forming: 3σ at full faint S=0.80 completeness is not achievable by any
-> detection/linking method — both the linking floor (132–336×) and the detector-density lever (1.5× vs 18×)
-> fall far short; the certifying information is not in 2 same-night faint points → a 3rd epoch is required.]
+> ### FINAL VERDICT (2026-06-03, 5 off-ecliptic fields, 439 real same-night pairs)
+> **3σ at full faint S=0.80 completeness is NOT achievable by any detection/linking method.** Three
+> independent lines of real-data evidence, all far short of the 1.35×10⁻³/pair budget:
+> 1. **Linking floor** (no SNR cut): pooled λ = **0.098/pair (97×)** at full recall (recurrence only) to
+>    **0.023/pair (31×)** at ~half recall (tight geometry+brightness). Converged across 5 fields.
+> 2. **Detector faint-FP-density lever CAPPED**: a classifier on all detection features separates faint
+>    real/FP at AUC 0.894 but reduces faint-FP density only **1.5×** at 95% faint recall — vs the **~18×**
+>    needed (λ∝ρ²). At SNR 2–4 a real NEO trail and a noise/residual trail are pixel-similar.
+> 3. **No free brightness cut**: SNR≥5 zeroes the FP but discards faint movers (31/231 two-visit-recoverable
+>    objects have an SNR<5 member). The best faint discriminator is the ADCNN *score* (not SNR), but reaching
+>    3σ still needs score ≫0.80 → a completeness cost (≈25% at S=0.90, which itself only reaches a 5× UL).
+>
+> **The certifying information — "this is a real heliocentric orbit, not a chance alignment of two faint
+> noise-trails" — is not present in two same-night faint detections.** It requires a 3rd epoch (same-night
+> triplet, the 17% the cadence delivers; or a 2nd night → tracklet-to-track). 2-visit at S=0.80 is therefore
+> an **alert/candidate** tier (the recurrence + tight-geometry stack is shipped and cuts FP ~30–100×, useful
+> for a clean-ish stream), not a standalone 3σ-confirmed discovery tier.
+> [Pipeline: build_realfp_manifests.py → run_realfp/detect.slurm (ADCNN, no injection) → count_realfp.py;
+> field-to-field FP varies ~10× so pooling matters.]
 
 > ⚠️ **STATUS (2026-06-02, direct real-data measurement).** The 2-visit FP rates below were first
 > estimated by the **null Monte Carlo** (`calibrate_link_fpp.py`). I briefly claimed the null MC
