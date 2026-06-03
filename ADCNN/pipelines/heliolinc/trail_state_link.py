@@ -112,6 +112,40 @@ def link(dets, *, exptime_s=30.0, tref=None, pos_tol_deg=0.017, vel_frac=0.30, v
     return labels, tracks
 
 
+def chord_seed_pairs(dets, *, max_arc_min=40.0, rate_min=0.3, rate_max=10.0):
+    """Seed 2-visit candidate pairs by the POSITION CHORD, not the noisy trail-velocity. For each pair of
+    adjacent same-night visits (gap <= max_arc_min) enumerate detection pairs whose sky separation is
+    consistent with a rate_min..rate_max deg/day mover, via a k-d tree. Returns [i,j] member-index lists
+    (iloc into `dets`). physical_check (trail-vs-chord PA/speed + collinearity + bound orbit) then verifies.
+    WHY: the trail-velocity tref-clustering in link() scatters ~80% of real pairs beyond the cluster radius
+    (8 deg / 18% trail-velocity error x propagation arm) AND manufactures FP via that scatter; seeding on the
+    PRECISE position chord recovers ~4x more real pairs at ~10x LOWER false rate (measured on real DP2 FP).
+    Seed on what's precise (positions), verify with what's distinctive (trails)."""
+    from scipy.spatial import cKDTree
+    d = dets.reset_index(drop=True)
+    mjd = d.mjd.to_numpy(); ra = d.ra.to_numpy(); dec = d.dec.to_numpy(); vis = d.visit.to_numpy()
+    uv = sorted(set(vis.tolist()))
+    vmjd = {v: float(np.median(mjd[vis == v])) for v in uv}
+    idx_by = {v: np.where(vis == v)[0] for v in uv}
+    pairs = []
+    for a_, b_ in zip(uv[:-1], uv[1:]):
+        dt = vmjd[b_] - vmjd[a_]
+        if dt <= 0 or dt * 1440.0 > max_arc_min:
+            continue
+        ia, ib = idx_by[a_], idx_by[b_]
+        if not len(ia) or not len(ib):
+            continue
+        cd = float(np.cos(np.radians(dec[ib].mean())))
+        tree = cKDTree(np.column_stack([ra[ib] * cd, dec[ib]]))
+        dmin, dmax = rate_min * dt, rate_max * dt                 # deg
+        for i in ia:
+            for jp in tree.query_ball_point([ra[i] * cd, dec[i]], dmax):
+                j = int(ib[jp])
+                if np.hypot((ra[j] - ra[i]) * cd, dec[j] - dec[i]) >= dmin:
+                    pairs.append([int(i), j])
+    return pairs
+
+
 def physical_check(dets, members, exptime_s=30.0, pa_tol_deg=20.0, speed_frac=0.5,
                    lin_rms_arcsec=1.0, min_epochs=2, epoch_gap_s=120.0, pa_tol_2v_deg=10.0,
                    orbit_check_2v=True, orbit_rate_tol=0.5, score_2v_min=0.0, max_arc_2v_min=None,
@@ -290,6 +324,10 @@ def main():
     ap.add_argument("--orbit-rate-tol", type=float, default=0.25, help="2-visit bound-orbit velocity-residual tol (frac of trail speed); 0.25 is the purity/recall knee (0.5 was too loose). Tighter=purer")
     ap.add_argument("--perp-collinear-2v", type=float, default=0.30, help="2-visit 4-trail-endpoint COLLINEARITY RMS tol (arcsec): real movers' two trail segments lie on ONE line (~0.08), FP merely parallel; recall-safe ~3x FP cut. None to disable")
     ap.add_argument("--snr-frac-2v", type=float, default=None, help="2-visit brightness consistency |dSNR|/min; OFF by default (costs recall). ~0.6 for extra purity")
+    ap.add_argument("--seed-2v", choices=["chord", "cluster"], default="chord", help="2-visit seeding: 'chord' (position-chord pairs + trail verify; ~4x recall, ~10x lower FP than 'cluster' trail-velocity clustering)")
+    ap.add_argument("--pos-tol-3v", type=float, default=0.05, help="3+visit cluster radius (deg); 0.05 ~doubles 3v recall vs 0.017 at zero purity cost (physical_check is the gate)")
+    ap.add_argument("--rate-min", type=float, default=0.3, help="chord seeder min apparent rate (deg/day)")
+    ap.add_argument("--rate-max", type=float, default=10.0, help="chord seeder max apparent rate (deg/day)")
     ap.add_argument("--min-epochs", type=int, default=2, help="distinct time epochs (snaps merged); 2 enables 2-visit linking")
     ap.add_argument("--tol-arcsec", type=float, default=5.0)
     ap.add_argument("--tol-day", type=float, default=0.02)
@@ -315,10 +353,20 @@ def main():
     rows = []
     for night, dn in d.groupby("night"):
         dn = dn.reset_index(drop=True)
-        labels, tracks = link(dn, exptime_s=a.exptime, npt=a.npt, pos_tol_deg=a.pos_tol,
-                              vel_frac=a.vel_frac, min_visits=a.npt)
-        npass = 0
-        for ti, members in enumerate(tracks):
+        if a.seed_2v == "chord":
+            # 3+visit via (looser) trail-velocity clustering; 2-visit via precise position-chord seeding
+            _, clus = link(dn, exptime_s=a.exptime, npt=3, pos_tol_deg=a.pos_tol_3v,
+                           vel_frac=a.vel_frac, min_visits=3)
+            cand = list(clus)
+            if a.min_epochs <= 2:
+                cand += chord_seed_pairs(dn, max_arc_min=(a.max_arc_2v_min or 1e9),
+                                         rate_min=a.rate_min, rate_max=a.rate_max)
+        else:
+            _, cand = link(dn, exptime_s=a.exptime, npt=a.npt, pos_tol_deg=a.pos_tol,
+                           vel_frac=a.vel_frac, min_visits=a.npt)
+        cand.sort(key=len, reverse=True)   # 3+visit (longer) first; a triplet's dets aren't re-reported as pairs
+        npass = 0; used = set()
+        for members in cand:
             ok, info, n_ep = physical_check(dn, members, a.exptime, pa_tol_deg=a.pa_tol,
                                             lin_rms_arcsec=a.max_rms, min_epochs=a.min_epochs,
                                             pa_tol_2v_deg=a.pa_tol_2v, score_2v_min=a.score_2v_min,
@@ -326,6 +374,9 @@ def main():
                                             perp_collinear_2v_arcsec=a.perp_collinear_2v, snr_frac_2v=a.snr_frac_2v)
             if not ok:
                 continue
+            if n_ep == 2 and any(m in used for m in members):
+                continue
+            used.update(members)
             npass += 1
             rms, speed = fit_residual(dn, members, a.exptime)
             obj, frac = crossmatch(dn, members, known, a.tol_arcsec, a.tol_day)
@@ -335,7 +386,7 @@ def main():
                              arc_hr=(g.mjd.max() - g.mjd.min()) * 24, rms_arcsec=rms, speed_degday=speed,
                              ra=g.ra.mean(), dec=g.dec.mean(), check=info,
                              match_obj=obj, match_frac=frac, status="CONFIRMED" if obj else "NEW"))
-        print(f"  night {night}: {len(dn)} dets -> {len(tracks)} raw tracks", flush=True)
+        print(f"  night {night}: {len(dn)} dets -> {len(cand)} candidates, {npass} passed", flush=True)
     T = pd.DataFrame(rows)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     T.to_csv(a.out, index=False)

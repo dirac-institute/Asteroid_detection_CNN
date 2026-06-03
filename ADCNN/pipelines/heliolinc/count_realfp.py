@@ -9,16 +9,19 @@ import argparse, glob
 from pathlib import Path
 import numpy as np, pandas as pd, sys
 sys.path.insert(0, "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
-from ADCNN.pipelines.heliolinc.trail_state_link import link, physical_check
+from ADCNN.pipelines.heliolinc.trail_state_link import link, physical_check, chord_seed_pairs
 from ADCNN.pipelines.heliolinc.recurrence import add_recurrence
 
 PC = dict(pa_tol_deg=20.0, lin_rms_arcsec=1.0, min_epochs=2, pa_tol_2v_deg=10.0, orbit_check_2v=True,
           orbit_rate_tol=0.25, max_arc_2v_min=30.0, perp_collinear_2v_arcsec=0.30)
 
 
-def field_false_tracks(d, S):
+def field_false_tracks(d, S, seed="chord"):
     d = d[d.score >= S].reset_index(drop=True)
-    _, tracks = link(d, npt=2, min_visits=2, pos_tol_deg=0.017)
+    if seed == "chord":
+        tracks = chord_seed_pairs(d, max_arc_min=PC.get("max_arc_2v_min") or 1e9)
+    else:
+        _, tracks = link(d, npt=2, min_visits=2, pos_tol_deg=0.017)
     n = 0
     for m in tracks:
         ok, info, nep = physical_check(d, m, **PC)
@@ -38,6 +41,7 @@ def main():
     ap.add_argument("--orbit-rate-tol", type=float, default=0.25)
     ap.add_argument("--perp", type=float, default=0.30, help="collinearity tol (arcsec)")
     ap.add_argument("--dsnr", type=float, default=None, help="brightness-consistency |dSNR|/min tol (snr_frac_2v)")
+    ap.add_argument("--seed", choices=["chord", "cluster"], default="chord", help="2-visit seeding (chord=position-chord, default; cluster=trail-velocity)")
     a = ap.parse_args()
     PC["max_arc_2v_min"] = a.max_arc_min
     PC["orbit_rate_tol"] = a.orbit_rate_tol
@@ -65,7 +69,7 @@ def main():
     out.append(f"{'S':>5} {'false_2tracks':>14} {'lambda/pair':>12} {'95%_CL_upper':>13} {'vs 1.35e-3':>11}")
     rows = []
     for S in a.scores:
-        nf = sum(field_false_tracks(d, S) for _, d, _ in fields)
+        nf = sum(field_false_tracks(d, S, seed=a.seed) for _, d, _ in fields)
         lam = nf / max(NP, 1)
         ul95 = (nf + 1.96 * np.sqrt(nf) + 1.92) / max(NP, 1) if nf > 0 else 3.0 / max(NP, 1)  # ~95% Poisson UL
         rows.append(dict(score=S, false=nf, pairs=NP, lambda_pair=lam, ul95=ul95))
