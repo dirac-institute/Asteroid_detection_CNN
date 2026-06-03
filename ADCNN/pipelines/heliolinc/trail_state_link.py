@@ -66,8 +66,16 @@ def pair_chi2(g, exptime_s=30.0, sig=None):
     mx = (b.ra - a.ra) * cd / mdt; my = (b.dec - a.dec) / mdt
     mpa = np.degrees(np.arctan2(my, mx)) % 180.0; mspeed = np.hypot(mx, my)
     tvs = [tv(a), tv(b)]
-    dpa_tm = max(abs(((np.degrees(np.arctan2(ty, tx)) % 180.0 - mpa + 90) % 180) - 90) for tx, ty in tvs)
+    pas = [np.degrees(np.arctan2(ty, tx)) % 180.0 for tx, ty in tvs]
+    dpa_tm = max(abs(((pa - mpa + 90) % 180) - 90) for pa in pas)
     dspeed = max(abs(np.hypot(tx, ty) - mspeed) / max(mspeed, 0.3) for tx, ty in tvs)
+    dpa_tt = abs(((pas[0] - pas[1] + 90) % 180) - 90)
+    rej = dict(bound=False, a=np.nan, e=np.nan, perp=np.nan, resid=np.nan, dsnr=np.nan, dpa_tm=dpa_tm, dspeed=dspeed)
+    # CHEAP pre-gate (trail-vs-motion PA & speed, trail-vs-trail PA): reject chance pairs on O(1) geometry
+    # BEFORE the expensive bound-orbit solve (astropy ephemeris + Lambert). Cuts ~all chance chords on the
+    # dense fields, so the chi2 path is fast (without this the orbit solve runs on every candidate -> O(hour)).
+    if dpa_tm > 20.0 or dpa_tt > 15.0 or dspeed > 0.6:
+        return np.inf, rej
     c0 = np.cos(np.radians(g.dec.mean()))
     P = np.array([[(ra - g.ra.mean()) * c0 * 3600.0, (dec - g.dec.mean()) * 3600.0]
                   for _, r in g.iterrows() for ra, dec in ((r.ra0, r.dec0), (r.ra1, r.dec1))])
