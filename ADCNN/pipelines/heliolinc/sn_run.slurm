@@ -57,12 +57,17 @@ source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
 python -m ADCNN.pipelines.heliolinc.mask_flags --dets "$RUN/adcnn_dets.csv" \
   --manifest "$RUN/manifest.csv" --out "$RUN/adcnn_dets_masked.csv" --workers 64
-# --score-min 0.80 = the 3-SIGMA discovery operating point from the FPP Monte-Carlo calibration
-# (calibrate_link_fpp.py / link_fpp.json): at this ADCNN score floor the 3+visit tier has a false-
-# linkage rate lambda_FP <= 1.35e-3/night (one-sided 3 sigma), validated across 11 night-fields,
-# while still recovering the real NEO 2025 NY2. 3+visit tracks at this floor are 3-sigma discoveries;
-# 2visit tracks remain candidate-grade (sub-3sigma -- 2 epochs cannot reach 3 sigma at this FP density).
+# --score-min 0.80 = the 3-SIGMA discovery operating point (FPP Monte-Carlo, link_fpp.json): the 3+visit
+# tier has lambda_FP <= 1.35e-3/night at this floor (recovers 2025 NY2). LINKER ARCHITECTURE (2026-06):
+#   * 2-visit seeded by the precise position CHORD (--seed-2v chord) not the noisy trail-velocity -> ~4x
+#     recall + ~10x lower FP vs the old tref-clustering (measured on real DP2 off-ecliptic FP).
+#   * 2-visit accepted by a single combined orbit-fit chi^2 (--chi2-2v-max 3.0) instead of independent
+#     AND-thresholds -> +2.5x completeness at the SAME false rate (lambda~0.0023/pair). No ML.
+#   * 3+visit clustered with --pos-tol-3v 0.05 (~2x its recall at zero purity cost).
+# 3+visit tracks at this floor are 3-sigma discoveries; 2visit are candidate-grade (lambda~0.0023/pair,
+# ~1.7x over 3-sigma point est. -- 2 same-night faint points cannot self-confirm; feed to follow-up).
 python -m ADCNN.pipelines.heliolinc.trail_state_link --dets "$RUN/adcnn_dets_masked.csv" \
   --known "$RUN/known.csv" --out "$RUN/tracks.csv" \
-  --npt 2 --min-epochs 2 --max-rms 1.0 --pa-tol 20 --pa-tol-2v 10 --score-min "${SCORE_MIN:-0.80}"
+  --npt 2 --min-epochs 2 --max-rms 1.0 --pa-tol 20 --pa-tol-2v 10 --score-min "${SCORE_MIN:-0.80}" \
+  --seed-2v chord --chi2-2v-max 3.0 --pos-tol-3v 0.05 --max-arc-2v-min 40
 echo "SN_RUN DONE -> $RUN/tracks.csv"

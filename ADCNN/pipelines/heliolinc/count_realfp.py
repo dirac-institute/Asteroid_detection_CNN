@@ -42,7 +42,9 @@ def main():
     ap.add_argument("--perp", type=float, default=0.30, help="collinearity tol (arcsec)")
     ap.add_argument("--dsnr", type=float, default=None, help="brightness-consistency |dSNR|/min tol (snr_frac_2v)")
     ap.add_argument("--seed", choices=["chord", "cluster"], default="chord", help="2-visit seeding (chord=position-chord, default; cluster=trail-velocity)")
+    ap.add_argument("--chi2-max", type=float, default=None, help="2-visit combined orbit-fit chi^2 gate (~3.0); preferred over the AND-cut knobs")
     a = ap.parse_args()
+    PC["chi2_2v_max"] = a.chi2_max
     PC["max_arc_2v_min"] = a.max_arc_min
     PC["orbit_rate_tol"] = a.orbit_rate_tol
     PC["perp_collinear_2v_arcsec"] = a.perp

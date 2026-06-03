@@ -45,6 +45,45 @@ def trail_velocity(d, exptime_s):
     return vx, vy
 
 
+# real-pair scatter (68th pct of |feature|), calibrated on injected NEO pairs in real off-ecliptic images;
+# used to weight the 2-visit combined-orbit-fit chi^2. perp [arcsec], resid [frac of trail speed], dsnr
+# [|dSNR|/min], dpa_tm [deg trail-vs-motion PA], dspeed [frac trail-vs-motion speed].
+CHI2_SIG_2V = dict(perp=0.127, resid=0.133, dsnr=0.558, dpa_tm=4.869, dspeed=0.237)
+
+
+def pair_chi2(g, exptime_s=30.0, sig=None):
+    """Combined orbit-fit chi^2 for a 2-visit pair (g = 2-row member df). Returns (chi2, info-dict).
+    Features (collinearity, bound-orbit rate-residual, brightness, trail-vs-motion PA & speed) are each
+    divided by their real-pair scatter and summed in quadrature (Mahalanobis goodness-of-fit). Real pairs
+    have chi2 ~ Ndof; a chance pair is large on >=1 axis. No training -- scatters are fixed from data."""
+    sig = sig or CHI2_SIG_2V
+    g = g.sort_values("mjd"); a, b = g.iloc[0], g.iloc[-1]
+    dt = exptime_s / SOLARDAY
+
+    def tv(r):
+        cd = np.cos(np.radians(r.dec)); return (r.ra1 - r.ra0) * cd / dt, (r.dec1 - r.dec0) / dt
+    cd = np.cos(np.radians(a.dec)); mdt = b.mjd - a.mjd
+    mx = (b.ra - a.ra) * cd / mdt; my = (b.dec - a.dec) / mdt
+    mpa = np.degrees(np.arctan2(my, mx)) % 180.0; mspeed = np.hypot(mx, my)
+    tvs = [tv(a), tv(b)]
+    dpa_tm = max(abs(((np.degrees(np.arctan2(ty, tx)) % 180.0 - mpa + 90) % 180) - 90) for tx, ty in tvs)
+    dspeed = max(abs(np.hypot(tx, ty) - mspeed) / max(mspeed, 0.3) for tx, ty in tvs)
+    c0 = np.cos(np.radians(g.dec.mean()))
+    P = np.array([[(ra - g.ra.mean()) * c0 * 3600.0, (dec - g.dec.mean()) * 3600.0]
+                  for _, r in g.iterrows() for ra, dec in ((r.ra0, r.dec0), (r.ra1, r.dec1))])
+    P = P - P.mean(0); perp = float(np.sqrt(np.mean((P @ np.linalg.svd(P)[2][1])**2)))
+    from ADCNN.pipelines.heliolinc.orbit_check import orbit_ok
+    _, of = orbit_ok(g, exptime_s=exptime_s, rate_frac_tol=1.0)
+    sp = max(np.hypot(*tvs[0]), np.hypot(*tvs[1]), 0.1)
+    resid = of["rate_resid"] / sp if of.get("bound") else 99.0
+    s = g.mf_snr.to_numpy() if "mf_snr" in g.columns else np.array([1.0, 1.0])
+    dsnr = abs(s[0] - s[-1]) / max(min(s), 1e-3)
+    f = dict(perp=perp, resid=resid, dsnr=dsnr, dpa_tm=dpa_tm, dspeed=dspeed)
+    chi2 = float(sum((f[k] / sig[k])**2 for k in sig))
+    return chi2, dict(bound=bool(of.get("bound", False)), a=float(of.get("a", np.nan)),
+                      e=float(of.get("e", np.nan)), **f)
+
+
 def link(dets, *, exptime_s=30.0, tref=None, pos_tol_deg=0.017, vel_frac=0.30, vel_floor=0.3,
          npt=2, min_visits=2):
     """Cluster detections in (RA@tref, Dec@tref, vRA, vDec). Returns a label per detection (-1=noise)
@@ -149,7 +188,7 @@ def chord_seed_pairs(dets, *, max_arc_min=40.0, rate_min=0.3, rate_max=10.0):
 def physical_check(dets, members, exptime_s=30.0, pa_tol_deg=20.0, speed_frac=0.5,
                    lin_rms_arcsec=1.0, min_epochs=2, epoch_gap_s=120.0, pa_tol_2v_deg=10.0,
                    orbit_check_2v=True, orbit_rate_tol=0.5, score_2v_min=0.0, max_arc_2v_min=None,
-                   perp_collinear_2v_arcsec=None, snr_frac_2v=None):
+                   perp_collinear_2v_arcsec=None, snr_frac_2v=None, chi2_2v_max=None, chi2_sig=None):
     """Defensible physical consistency of a candidate track (rejects chance/trail-angle-coincidence
     false links that pass position clustering). Requires:
       1. >= min_epochs DISTINCT time epochs (merge sub-epoch_gap snaps — back-to-back snaps are one).
@@ -196,6 +235,18 @@ def physical_check(dets, members, exptime_s=30.0, pa_tol_deg=20.0, speed_frac=0.
     if two_visit and score_2v_min > 0 and "score" in g.columns:
         if float(g.score.min()) < score_2v_min:
             return False, f"2v member score {g.score.min():.2f}<{score_2v_min}", n_ep
+    # 2-visit COMBINED-χ² GATE (preferred over the independent AND-thresholds below): weight the orbit-fit
+    # evidence (collinearity, rate-residual, brightness, trail-vs-motion PA & speed) by its real-pair scatter
+    # and sum in quadrature — a Mahalanobis goodness-of-fit. Keeps a real pair that is excellent on most axes
+    # but borderline on ONE (which AND-cuts reject) while rejecting an FP mediocre on ALL axes (which loose
+    # AND-cuts admit): ~2.5x more completeness at the SAME false rate (measured on real DP2 FP), no ML.
+    if two_visit and chi2_2v_max is not None:
+        c2, ci = pair_chi2(g, exptime_s, chi2_sig)
+        if not ci["bound"]:
+            return False, f"2v no bound orbit", n_ep
+        if c2 > chi2_2v_max:
+            return False, f"2v chi2 {c2:.1f}>{chi2_2v_max}", n_ep
+        return True, f"OK 2v chi2 {c2:.1f} a{ci['a']:.2f} e{ci['e']:.2f}", n_ep
     # 2. LINEAR fit residual over ALL member detections (degenerate only for <=2 points)
     tt = (g.mjd.to_numpy() - g.mjd.mean())
     cosd = np.cos(np.radians(g.dec.to_numpy()))
@@ -324,6 +375,7 @@ def main():
     ap.add_argument("--orbit-rate-tol", type=float, default=0.25, help="2-visit bound-orbit velocity-residual tol (frac of trail speed); 0.25 is the purity/recall knee (0.5 was too loose). Tighter=purer")
     ap.add_argument("--perp-collinear-2v", type=float, default=0.30, help="2-visit 4-trail-endpoint COLLINEARITY RMS tol (arcsec): real movers' two trail segments lie on ONE line (~0.08), FP merely parallel; recall-safe ~3x FP cut. None to disable")
     ap.add_argument("--snr-frac-2v", type=float, default=None, help="2-visit brightness consistency |dSNR|/min; OFF by default (costs recall). ~0.6 for extra purity")
+    ap.add_argument("--chi2-2v-max", type=float, default=3.0, help="2-visit COMBINED orbit-fit chi^2 gate (DEFAULT, preferred over the AND-thresholds): 3.0 gives 2.5x the completeness of tight AND-cuts at the SAME false rate (lambda~0.0023/pair on real DP2 FP). Set 0 to fall back to AND-cuts")
     ap.add_argument("--seed-2v", choices=["chord", "cluster"], default="chord", help="2-visit seeding: 'chord' (position-chord pairs + trail verify; ~4x recall, ~10x lower FP than 'cluster' trail-velocity clustering)")
     ap.add_argument("--pos-tol-3v", type=float, default=0.05, help="3+visit cluster radius (deg); 0.05 ~doubles 3v recall vs 0.017 at zero purity cost (physical_check is the gate)")
     ap.add_argument("--rate-min", type=float, default=0.3, help="chord seeder min apparent rate (deg/day)")
@@ -371,7 +423,8 @@ def main():
                                             lin_rms_arcsec=a.max_rms, min_epochs=a.min_epochs,
                                             pa_tol_2v_deg=a.pa_tol_2v, score_2v_min=a.score_2v_min,
                                             max_arc_2v_min=a.max_arc_2v_min, orbit_rate_tol=a.orbit_rate_tol,
-                                            perp_collinear_2v_arcsec=a.perp_collinear_2v, snr_frac_2v=a.snr_frac_2v)
+                                            perp_collinear_2v_arcsec=a.perp_collinear_2v, snr_frac_2v=a.snr_frac_2v,
+                                            chi2_2v_max=(a.chi2_2v_max if a.chi2_2v_max and a.chi2_2v_max > 0 else None))
             if not ok:
                 continue
             if n_ep == 2 and any(m in used for m in members):
