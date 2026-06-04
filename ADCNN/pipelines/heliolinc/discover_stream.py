@@ -211,7 +211,10 @@ def main():
     shards = [man.iloc[g::n_gpus].to_dict("records") for g in range(n_gpus)]
     tmp = Path(a.out).parent
     tmp.mkdir(parents=True, exist_ok=True)
-    shard_csvs = [str(tmp / f"_shard{g}.csv") for g in range(n_gpus)]
+    # shard paths MUST be unique per output, else concurrent fields sharing a RUN dir append to the same
+    # _shard{g}.csv and interleave/tear each other's rows (corruption). Tag with the output stem.
+    _tag = Path(a.out).stem
+    shard_csvs = [str(tmp / f"_shard_{_tag}_{g}.csv") for g in range(n_gpus)]
     feat_pqs = [None for _ in range(n_gpus)]   # legacy run_shard arg; feature-dump not used in CNN path
 
     if n_gpus == 1:
@@ -226,8 +229,16 @@ def main():
         for p in procs:
             p.join()
 
-    cat = pd.concat([pd.read_csv(c) for c in shard_csvs if Path(c).exists() and os.path.getsize(c) > 1],
-                    ignore_index=True)
+    cat = pd.concat([pd.read_csv(c, low_memory=False) for c in shard_csvs
+                     if Path(c).exists() and os.path.getsize(c) > 1], ignore_index=True)
+    # defensive: drop any torn/misaligned rows (visit must be a 13-digit visit id); coerce to int
+    vnum = pd.to_numeric(cat.visit, errors="coerce")
+    bad = ~(vnum.notna() & (vnum >= 1e12) & (vnum < 1e13))
+    if bad.any():
+        print(f"[discover] dropping {int(bad.sum())} malformed rows (bad visit)", flush=True)
+        cat = cat[~bad].copy()
+    cat["visit"] = pd.to_numeric(cat.visit).astype(np.int64)
+    cat["detector"] = pd.to_numeric(cat.detector, errors="coerce").astype("Int64")
     cat = cat.sort_values(["mjd", "visit", "detector"]).reset_index(drop=True)
     cat.insert(0, "detid", range(len(cat)))
     cat.to_csv(a.out, index=False)
@@ -236,7 +247,8 @@ def main():
         Path(c).unlink(missing_ok=True)
         Path(c + ".done").unlink(missing_ok=True)   # resume sidecars (only here, after success)
     print(f"[discover] {len(cat)} detections over {man.shape[0]} panels (cnn@{thr}) -> {a.out}", flush=True)
-    print(f"[discover] {cat.visit.nunique()} visits, {len({int(str(v)[:8]) for v in cat.visit})} nights", flush=True)
+    nights = len({int(str(v)[:8]) for v in cat.visit})
+    print(f"[discover] {cat.visit.nunique()} visits, {nights} nights", flush=True)
 
 
 if __name__ == "__main__":

@@ -55,8 +55,15 @@ def main():
     ap.add_argument("--n-objects", type=int, default=300)
     ap.add_argument("--rate-min", type=float, default=1.0, help="deg/day (log-uniform); >=1 = the trailed regime the pipeline keeps")
     ap.add_argument("--rate-max", type=float, default=8.0)
-    ap.add_argument("--mag-min", type=float, default=20.0)
-    ap.add_argument("--mag-max", type=float, default=24.5)
+    # FAINT regime: sample the target DETECTION-SNR (log-uniform) down to ~2 -- the sub-5sigma fast movers
+    # ADCNN targets -- and convert to a magnitude via the single-visit 5sigma depth + trail SNR dilution.
+    ap.add_argument("--snr-min", type=float, default=2.0, help="faintest target detection-SNR (the point)")
+    ap.add_argument("--snr-max", type=float, default=30.0)
+    ap.add_argument("--m5", type=float, default=24.0, help="nominal single-visit 5sigma POINT-source depth (mag)")
+    ap.add_argument("--psf-fwhm-px", type=float, default=3.77, help="PSF FWHM (px); trail dilution = sqrt(trail/FWHM)")
+    ap.add_argument("--mag-min", type=float, default=18.0, help="bright clamp on the SNR-derived magnitude")
+    ap.add_argument("--mag-max", type=float, default=27.0, help="faint clamp on the SNR-derived magnitude")
+    ap.add_argument("--retime-map", default=None, help="retime_cadence.py output: visit,mjd_retimed (re-stamp times)")
     ap.add_argument("--exptime", type=float, default=30.0)
     ap.add_argument("--seed", type=int, default=2026)
     a = ap.parse_args()
@@ -65,6 +72,14 @@ def main():
     panels = read_panels(a.manifest)
     visits = sorted({p["visit"] for p in panels})
     vmjd = {v: np.median([p["mjd"] for p in panels if p["visit"] == v]) for v in visits}
+    if a.retime_map:                          # re-stamp each visit to the realistic same-night cadence
+        rmap = pd.read_csv(a.retime_map)
+        rm = dict(zip(rmap.visit.astype(int), rmap.mjd_retimed.astype(float)))
+        miss = [v for v in visits if v not in rm]
+        if miss:
+            raise SystemExit(f"[orbits] retime-map missing {len(miss)} visits (e.g. {miss[:3]})")
+        vmjd = {v: rm[v] for v in visits}
+        print(f"[orbits] re-timed {len(visits)} visits from {a.retime_map}", flush=True)
     by_visit = {v: [p for p in panels if p["visit"] == v] for v in visits}
     ra0, ra1, dec0, dec1 = footprint(panels)
     t0 = min(vmjd.values())
@@ -104,8 +119,15 @@ def main():
         pa = rng.uniform(0, 2*np.pi)
         cd = np.cos(np.radians(sdec))
         vx = rate*np.cos(pa)/cd; vy = rate*np.sin(pa)  # deg/day in (ra, dec)
-        mag = float(rng.uniform(a.mag_min, a.mag_max))
         trail_px = rate * a.exptime/86400.0 / (PIXSCALE/3600.0)  # deg/exposure -> px
+        # target detection-SNR (log-uniform, down to ~2) -> magnitude via depth + trail dilution:
+        # a trail of length L spreads flux over ~max(1, L/FWHM) PSF footprints, so detection SNR for an
+        # optimally-filtered trail ~ point-SNR / sqrt(N_psf). Point-SNR=5 at m5 => for target SNR:
+        #   mag = m5 - 2.5*log10( SNR * sqrt(N_psf) / 5 ).
+        snr_t = float(np.exp(rng.uniform(np.log(a.snr_min), np.log(a.snr_max))))
+        n_psf = max(1.0, trail_px / a.psf_fwhm_px)
+        mag = a.m5 - 2.5*np.log10(snr_t * np.sqrt(n_psf) / 5.0)
+        mag = float(np.clip(mag, a.mag_min, a.mag_max))
         # sample this object's same-night apparition count k (cadence cap), then a contiguous window of
         # k real visits; the object is only present (injected) during those k epochs.
         k = int(rng.choice(KDIST_K, p=KDIST_P)); k = min(k, nv)
@@ -124,17 +146,21 @@ def main():
             beta = float(np.degrees(np.arctan2(yb - y, xb - x)) % 360.0)
             inj_rows.append(dict(objID=oid_s, visit=v, detector=p["detector"], mjd=t,
                                  ra=float(ra), dec=float(dec), x=x, y=y,
-                                 trail_length=float(trail_px), beta=beta, mag=mag))
+                                 trail_length=float(trail_px), beta=beta, mag=mag, snr_target=snr_t))
             n_sight += 1
         truth_rows.append(dict(objID=oid_s, rate_degday=rate, pa_deg=float(np.degrees(pa)),
-                               mag=mag, trail_px=float(trail_px), k_observable=int(len(obj_visits)),
+                               mag=mag, snr_target=snr_t, trail_px=float(trail_px),
+                               k_observable=int(len(obj_visits)),
                                n_sightings=n_sight, ra0=sra, dec0=sdec))
     inj = pd.DataFrame(inj_rows); truth = pd.DataFrame(truth_rows)
     Path(a.out_inject).parent.mkdir(parents=True, exist_ok=True)
     inj.to_csv(a.out_inject, index=False); truth.to_csv(a.out_truth, index=False)
     ns = truth.n_sightings
+    st = truth.snr_target
     print(f"[orbits] {len(truth)} objects -> {len(inj)} sightings | n_sightings: "
           f">=2 {int((ns>=2).sum())}, >=3 {int((ns>=3).sum())}, >=5 {int((ns>=5).sum())}, max {int(ns.max())}", flush=True)
+    print(f"[orbits] target-SNR: <5 {int((st<5).sum())} ([2,5) faint), 5-10 {int(((st>=5)&(st<10)).sum())}, "
+          f">=10 {int((st>=10).sum())} | mag [{truth.mag.min():.1f},{truth.mag.max():.1f}]", flush=True)
     print(f"[orbits] panels with injections: {inj.groupby(['visit','detector']).ngroups} | -> {a.out_inject}", flush=True)
 
 

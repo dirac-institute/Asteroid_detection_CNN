@@ -23,9 +23,26 @@ def main():
     ap.add_argument("--n-fields", type=int, default=6)
     ap.add_argument("--min-ecl-lat", type=float, default=20.0)
     ap.add_argument("--min-visits", type=int, default=20)
+    ap.add_argument("--max-per-tract", type=int, default=1,
+                    help="max field-nights reused per tract (1 = distinct tracts, the old behavior; "
+                         ">1 allows the same tract on different nights to reach more fields at scale)")
+    ap.add_argument("--exclude-visits-from", default=None,
+                    help="comma-separated globs of csvs with a 'visit' column; those visits are dropped "
+                         "from every manifest (LEAKAGE: pass the train/train2 csvs)")
     ap.add_argument("--out-dir", default=str(REPO / "ADCNN/pipelines/heliolinc/run_realfp"))
     a = ap.parse_args()
     out = Path(a.out_dir); out.mkdir(parents=True, exist_ok=True)
+
+    excl = set()
+    if a.exclude_visits_from:
+        import glob as _glob
+        for pat in a.exclude_visits_from.split(","):
+            for f in _glob.glob(pat.strip()):
+                try:
+                    excl |= set(pd.read_csv(f, usecols=["visit"]).visit.astype(int).unique())
+                except Exception as e:
+                    print(f"[realfp] WARN could not read {f}: {e}", flush=True)
+        print(f"[realfp] excluding {len(excl)} leakage visits from {a.exclude_visits_from}", flush=True)
 
     c = pd.read_csv(a.cadence)
     sc = SkyCoord(ra=c.ra.values * u.deg, dec=c.dec.values * u.deg)
@@ -36,16 +53,16 @@ def main():
     b = Butler("dp2_prep")
     skymap = b.get("skyMap", skymap=a.skymap, collections="skymaps")
     rows = []
-    used_tracts = set()
+    from collections import Counter
+    per_tract = Counter()
     k = 0
     for _, fld in off.iterrows():
         if k >= a.n_fields:
             break
         ra, dec, night = float(fld.ra), float(fld.dec), int(fld.night)
         tract = skymap.findTract(SpherePoint(ra * degrees, dec * degrees)).getId()
-        if tract in used_tracts:           # distinct tracts -> independent FP fields
+        if per_tract[tract] >= a.max_per_tract:   # cap reuse of a tract -> ~independent FP fields
             continue
-        used_tracts.add(tract)
         # one efficient query: all diffim panels for this tract on this night (day_obs == night)
         refs = list(b.registry.queryDatasets("difference_image", collections=STAGE4, findFirst=True,
                     where=(f"instrument='LSSTCam' AND skymap='{a.skymap}' AND tract={tract} "
@@ -53,9 +70,12 @@ def main():
         man = [dict(visit=int(r.dataId["visit"]), detector=int(r.dataId["detector"]),
                     band=r.dataId.get("band", ""), fits_path=b.getURI(r).ospath) for r in refs]
         mdf = pd.DataFrame(man).drop_duplicates(["visit", "detector"])
+        if len(mdf) and excl:                     # drop leakage (train/train2) visits
+            mdf = mdf[~mdf.visit.isin(excl)]
         nv = mdf.visit.nunique() if len(mdf) else 0
         if nv < a.min_visits:
             continue
+        per_tract[tract] += 1
         mdf.insert(0, "image_id", range(len(mdf)))
         mdf.to_csv(out / f"manifest_{k}.csv", index=False)
         rows.append(dict(field=k, tract=tract, night=night, ra=round(ra, 2), dec=round(dec, 2),
