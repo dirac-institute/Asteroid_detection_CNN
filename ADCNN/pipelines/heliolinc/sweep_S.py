@@ -105,10 +105,39 @@ def _load_field(d_dir, k, len_db_min, art_frac_max, recur_max):
     return k, d, recoverable
 
 
+def _cache_path(d_dir, k, scores):
+    import hashlib
+    tag = hashlib.md5((",".join(f"{s:.3f}" for s in sorted(scores))).encode()).hexdigest()[:8]
+    return f"{d_dir}/_sweepcache/{k}_{tag}.json"
+
+
+def _read_cache(d_dir, k, scores):
+    import json, os
+    cp = _cache_path(d_dir, k, scores)
+    if not os.path.exists(cp):
+        return None
+    with open(cp) as f:
+        c = json.load(f)
+    res = {float(s): (v[0], v[1], set(v[2])) for s, v in c["res"].items()}
+    return res, {o: float(sn) for o, sn in c["rec"].items()}
+
+
 def _eval_field_worker(args):
+    """Per-field eval with on-disk caching -> the sweep is resumable and never re-does a finished field;
+    a giant slow field can't block aggregation of the rest (use --aggregate-only)."""
+    import json, os
     d_dir, k, scores, len_db_min, art_frac_max, recur_max = args
+    cached = _read_cache(d_dir, k, scores)
+    if cached is not None:
+        return (k, *cached)
     _, d, recoverable = _load_field(d_dir, k, len_db_min, art_frac_max, recur_max)
-    return k, field_eval(d, scores), recoverable
+    res = field_eval(d, scores)
+    os.makedirs(f"{d_dir}/_sweepcache", exist_ok=True)
+    cp = _cache_path(d_dir, k, scores)
+    with open(cp + ".tmp", "w") as f:
+        json.dump({"res": {f"{s}": [v[0], v[1], sorted(v[2])] for s, v in res.items()}, "rec": recoverable}, f)
+    os.replace(cp + ".tmp", cp)   # atomic
+    return k, res, recoverable
 
 
 def main():
@@ -120,6 +149,8 @@ def main():
     ap.add_argument("--art-frac-max", type=float, default=0.3)
     ap.add_argument("--recur-max", type=int, default=2)
     ap.add_argument("--workers", type=int, default=32, help="parallel fields")
+    ap.add_argument("--aggregate-only", action="store_true",
+                    help="skip compute; build the curve from existing _sweepcache (partial results anytime)")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
     outdir = Path(a.out or a.dir)
@@ -128,17 +159,24 @@ def main():
     ks = [f.split("adcnn_dets_masked_")[1].split(".csv")[0]
           for f in sorted(glob.glob(f"{a.dir}/adcnn_dets_masked_*.csv"))]
     print(f"[sweep] {len(ks)} fields, {a.workers} workers, scores {scores}", flush=True)
-    tasks = [(a.dir, k, scores, a.len_db_min, a.art_frac_max, a.recur_max) for k in ks]
 
-    # per-field eval in parallel; aggregate per score
     per_field = {}            # k -> {S: (NP, nf, recset)}
     all_recoverable = {}
-    from concurrent.futures import ProcessPoolExecutor, as_completed
-    with ProcessPoolExecutor(max_workers=a.workers) as ex:
-        for fut in as_completed([ex.submit(_eval_field_worker, t) for t in tasks]):
-            k, res_k, recoverable = fut.result()
-            per_field[k] = res_k; all_recoverable.update(recoverable)
-            print(f"[sweep] field {k} done ({len(recoverable)} recoverable injected)", flush=True)
+    if a.aggregate_only:
+        for k in ks:
+            c = _read_cache(a.dir, k, scores)
+            if c is not None:
+                per_field[k] = c[0]; all_recoverable.update(c[1])
+        ks = [k for k in ks if k in per_field]
+        print(f"[sweep] AGGREGATE-ONLY: {len(ks)} cached fields", flush=True)
+    else:
+        tasks = [(a.dir, k, scores, a.len_db_min, a.art_frac_max, a.recur_max) for k in ks]
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        with ProcessPoolExecutor(max_workers=a.workers) as ex:
+            for fut in as_completed([ex.submit(_eval_field_worker, t) for t in tasks]):
+                k, res_k, recoverable = fut.result()
+                per_field[k] = res_k; all_recoverable.update(recoverable)
+                print(f"[sweep] field {k} done ({len(recoverable)} recoverable injected)", flush=True)
 
     snr_bins = [(2, 5), (5, 10), (10, 1e9)]
     rows = []
