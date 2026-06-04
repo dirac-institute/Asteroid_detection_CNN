@@ -14,8 +14,10 @@ THROTTLE=${THROTTLE:-8}            # never above 8 nodes concurrently for data p
 # a 100-field run -> use rubin:commissioning (normal QOS, real headroom) to actually parallelise.
 ACCT=${ACCT:-rubin:commissioning}
 CPUP=${CPUP:-roma}                # CPU partition for inject+stack (roma/milano)
-GPUP=${GPUP:-ada}                 # GPU partition for detection (ada normal=non-preempt; ampere=preempt)
-GRES=${GRES:-gpu:l40s:4}          # match GPUP (ada=l40s, ampere=a100)
+GPUP=${GPUP:-ampere}              # GPU detection: ampere has NO node cap (kipac/rubin ada cap at 1 node!)
+GRES=${GRES:-gpu:a100:4}          # match GPUP (ada=l40s:4, ampere=a100:4)
+GQOS=${GQOS:-preemptable}         # ampere is preemptable-only; --requeue + per-shard resume self-heal
+GTHROT=${GTHROT:-16}              # concurrent detection nodes (max-concurrency; preemption-tolerant)
 last=$((NFIELDS-1))
 
 echo "[submit] inject array 0-$last ($CPUP, $ACCT, throttle %$THROTTLE)"
@@ -23,9 +25,10 @@ JIN=$(sbatch --parsable --partition=$CPUP --account=$ACCT --qos=normal \
   --array=0-${last}%${THROTTLE} --export=ALL,RUN=$RUN,NOBJ=$NOBJ $HL/run_lambda/inject.slurm)
 echo "  inject job $JIN"
 
-echo "[submit] detect array 0-$last ($GPUP, $ACCT, afterok inject)"
-JDET=$(sbatch --parsable --partition=$GPUP --account=$ACCT --gres=$GRES \
-  --dependency=aftercorr:$JIN --array=0-${last}%16 --export=ALL,RUN=$RUN $HL/run_lambda/detect_ada.slurm)
+echo "[submit] detect array 0-$last ($GPUP $GQOS, $ACCT, aftercorr inject, throttle %$GTHROT, --requeue)"
+JDET=$(sbatch --parsable --partition=$GPUP --account=$ACCT --qos=$GQOS --gres=$GRES --requeue \
+  --exclude=sdfampere017 --dependency=aftercorr:$JIN --array=0-${last}%${GTHROT} \
+  --export=ALL,RUN=$RUN $HL/run_lambda/detect_ada.slurm)
 echo "  detect job $JDET"
 
 echo "[submit] stack array 0-$last ($CPUP, $ACCT, afterok inject, throttle %$THROTTLE)"

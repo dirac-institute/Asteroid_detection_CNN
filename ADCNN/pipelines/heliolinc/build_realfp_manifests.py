@@ -29,6 +29,10 @@ def main():
     ap.add_argument("--exclude-visits-from", default=None,
                     help="comma-separated globs of csvs with a 'visit' column; those visits are dropped "
                          "from every manifest (LEAKAGE: pass the train/train2 csvs)")
+    ap.add_argument("--from-diffim-cadence", default=None,
+                    help="use cadence_diffim.csv (tract,night,n_visits) as the source instead of the "
+                         "pointing cadence.csv -- reaches the full off-ecliptic tract-night pool (~412)")
+    ap.add_argument("--start-index", type=int, default=0, help="first manifest_<k> index (append to an existing run)")
     ap.add_argument("--out-dir", default=str(REPO / "ADCNN/pipelines/heliolinc/run_realfp"))
     a = ap.parse_args()
     out = Path(a.out_dir); out.mkdir(parents=True, exist_ok=True)
@@ -44,14 +48,31 @@ def main():
                     print(f"[realfp] WARN could not read {f}: {e}", flush=True)
         print(f"[realfp] excluding {len(excl)} leakage visits from {a.exclude_visits_from}", flush=True)
 
-    c = pd.read_csv(a.cadence)
+    STAGE4 = "LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage4"
+    b = Butler("dp2_prep")
+    skymap = b.get("skyMap", skymap=a.skymap, collections="skymaps")
+
+    if a.from_diffim_cadence:
+        # source = diffim-available (tract, night) pool; tract centre -> ra/dec/ecl_lat
+        c = pd.read_csv(a.from_diffim_cadence)
+        ctr = {int(t): skymap[int(t)].getCtrCoord() for t in c.tract.unique()}
+        c["ra"] = c.tract.map(lambda t: ctr[int(t)].getRa().asDegrees())
+        c["dec"] = c.tract.map(lambda t: ctr[int(t)].getDec().asDegrees())
+        c["has_tract"] = True
+    else:
+        c = pd.read_csv(a.cadence); c["has_tract"] = False
     sc = SkyCoord(ra=c.ra.values * u.deg, dec=c.dec.values * u.deg)
     c["ecl_lat"] = sc.barycentrictrueecliptic.lat.deg
     off = c[(c.ecl_lat.abs() > a.min_ecl_lat) & (c.n_visits >= a.min_visits)].sort_values("n_visits", ascending=False)
 
-    STAGE4 = "LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage4"
-    b = Butler("dp2_prep")
-    skymap = b.get("skyMap", skymap=a.skymap, collections="skymaps")
+    # when extending, drop (tract,night) already built so the new FP fields stay independent
+    fcsv0 = out / "fields.csv"
+    if a.start_index > 0 and fcsv0.exists() and "tract" in off.columns:
+        prev = pd.read_csv(fcsv0)
+        seen = set(zip(prev.tract.astype(int), prev.night.astype(int)))
+        off = off[~off.apply(lambda r: (int(r.tract), int(r.night)) in seen, axis=1)]
+        print(f"[realfp] extend: {len(off)} candidate (tract,night) after dropping {len(seen)} already-built", flush=True)
+
     rows = []
     from collections import Counter
     per_tract = Counter()
@@ -60,7 +81,7 @@ def main():
         if k >= a.n_fields:
             break
         ra, dec, night = float(fld.ra), float(fld.dec), int(fld.night)
-        tract = skymap.findTract(SpherePoint(ra * degrees, dec * degrees)).getId()
+        tract = int(fld.tract) if fld.get("has_tract") else skymap.findTract(SpherePoint(ra * degrees, dec * degrees)).getId()
         if per_tract[tract] >= a.max_per_tract:   # cap reuse of a tract -> ~independent FP fields
             continue
         # one efficient query: all diffim panels for this tract on this night (day_obs == night)
@@ -76,16 +97,21 @@ def main():
         if nv < a.min_visits:
             continue
         per_tract[tract] += 1
+        kk = a.start_index + k
         mdf.insert(0, "image_id", range(len(mdf)))
-        mdf.to_csv(out / f"manifest_{k}.csv", index=False)
-        rows.append(dict(field=k, tract=tract, night=night, ra=round(ra, 2), dec=round(dec, 2),
+        mdf.to_csv(out / f"manifest_{kk}.csv", index=False)
+        rows.append(dict(field=kk, tract=tract, night=night, ra=round(ra, 2), dec=round(dec, 2),
                          ecl_lat=round(float(fld.ecl_lat), 1), n_visits=nv, n_panels=len(mdf), pairs=nv - 1))
-        print(f"[realfp] field {k}: tract {tract} night {night} ecllat {fld.ecl_lat:.0f} | "
-              f"{nv} visits, {len(mdf)} panels, ~{nv-1} pairs -> manifest_{k}.csv", flush=True)
+        print(f"[realfp] field {kk}: tract {tract} night {night} ecllat {fld.ecl_lat:.0f} | "
+              f"{nv} visits, {len(mdf)} panels, ~{nv-1} pairs -> manifest_{kk}.csv", flush=True)
         k += 1
     summ = pd.DataFrame(rows)
-    summ.to_csv(out / "fields.csv", index=False)
-    print(f"[realfp] {len(summ)} fields | total {summ.pairs.sum()} pairs | {summ.n_panels.sum()} panels -> {out}/fields.csv", flush=True)
+    fcsv = out / "fields.csv"
+    if a.start_index > 0 and fcsv.exists():        # appending to an existing run
+        summ = pd.concat([pd.read_csv(fcsv), summ], ignore_index=True).drop_duplicates("field")
+    summ.to_csv(fcsv, index=False)
+    print(f"[realfp] wrote {len(rows)} new fields (total {len(summ)}) | new pairs {sum(r['pairs'] for r in rows)} | "
+          f"grand total {summ.pairs.sum()} pairs, {summ.n_panels.sum()} panels -> {fcsv}", flush=True)
 
 
 if __name__ == "__main__":

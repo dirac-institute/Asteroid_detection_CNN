@@ -46,23 +46,69 @@ def label_injected(d, inj, tol_px=10.0):
     return d
 
 
-def field_pairs(d, S):
-    """Return (n_pairs_trials, n_false, recovered_objIDs) at score floor S for one field's labelled dets."""
-    ds = d[d.score >= S].reset_index(drop=True)
-    vis = sorted(ds.visit.unique())
-    mj = {v: ds[ds.visit == v].mjd.median() for v in vis}
-    npair = sum(1 for i in range(len(vis) - 1) if (mj[vis[i + 1]] - mj[vis[i]]) * 1440 <= PC["max_arc_2v_min"])
-    n_false = 0; rec = set()
+def field_eval(d, scores):
+    """Evaluate one field across ALL score thresholds in a SINGLE pass.
+    physical_check is score-INDEPENDENT geometry, so we seed pairs once at the lowest score, run the
+    check once per pair, and threshold afterward by each pair's MIN member score. ~5x faster than
+    re-seeding/re-checking per score. (Valid because every visit keeps dets at any score in this FP-dense
+    regime, so visit-adjacency -- and thus the pair set as a function of min-score -- is monotone.)
+    A pair is a RECOVERY only if BOTH members are the SAME injected objID; obj+FP or FP+FP => false link.
+    Returns {S: (n_pairs_trials, n_false, recovered_objID_set)}."""
+    smin = min(scores)
+    ds = d[d.score >= smin].reset_index(drop=True)
+    sc = ds.score.to_numpy(); oid = ds.objID.to_numpy()
+    checked = []   # (pair_min_score, recovered_objID or None)
     for m in chord_seed_pairs(ds, max_arc_min=PC["max_arc_2v_min"]):
         ok, _info, nep = physical_check(ds, m, **PC)
         if not (ok and nep == 2):
             continue
-        oids = set(ds.loc[list(m), "objID"].dropna().unique())
-        if len(oids) == 1:                 # both endpoints = same injected object -> recovery
-            rec.add(next(iter(oids)))
-        else:                              # unmatched / cross-object -> false link
-            n_false += 1
-    return npair, n_false, rec
+        i, j = m
+        o = oid[i] if (pd.notna(oid[i]) and oid[i] == oid[j]) else None   # same injected obj => recovery
+        checked.append((float(min(sc[i], sc[j])), o))
+    out = {}
+    for S in scores:
+        dss = ds[ds.score >= S]
+        vis = sorted(dss.visit.unique())
+        mj = {v: dss[dss.visit == v].mjd.median() for v in vis}
+        npair = sum(1 for i in range(len(vis) - 1) if (mj[vis[i + 1]] - mj[vis[i]]) * 1440 <= PC["max_arc_2v_min"])
+        nf = 0; rec = set()
+        for ps, o in checked:
+            if ps < S:
+                continue
+            if o is not None:
+                rec.add(o)
+            else:
+                nf += 1
+        out[S] = (npair, nf, rec)
+    return out
+
+
+def _load_field(d_dir, k, len_db_min, art_frac_max, recur_max):
+    """Worker: load+filter+retime+recur+label one field. Returns (k, labelled_df, recoverable{objID:snr})."""
+    import pandas as pd
+    from pathlib import Path
+    f = f"{d_dir}/adcnn_dets_masked_{k}.csv"
+    d = pd.read_csv(f)
+    d = d[(d.len_db >= len_db_min) & (d.get("art_frac", 0) < art_frac_max)].reset_index(drop=True)
+    rmf = f"{d_dir}/retime_{k}.csv"
+    if Path(rmf).exists():
+        d = apply_retime(d, pd.read_csv(rmf))
+    if recur_max is not None:
+        d = add_recurrence(d); d = d[d.recur < recur_max].reset_index(drop=True)
+    injf = f"{d_dir}/inject_{k}.csv"
+    inj = pd.read_csv(injf) if Path(injf).exists() else None
+    d = label_injected(d, inj)
+    recoverable = {}
+    if inj is not None and len(inj):
+        cnt = inj.groupby("objID").size(); snr = inj.groupby("objID").snr_target.first()
+        recoverable = {o: float(snr[o]) for o in cnt[cnt >= 2].index}
+    return k, d, recoverable
+
+
+def _eval_field_worker(args):
+    d_dir, k, scores, len_db_min, art_frac_max, recur_max = args
+    _, d, recoverable = _load_field(d_dir, k, len_db_min, art_frac_max, recur_max)
+    return k, field_eval(d, scores), recoverable
 
 
 def main():
@@ -73,40 +119,33 @@ def main():
     ap.add_argument("--len-db-min", type=float, default=6.0)
     ap.add_argument("--art-frac-max", type=float, default=0.3)
     ap.add_argument("--recur-max", type=int, default=2)
+    ap.add_argument("--workers", type=int, default=32, help="parallel fields")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
     outdir = Path(a.out or a.dir)
+    scores = sorted(a.scores)
 
-    fields = []
-    for f in sorted(glob.glob(f"{a.dir}/adcnn_dets_masked_*.csv")):
-        k = f.split("adcnn_dets_masked_")[1].split(".csv")[0]
-        d = pd.read_csv(f)
-        d = d[(d.len_db >= a.len_db_min) & (d.get("art_frac", 0) < a.art_frac_max)].reset_index(drop=True)
-        rmf = f"{a.dir}/retime_{k}.csv"
-        if Path(rmf).exists():
-            d = apply_retime(d, pd.read_csv(rmf))
-        if a.recur_max is not None:
-            d = add_recurrence(d); d = d[d.recur < a.recur_max].reset_index(drop=True)
-        injf = f"{a.dir}/inject_{k}.csv"
-        inj = pd.read_csv(injf) if Path(injf).exists() else None
-        d = label_injected(d, inj)
-        # recoverable denominator: injected objects with >=2 sightings landing on panels (cadence+footprint)
-        recoverable = {}
-        if inj is not None and len(inj):
-            cnt = inj.groupby("objID").size()
-            snr = inj.groupby("objID").snr_target.first()
-            for oid in cnt[cnt >= 2].index:
-                recoverable[oid] = float(snr[oid])
-        fields.append(dict(k=k, d=d, recoverable=recoverable))
-        print(f"[sweep] field {k}: {len(d)} dets, {len(recoverable)} recoverable injected (>=2 sightings)", flush=True)
+    ks = [f.split("adcnn_dets_masked_")[1].split(".csv")[0]
+          for f in sorted(glob.glob(f"{a.dir}/adcnn_dets_masked_*.csv"))]
+    print(f"[sweep] {len(ks)} fields, {a.workers} workers, scores {scores}", flush=True)
+    tasks = [(a.dir, k, scores, a.len_db_min, a.art_frac_max, a.recur_max) for k in ks]
 
-    all_recoverable = {oid: s for fl in fields for oid, s in fl["recoverable"].items()}
+    # per-field eval in parallel; aggregate per score
+    per_field = {}            # k -> {S: (NP, nf, recset)}
+    all_recoverable = {}
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    with ProcessPoolExecutor(max_workers=a.workers) as ex:
+        for fut in as_completed([ex.submit(_eval_field_worker, t) for t in tasks]):
+            k, res_k, recoverable = fut.result()
+            per_field[k] = res_k; all_recoverable.update(recoverable)
+            print(f"[sweep] field {k} done ({len(recoverable)} recoverable injected)", flush=True)
+
     snr_bins = [(2, 5), (5, 10), (10, 1e9)]
     rows = []
-    for S in a.scores:
+    for S in scores:
         NP = nf = 0; rec = set()
-        for fl in fields:
-            p, x, r = field_pairs(fl["d"], S)
+        for k in ks:
+            p, x, r = per_field[k][S]
             NP += p; nf += x; rec |= r
         lam = nf / max(NP, 1)
         ul = 0.5 * chi2dist.ppf(0.95, 2 * (nf + 1)) / max(NP, 1)      # exact Poisson 95% upper limit
