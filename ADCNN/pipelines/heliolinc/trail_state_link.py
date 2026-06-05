@@ -196,7 +196,8 @@ def chord_seed_pairs(dets, *, max_arc_min=40.0, rate_min=0.3, rate_max=10.0):
 def physical_check(dets, members, exptime_s=30.0, pa_tol_deg=20.0, speed_frac=0.5,
                    lin_rms_arcsec=1.0, min_epochs=2, epoch_gap_s=120.0, pa_tol_2v_deg=10.0,
                    orbit_check_2v=True, orbit_rate_tol=0.5, score_2v_min=0.0, max_arc_2v_min=None,
-                   perp_collinear_2v_arcsec=None, snr_frac_2v=None, chi2_2v_max=None, chi2_sig=None):
+                   perp_collinear_2v_arcsec=None, snr_frac_2v=None, chi2_2v_max=None, chi2_sig=None,
+                   mfsnr_min_2v=None, rate_lo_2v=None, rate_hi_2v=10.0):
     """Defensible physical consistency of a candidate track (rejects chance/trail-angle-coincidence
     false links that pass position clustering). Requires:
       1. >= min_epochs DISTINCT time epochs (merge sub-epoch_gap snaps — back-to-back snaps are one).
@@ -243,6 +244,21 @@ def physical_check(dets, members, exptime_s=30.0, pa_tol_deg=20.0, speed_frac=0.
     if two_visit and score_2v_min > 0 and "score" in g.columns:
         if float(g.score.min()) < score_2v_min:
             return False, f"2v member score {g.score.min():.2f}<{score_2v_min}", n_ep
+    # 2-visit PHOTOMETRIC purity cut (the strongest non-ML 2v lever, measured on real DP2 FP): a recovered
+    # mover is bright in BOTH visits while a surviving chance-FP pair has >=1 faint marginal member. Require
+    # the fainter member's matched-filter TRAIL SNR >= mfsnr_min_2v. This is the MATCHED-FILTER trail SNR
+    # (integrates along the streak), NOT the per-PSF point SNR -> it does NOT revert to the 5sigma-stack
+    # regime: the stack-missed fast/long-trail movers have high mf_snr and are KEPT. With mfsnr carrying the
+    # purity, chi2_2v_max can be LOOSENED (~10) to recover noisy real movers (orbit chi2 doesn't separate
+    # true/false among survivors). Lifts the 3sigma op-point from S0.95 (comp .044) to S0.80 (comp ~.09).
+    if two_visit and mfsnr_min_2v is not None and "mf_snr" in g.columns:
+        if float(g.mf_snr.min()) < mfsnr_min_2v:
+            return False, f"2v mf_snr {g.mf_snr.min():.1f}<{mfsnr_min_2v}", n_ep
+    if two_visit and rate_lo_2v is not None:
+        cd = float(np.cos(np.radians(g.dec.mean()))); dt = t.max() - t.min()
+        rate = np.hypot((g.ra.iloc[-1] - g.ra.iloc[0]) * cd, g.dec.iloc[-1] - g.dec.iloc[0]) / dt if dt > 0 else 0.0
+        if rate < rate_lo_2v or rate > rate_hi_2v:
+            return False, f"2v rate {rate:.1f} out of [{rate_lo_2v},{rate_hi_2v}]deg/day", n_ep
     # 2-visit COMBINED-χ² GATE (preferred over the independent AND-thresholds below): weight the orbit-fit
     # evidence (collinearity, rate-residual, brightness, trail-vs-motion PA & speed) by its real-pair scatter
     # and sum in quadrature — a Mahalanobis goodness-of-fit. Keeps a real pair that is excellent on most axes
@@ -383,7 +399,10 @@ def main():
     ap.add_argument("--orbit-rate-tol", type=float, default=0.25, help="2-visit bound-orbit velocity-residual tol (frac of trail speed); 0.25 is the purity/recall knee (0.5 was too loose). Tighter=purer")
     ap.add_argument("--perp-collinear-2v", type=float, default=0.30, help="2-visit 4-trail-endpoint COLLINEARITY RMS tol (arcsec): real movers' two trail segments lie on ONE line (~0.08), FP merely parallel; recall-safe ~3x FP cut. None to disable")
     ap.add_argument("--snr-frac-2v", type=float, default=None, help="2-visit brightness consistency |dSNR|/min; OFF by default (costs recall). ~0.6 for extra purity")
-    ap.add_argument("--chi2-2v-max", type=float, default=3.0, help="2-visit COMBINED orbit-fit chi^2 gate (DEFAULT, preferred over the AND-thresholds): 3.0 gives 2.5x the completeness of tight AND-cuts at the SAME false rate (lambda~0.0023/pair on real DP2 FP). Set 0 to fall back to AND-cuts")
+    ap.add_argument("--chi2-2v-max", type=float, default=10.0, help="2-visit COMBINED orbit-fit chi^2 gate. With the mf_snr purity cut ON, this is LOOSENED to ~10 (orbit chi2 does not separate true/false among survivors, so a tight gate only cost completeness); set 3.0 if running WITHOUT --mfsnr-min-2v. 0 to disable")
+    ap.add_argument("--mfsnr-min-2v", type=float, default=12.0, help="2-visit PHOTOMETRIC purity cut (THE strongest non-ML 2v lever): require the fainter member's matched-filter TRAIL SNR >= this. Lifts the 3sigma op-point from S0.95 to S0.80 (+~60%% completeness). matched-filter trail SNR != per-PSF stack SNR, so it KEEPS the stack-missed fast/long-trail movers. 0 to disable")
+    ap.add_argument("--rate-lo-2v", type=float, default=1.0, help="2-visit NEO apparent-rate band low (deg/day)")
+    ap.add_argument("--rate-hi-2v", type=float, default=8.0, help="2-visit NEO apparent-rate band high (deg/day)")
     ap.add_argument("--seed-2v", choices=["chord", "cluster"], default="chord", help="2-visit seeding: 'chord' (position-chord pairs + trail verify; ~4x recall, ~10x lower FP than 'cluster' trail-velocity clustering)")
     ap.add_argument("--pos-tol-3v", type=float, default=0.05, help="3+visit cluster radius (deg); 0.05 ~doubles 3v recall vs 0.017 at zero purity cost (physical_check is the gate)")
     ap.add_argument("--rate-min", type=float, default=0.3, help="chord seeder min apparent rate (deg/day)")
@@ -437,7 +456,9 @@ def main():
                                             pa_tol_2v_deg=a.pa_tol_2v, score_2v_min=a.score_2v_min,
                                             max_arc_2v_min=a.max_arc_2v_min, orbit_rate_tol=a.orbit_rate_tol,
                                             perp_collinear_2v_arcsec=a.perp_collinear_2v, snr_frac_2v=a.snr_frac_2v,
-                                            chi2_2v_max=(a.chi2_2v_max if a.chi2_2v_max and a.chi2_2v_max > 0 else None))
+                                            chi2_2v_max=(a.chi2_2v_max if a.chi2_2v_max and a.chi2_2v_max > 0 else None),
+                                            mfsnr_min_2v=(a.mfsnr_min_2v if a.mfsnr_min_2v and a.mfsnr_min_2v > 0 else None),
+                                            rate_lo_2v=a.rate_lo_2v, rate_hi_2v=a.rate_hi_2v)
             if not ok:
                 continue
             if n_ep == 2 and any(m in used for m in members):

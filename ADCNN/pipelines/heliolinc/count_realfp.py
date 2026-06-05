@@ -13,7 +13,8 @@ from ADCNN.pipelines.heliolinc.trail_state_link import link, physical_check, cho
 from ADCNN.pipelines.heliolinc.recurrence import add_recurrence
 
 PC = dict(pa_tol_deg=20.0, lin_rms_arcsec=1.0, min_epochs=2, pa_tol_2v_deg=10.0, orbit_check_2v=True,
-          orbit_rate_tol=0.25, max_arc_2v_min=30.0, perp_collinear_2v_arcsec=0.30)
+          orbit_rate_tol=0.25, max_arc_2v_min=30.0, perp_collinear_2v_arcsec=0.30,
+          mfsnr_min_2v=None, rate_lo_2v=None, rate_hi_2v=8.0)
 
 
 def field_false_tracks(d, S, seed="chord"):
@@ -43,12 +44,18 @@ def main():
     ap.add_argument("--dsnr", type=float, default=None, help="brightness-consistency |dSNR|/min tol (snr_frac_2v)")
     ap.add_argument("--seed", choices=["chord", "cluster"], default="chord", help="2-visit seeding (chord=position-chord, default; cluster=trail-velocity)")
     ap.add_argument("--chi2-max", type=float, default=None, help="2-visit combined orbit-fit chi^2 gate (~3.0); preferred over the AND-cut knobs")
+    ap.add_argument("--mfsnr-min-2v", type=float, default=None, help="2v PHOTOMETRIC purity cut: fainter member matched-filter TRAIL SNR floor (shipped op-point = 10; THE strongest non-ML 2v lever)")
+    ap.add_argument("--rate-lo-2v", type=float, default=None, help="2v NEO apparent-rate band low (deg/day; shipped = 1)")
+    ap.add_argument("--rate-hi-2v", type=float, default=8.0, help="2v NEO apparent-rate band high (deg/day; shipped = 8)")
     a = ap.parse_args()
     PC["chi2_2v_max"] = a.chi2_max
     PC["max_arc_2v_min"] = a.max_arc_min
     PC["orbit_rate_tol"] = a.orbit_rate_tol
     PC["perp_collinear_2v_arcsec"] = a.perp
     PC["snr_frac_2v"] = a.dsnr
+    PC["mfsnr_min_2v"] = (a.mfsnr_min_2v if a.mfsnr_min_2v and a.mfsnr_min_2v > 0 else None)
+    PC["rate_lo_2v"] = a.rate_lo_2v
+    PC["rate_hi_2v"] = a.rate_hi_2v
     files = sorted(glob.glob(f"{a.dir}/adcnn_dets_masked_*.csv"))
     out = [f"[realfp] {len(files)} field-nights"]
     # total same-night adjacent pairs (gap <= max_arc) across fields
