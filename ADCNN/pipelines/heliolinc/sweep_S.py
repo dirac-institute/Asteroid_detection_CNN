@@ -62,9 +62,10 @@ def field_eval(d, scores):
     mfsnr_cut = PC.get("mfsnr_min_2v"); rlo = PC.get("rate_lo_2v"); rhi = PC.get("rate_hi_2v")
     mfs = ds.mf_snr.to_numpy() if "mf_snr" in ds else None
     ra = ds.ra.to_numpy(); dec = ds.dec.to_numpy(); mjd = ds.mjd.to_numpy()
+    pcheck = {k: v for k, v in PC.items() if k not in ("mfsnr_min_2v", "rate_lo_2v", "rate_hi_2v")}
     checked = []   # (pair_min_score, recovered_objID or None)
     for m in chord_seed_pairs(ds, max_arc_min=PC["max_arc_2v_min"]):
-        ok, _info, nep = physical_check(ds, m, **PC)
+        ok, _info, nep = physical_check(ds, m, **pcheck)
         if not (ok and nep == 2):
             continue
         i, j = m
