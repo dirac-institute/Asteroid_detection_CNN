@@ -57,12 +57,24 @@ def field_eval(d, scores):
     smin = min(scores)
     ds = d[d.score >= smin].reset_index(drop=True)
     sc = ds.score.to_numpy(); oid = ds.objID.to_numpy()
+    # LINKING-stage purity cuts (non-ML): the recovered movers are bright in BOTH visits while surviving FP
+    # are faint marginal detections -> require the fainter member's mf_snr >= mfsnr_min_2v; + a NEO rate band.
+    mfsnr_cut = PC.get("mfsnr_min_2v"); rlo = PC.get("rate_lo_2v"); rhi = PC.get("rate_hi_2v")
+    mfs = ds.mf_snr.to_numpy() if "mf_snr" in ds else None
+    ra = ds.ra.to_numpy(); dec = ds.dec.to_numpy(); mjd = ds.mjd.to_numpy()
     checked = []   # (pair_min_score, recovered_objID or None)
     for m in chord_seed_pairs(ds, max_arc_min=PC["max_arc_2v_min"]):
         ok, _info, nep = physical_check(ds, m, **PC)
         if not (ok and nep == 2):
             continue
         i, j = m
+        if mfsnr_cut is not None and mfs is not None and min(mfs[i], mfs[j]) < mfsnr_cut:
+            continue
+        if rlo is not None:
+            dt = abs(mjd[j] - mjd[i]); cd = np.cos(np.radians(dec[i]))
+            rate = np.hypot((ra[j] - ra[i]) * cd, dec[j] - dec[i]) / dt if dt > 0 else 0.0
+            if rate < rlo or rate > rhi:
+                continue
         o = oid[i] if (pd.notna(oid[i]) and oid[i] == oid[j]) else None   # same injected obj => recovery
         checked.append((float(min(sc[i], sc[j])), o))
     out = {}
@@ -83,13 +95,14 @@ def field_eval(d, scores):
     return out
 
 
-def _load_field(d_dir, k, len_db_min, art_frac_max, recur_max):
+def _load_field(d_dir, k, len_db_min, art_frac_max, recur_max, len_db_max=1e9):
     """Worker: load+filter+retime+recur+label one field. Returns (k, labelled_df, recoverable{objID:snr})."""
     import pandas as pd
     from pathlib import Path
     f = f"{d_dir}/adcnn_dets_masked_{k}.csv"
     d = pd.read_csv(f)
-    d = d[(d.len_db >= len_db_min) & (d.get("art_frac", 0) < art_frac_max)].reset_index(drop=True)
+    d = d[(d.len_db >= len_db_min) & (d.len_db <= len_db_max) &
+          (d.get("art_frac", 0) < art_frac_max)].reset_index(drop=True)
     rmf = f"{d_dir}/retime_{k}.csv"
     if Path(rmf).exists():
         d = apply_retime(d, pd.read_csv(rmf))
@@ -98,22 +111,26 @@ def _load_field(d_dir, k, len_db_min, art_frac_max, recur_max):
     injf = f"{d_dir}/inject_{k}.csv"
     inj = pd.read_csv(injf) if Path(injf).exists() else None
     d = label_injected(d, inj)
+    # sim_orbits REUSES objID names (SNEO00000..) in every field -> make them FIELD-UNIQUE so recovered/
+    # recoverable count PHYSICAL objects, not names (else completeness inflates with field count).
+    m = d.objID.notna()
+    d.loc[m, "objID"] = f"{k}_" + d.loc[m, "objID"].astype(str)
     recoverable = {}
     if inj is not None and len(inj):
         cnt = inj.groupby("objID").size(); snr = inj.groupby("objID").snr_target.first()
-        recoverable = {o: float(snr[o]) for o in cnt[cnt >= 2].index}
+        recoverable = {f"{k}_{o}": float(snr[o]) for o in cnt[cnt >= 2].index}
     return k, d, recoverable
 
 
-def _cache_path(d_dir, k, scores):
+def _cache_path(d_dir, k, params):
     import hashlib
-    tag = hashlib.md5((",".join(f"{s:.3f}" for s in sorted(scores))).encode()).hexdigest()[:8]
+    tag = hashlib.md5(repr(params).encode()).hexdigest()[:10]   # keyed by scores + ALL filter params
     return f"{d_dir}/_sweepcache/{k}_{tag}.json"
 
 
-def _read_cache(d_dir, k, scores):
+def _read_cache(d_dir, k, params):
     import json, os
-    cp = _cache_path(d_dir, k, scores)
+    cp = _cache_path(d_dir, k, params)
     if not os.path.exists(cp):
         return None
     with open(cp) as f:
@@ -123,17 +140,20 @@ def _read_cache(d_dir, k, scores):
 
 
 def _eval_field_worker(args):
-    """Per-field eval with on-disk caching -> the sweep is resumable and never re-does a finished field;
-    a giant slow field can't block aggregation of the rest (use --aggregate-only)."""
+    """Per-field eval with on-disk caching (keyed by scores+filters) -> resumable; a giant slow field
+    can't block aggregation of the rest (use --aggregate-only)."""
     import json, os
-    d_dir, k, scores, len_db_min, art_frac_max, recur_max = args
-    cached = _read_cache(d_dir, k, scores)
+    d_dir, k, scores, len_db_min, len_db_max, art_frac_max, recur_max = args
+    params = (tuple(scores), len_db_min, len_db_max, art_frac_max, recur_max,
+              PC.get("mfsnr_min_2v"), PC.get("rate_lo_2v"), PC.get("rate_hi_2v"),
+              PC.get("max_arc_2v_min"), PC.get("chi2_2v_max"))
+    cached = _read_cache(d_dir, k, params)
     if cached is not None:
         return (k, *cached)
-    _, d, recoverable = _load_field(d_dir, k, len_db_min, art_frac_max, recur_max)
+    _, d, recoverable = _load_field(d_dir, k, len_db_min, art_frac_max, recur_max, len_db_max)
     res = field_eval(d, scores)
     os.makedirs(f"{d_dir}/_sweepcache", exist_ok=True)
-    cp = _cache_path(d_dir, k, scores)
+    cp = _cache_path(d_dir, k, params)
     with open(cp + ".tmp", "w") as f:
         json.dump({"res": {f"{s}": [v[0], v[1], sorted(v[2])] for s, v in res.items()}, "rec": recoverable}, f)
     os.replace(cp + ".tmp", cp)   # atomic
@@ -146,8 +166,13 @@ def main():
     ap.add_argument("--scores", nargs="+", type=float,
                     default=[0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90])
     ap.add_argument("--len-db-min", type=float, default=6.0)
+    ap.add_argument("--len-db-max", type=float, default=1e9, help="upper len_db band (50 = the tuned-params band; default off = pin-equivalent)")
     ap.add_argument("--art-frac-max", type=float, default=0.3)
     ap.add_argument("--recur-max", type=int, default=2)
+    ap.add_argument("--max-arc", type=float, default=None, help="override Δt link window (min); must exceed the pair gap")
+    ap.add_argument("--mfsnr-min", type=float, default=None, help="LINKING purity cut: require fainter member mf_snr >= this")
+    ap.add_argument("--rate-lo", type=float, default=None, help="NEO rate band low (deg/day); pair with --rate-hi")
+    ap.add_argument("--rate-hi", type=float, default=10.0)
     ap.add_argument("--workers", type=int, default=32, help="parallel fields")
     ap.add_argument("--aggregate-only", action="store_true",
                     help="skip compute; build the curve from existing _sweepcache (partial results anytime)")
@@ -155,6 +180,10 @@ def main():
     a = ap.parse_args()
     outdir = Path(a.out or a.dir)
     scores = sorted(a.scores)
+    if a.max_arc is not None:
+        PC["max_arc_2v_min"] = a.max_arc   # forked workers inherit this module global
+    PC["mfsnr_min_2v"] = a.mfsnr_min
+    PC["rate_lo_2v"] = a.rate_lo; PC["rate_hi_2v"] = a.rate_hi
 
     ks = [f.split("adcnn_dets_masked_")[1].split(".csv")[0]
           for f in sorted(glob.glob(f"{a.dir}/adcnn_dets_masked_*.csv"))]
@@ -162,15 +191,17 @@ def main():
 
     per_field = {}            # k -> {S: (NP, nf, recset)}
     all_recoverable = {}
+    params = (tuple(scores), a.len_db_min, a.len_db_max, a.art_frac_max, a.recur_max,
+              a.mfsnr_min, a.rate_lo, a.rate_hi, PC["max_arc_2v_min"], PC["chi2_2v_max"])
     if a.aggregate_only:
         for k in ks:
-            c = _read_cache(a.dir, k, scores)
+            c = _read_cache(a.dir, k, params)
             if c is not None:
                 per_field[k] = c[0]; all_recoverable.update(c[1])
         ks = [k for k in ks if k in per_field]
         print(f"[sweep] AGGREGATE-ONLY: {len(ks)} cached fields", flush=True)
     else:
-        tasks = [(a.dir, k, scores, a.len_db_min, a.art_frac_max, a.recur_max) for k in ks]
+        tasks = [(a.dir, k, scores, a.len_db_min, a.len_db_max, a.art_frac_max, a.recur_max) for k in ks]
         from concurrent.futures import ProcessPoolExecutor, as_completed
         with ProcessPoolExecutor(max_workers=a.workers) as ex:
             for fut in as_completed([ex.submit(_eval_field_worker, t) for t in tasks]):
@@ -200,6 +231,7 @@ def main():
               f"comp={comp:.2f} ({len(rec)}/{len(all_recoverable)})", flush=True)
 
     res = pd.DataFrame(rows)
+    outdir.mkdir(parents=True, exist_ok=True)
     res.to_csv(outdir / "lambda_vs_S.csv", index=False)
 
     # interpolate S* where lambda(S) crosses the 3-sigma budget (lambda decreasing in S)
