@@ -9,10 +9,12 @@
 set -eo pipefail
 # CANONICAL same-night NEO pipeline orchestrator (run on CPU; drives the GPU detect + the rest).
 #
-# Morning run (build manifest from a night + tract(s) and link 2-visit tracks):
-#   DAY=20250706 TRACTS=8489 RUN=<out dir>  sbatch --export=ALL,DAY,TRACTS,RUN sn_run.slurm
-# Or with a pre-built manifest (DAY/TRACTS then optional):
-#   RUN=<dir with manifest.csv>  sbatch --export=ALL,RUN sn_run.slurm
+# Morning run (build manifest from a night + tract(s) and link 2-visit tracks). EXPORT the vars into the
+# shell first, then `--export=ALL` -- do NOT write `--export=ALL,TRACTS=a,b,c`: sbatch splits --export on
+# commas, so a comma-separated TRACTS value is truncated to its first tract (silent under-coverage).
+#   export DAY=20250706 TRACTS="8487-8493,8729-8735" RUN=<out dir>; sbatch --export=ALL sn_run.slurm
+# Or with a pre-built manifest:
+#   export RUN=<dir with manifest.csv>; sbatch --export=ALL sn_run.slurm
 #
 # Stages (this IS how we run it every morning):
 #   0. manifest.csv for DAY + TRACTS (build_manifest, LSST stack env) if $RUN/manifest.csv is missing.
