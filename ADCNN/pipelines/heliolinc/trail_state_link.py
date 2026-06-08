@@ -175,21 +175,27 @@ def chord_seed_pairs(dets, *, max_arc_min=40.0, rate_min=0.3, rate_max=10.0):
     vmjd = {v: float(np.median(mjd[vis == v])) for v in uv}
     idx_by = {v: np.where(vis == v)[0] for v in uv}
     pairs = []
-    for a_, b_ in zip(uv[:-1], uv[1:]):
-        dt = vmjd[b_] - vmjd[a_]
-        if dt <= 0 or dt * 1440.0 > max_arc_min:
-            continue
-        ia, ib = idx_by[a_], idx_by[b_]
-        if not len(ia) or not len(ib):
-            continue
-        cd = float(np.cos(np.radians(dec[ib].mean())))
-        tree = cKDTree(np.column_stack([ra[ib] * cd, dec[ib]]))
-        dmin, dmax = rate_min * dt, rate_max * dt                 # deg
-        for i in ia:
-            for jp in tree.query_ball_point([ra[i] * cd, dec[i]], dmax):
-                j = int(ib[jp])
-                if np.hypot((ra[j] - ra[i]) * cd, dec[j] - dec[i]) >= dmin:
-                    pairs.append([int(i), j])
+    # ALL same-night visit pairs within max_arc_min (NOT just adjacent visits). The old adjacent-only
+    # zip(uv[:-1],uv[1:]) missed real movers detected in NON-adjacent visits -- e.g. a deep-drilling night
+    # with many same-night revisits where a faint mover is detected in visits 3 & 7 (4,5,6 below threshold).
+    # No-op for the WFD 2-visit-per-night case (one pair); recovers the multi-visit movers otherwise.
+    for ai in range(len(uv)):
+        for bi in range(ai + 1, len(uv)):
+            a_, b_ = uv[ai], uv[bi]
+            dt = vmjd[b_] - vmjd[a_]
+            if dt <= 0 or dt * 1440.0 > max_arc_min:
+                continue
+            ia, ib = idx_by[a_], idx_by[b_]
+            if not len(ia) or not len(ib):
+                continue
+            cd = float(np.cos(np.radians(dec[ib].mean())))
+            tree = cKDTree(np.column_stack([ra[ib] * cd, dec[ib]]))
+            dmin, dmax = rate_min * dt, rate_max * dt             # deg
+            for i in ia:
+                for jp in tree.query_ball_point([ra[i] * cd, dec[i]], dmax):
+                    j = int(ib[jp])
+                    if np.hypot((ra[j] - ra[i]) * cd, dec[j] - dec[i]) >= dmin:
+                        pairs.append([int(i), j])
     return pairs
 
 
@@ -218,12 +224,20 @@ def physical_check(dets, members, exptime_s=30.0, pa_tol_deg=20.0, speed_frac=0.
          randomized-trail null test confirms ~0 survivors).
     Returns (ok, info)."""
     g = dets.iloc[members].sort_values("mjd").reset_index(drop=True)
-    # 1. distinct epochs
-    t = g.mjd.to_numpy(); ep = [0]
-    for i in range(1, len(t)):
-        if (t[i] - t[ep[-1]]) * SOLARDAY > epoch_gap_s:
-            ep.append(i)
-    n_ep = len(ep)
+    t = g.mjd.to_numpy()
+    # 1. distinct epochs. PRIMARY definition = distinct VISIT id (each visit is ONE observation epoch,
+    # cadence-independent). This fixes the failure on rapid same-night cadences (deep-drilling, ~1-min
+    # revisits) where the old time-gap merge (epoch_gap_s) wrongly fused genuine separate visits into one
+    # epoch and rejected real 2-visit links as "1 epoch". Fall back to the time-gap merge only when there
+    # is no visit column (merge sub-epoch_gap_s back-to-back snaps).
+    if "visit" in g.columns:
+        n_ep = int(g.visit.nunique())
+    else:
+        ep = [0]
+        for i in range(1, len(t)):
+            if (t[i] - t[ep[-1]]) * SOLARDAY > epoch_gap_s:
+                ep.append(i)
+        n_ep = len(ep)
     if n_ep < min_epochs:
         return False, f"only {n_ep} distinct epochs", n_ep
     two_visit = (n_ep == 2)
@@ -399,8 +413,9 @@ def main():
     ap.add_argument("--orbit-rate-tol", type=float, default=0.25, help="2-visit bound-orbit velocity-residual tol (frac of trail speed); 0.25 is the purity/recall knee (0.5 was too loose). Tighter=purer")
     ap.add_argument("--perp-collinear-2v", type=float, default=0.30, help="2-visit 4-trail-endpoint COLLINEARITY RMS tol (arcsec): real movers' two trail segments lie on ONE line (~0.08), FP merely parallel; recall-safe ~3x FP cut. None to disable")
     ap.add_argument("--snr-frac-2v", type=float, default=None, help="2-visit brightness consistency |dSNR|/min; OFF by default (costs recall). ~0.6 for extra purity")
-    ap.add_argument("--chi2-2v-max", type=float, default=10.0, help="2-visit COMBINED orbit-fit chi^2 gate. With the mf_snr purity cut ON, this is LOOSENED to ~10 (orbit chi2 does not separate true/false among survivors, so a tight gate only cost completeness); set 3.0 if running WITHOUT --mfsnr-min-2v. 0 to disable")
-    ap.add_argument("--mfsnr-min-2v", type=float, default=12.0, help="2-visit PHOTOMETRIC purity cut (THE strongest non-ML 2v lever): require the fainter member's matched-filter TRAIL SNR >= this. Lifts the 3sigma op-point from S0.95 to S0.80 (+~60%% completeness). matched-filter trail SNR != per-PSF stack SNR, so it KEEPS the stack-missed fast/long-trail movers. 0 to disable")
+    ap.add_argument("--epoch-gap-s", type=float, default=40.0, help="seconds; detections closer than this in time are merged into ONE epoch (intra-visit snaps). MUST be < the same-night revisit gap or genuine separate visits merge and 2-visit links are rejected as '1 epoch' -- the shipped 120s WRONGLY merged the ~1-min deep-drilling cadence. 40s separates >=40s-apart visits, merges true back-to-back snaps; no-op for WFD's ~34-min pairs.")
+    ap.add_argument("--chi2-2v-max", type=float, default=5.0, help="2-visit COMBINED orbit-fit chi^2 gate -- THE primary purity lever. The GEOMETRIC chi2 (collinearity + trail-vs-motion PA & speed) is the STRONG true/false discriminator (true median ~4 vs false ~39, FAST movers); TIGHTENING it 10->5 lifts the 3sigma completeness at the realistic 34-min WFD cadence from 0.070 to ~0.10 (+~45%%, validated on 80 off-ecliptic lambda fields) at NO purity cost. 0 to disable")
+    ap.add_argument("--mfsnr-min-2v", type=float, default=10.0, help="2-visit photometric purity floor: fainter member's matched-filter TRAIL SNR >= this. CADENCE-DEPENDENT DIAL: at the realistic ~34-min WFD pair gap the residual chance-FP need this floor to reach 3sigma -> keep ~10. At RAPID cadence (deep-drilling/short dt, sparse FP) the geometric chi2 alone carries purity -> lower to ~5 to recover the fast FAINT movers (mf_snr ~ point_SNR*sqrt(PSF/trail_area) is low for long trails, so a high floor rejects exactly them). 0 to disable")
     ap.add_argument("--rate-lo-2v", type=float, default=1.0, help="2-visit NEO apparent-rate band low (deg/day)")
     ap.add_argument("--rate-hi-2v", type=float, default=8.0, help="2-visit NEO apparent-rate band high (deg/day)")
     ap.add_argument("--seed-2v", choices=["chord", "cluster"], default="chord", help="2-visit seeding: 'chord' (position-chord pairs + trail verify; ~4x recall, ~10x lower FP than 'cluster' trail-velocity clustering)")
@@ -453,6 +468,7 @@ def main():
         for members in cand:
             ok, info, n_ep = physical_check(dn, members, a.exptime, pa_tol_deg=a.pa_tol,
                                             lin_rms_arcsec=a.max_rms, min_epochs=a.min_epochs,
+                                            epoch_gap_s=a.epoch_gap_s,
                                             pa_tol_2v_deg=a.pa_tol_2v, score_2v_min=a.score_2v_min,
                                             max_arc_2v_min=a.max_arc_2v_min, orbit_rate_tol=a.orbit_rate_tol,
                                             perp_collinear_2v_arcsec=a.perp_collinear_2v, snr_frac_2v=a.snr_frac_2v,

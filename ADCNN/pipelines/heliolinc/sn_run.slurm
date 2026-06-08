@@ -61,20 +61,21 @@ python -m ADCNN.pipelines.heliolinc.mask_flags --dets "$RUN/adcnn_dets.csv" \
 # tier has lambda_FP <= 1.35e-3/night at this floor (recovers 2025 NY2). LINKER ARCHITECTURE (2026-06):
 #   * 2-visit seeded by the precise position CHORD (--seed-2v chord) not the noisy trail-velocity -> ~4x
 #     recall + ~10x lower FP vs the old tref-clustering (measured on real DP2 off-ecliptic FP).
-#   * 2-visit purity at REALISTIC OpSim cadence (34-min same-night gap) is set by a PHOTOMETRIC cut, not the
-#     orbit chi^2: --mfsnr-min-2v 10 (fainter member's matched-filter TRAIL SNR) + --rate-lo/hi-2v 1..8
-#     deg/day. Measured on 82 off-ecliptic fields w/ faint injection: lifts the 3-sigma op-point from S0.95 to
-#     S0.80 (+~60%% completeness: 0.044->0.070 of cadence-observable movers, 3.07-sigma). The orbit chi^2 does
-#     NOT separate true/false among survivors at this cadence, so --chi2-2v-max is LOOSENED to 10 (a tight 3.0
-#     only costs completeness). matched-filter trail SNR != per-PSF stack SNR, so the cut KEEPS the stack-missed
-#     fast/long-trail faint movers ADCNN exists for (20%%->21%% ADCNN-enabled, preserved).
+#   * 2-visit purity is carried by the GEOMETRIC orbit-fit chi^2 (collinearity + trail-vs-motion PA & speed):
+#     --chi2-2v-max 5 is the PRIMARY lever. Tightening it 10->5 lifts the 3-sigma completeness at the realistic
+#     34-min WFD cadence from 0.070 to ~0.10 (+~45%%, validated on 80 off-ecliptic lambda fields) at no purity
+#     cost (true median chi2 ~4 vs false ~39). The mf_snr floor (--mfsnr-min-2v 10) is a CADENCE-DEPENDENT
+#     purity dial: ~10 holds 3-sigma at the 34-min gap; LOWER to ~5 at rapid (deep-drilling) cadence where FP
+#     are sparse, to recover fast FAINT movers (a long trail has low matched-filter SNR ~ point_SNR*sqrt(PSF/
+#     trail_area), so a high floor rejects exactly them). Epochs are now keyed by VISIT id (not a time gap),
+#     and chord-seeding pairs ALL same-night visit pairs -- both fixes are required for rapid same-night cadences.
 #   * 3+visit clustered with --pos-tol-3v 0.05 (~2x its recall at zero purity cost).
-# 3+visit tracks at this floor are 3-sigma discoveries; 2visit at S0.80+mfsnr/rate cut are 3-sigma-PURITY but
-# completeness-limited (~7%% of cadence-observable; detection ceiling -- BOTH same-night sightings must clear
-# the score floor; reaching >=50%% requires a 3rd epoch / multi-night arc, NOT a looser 2-visit cut).
+# 3+visit tracks at this floor are 3-sigma discoveries; 2visit at S0.80 + chi2<=5 + mfsnr>=10 are 3-sigma-PURITY
+# at ~10%% completeness (detection ceiling -- BOTH same-night sightings must clear the score floor; reaching
+# >=50%% requires a 3rd epoch / multi-night arc, NOT a looser 2-visit cut).
 python -m ADCNN.pipelines.heliolinc.trail_state_link --dets "$RUN/adcnn_dets_masked.csv" \
   --known "$RUN/known.csv" --out "$RUN/tracks.csv" \
   --npt 2 --min-epochs 2 --max-rms 1.0 --pa-tol 20 --pa-tol-2v 10 --score-min "${SCORE_MIN:-0.80}" \
-  --seed-2v chord --chi2-2v-max 10 --mfsnr-min-2v 10 --rate-lo-2v 1 --rate-hi-2v 8 \
+  --seed-2v chord --chi2-2v-max 5 --mfsnr-min-2v 10 --rate-lo-2v 1 --rate-hi-2v 8 \
   --pos-tol-3v 0.05 --max-arc-2v-min 40
 echo "SN_RUN DONE -> $RUN/tracks.csv"
