@@ -20,6 +20,7 @@ from ADCNN.pipelines.heliolinc.trail_state_link import (
     chord_seed_pairs, crossmatch, build_known_index,
 )
 from ADCNN.pipelines.heliolinc.orbit_check import orbit_ok
+from ADCNN.pipelines.heliolinc.alert_stream import build_alert, write_alerts
 
 SOLARDAY = 86400.0
 EXPT = 30.0
@@ -145,6 +146,30 @@ def test_orbit_ok_runs_and_flags():
            (np.isfinite(res["a"]) or np.isnan(res["a"])))
 
 
+# ---------------------------------------------------------------- alert stream
+def test_alert_build_predict_and_wrap():
+    import json
+    # 2-visit mover straddling RA=0 -> the alert's motion must be a small +RA rate, not a wrap artefact
+    g = _mover_dets(359.99, -10.0, 3.0, 30.0, mf_snr=12.0).rename(columns={})
+    al = build_alert(g, alert_id="2v_60000_000000", night=60000, obscode="I11", status="NEW",
+                     tier="2visit", chi2=2.3, a_au=1.1, ecc=0.4, rms_arcsec=0.3)
+    _check("alert is JSON-serializable", isinstance(json.dumps(al), str))
+    _check("alert has the actionable blocks", all(k in al for k in ("epochs", "motion", "predict", "orbit")))
+    _check("2-visit NEW alert is priority 2", al["priority"] == 2)
+    _check("alert motion RA-wrap safe (rate ~3, not a wrap)", 2.5 < al["motion"]["rate_degday"] < 3.5)
+    errs = [p["err_arcsec"] for p in al["predict"]]
+    _check("forward-ephemeris uncertainty grows with lookahead", errs == sorted(errs) and errs[0] > 0)
+    _check("predicted epochs are after the as-of (last) epoch",
+           all(p["mjd"] > al["asOfMjd"] for p in al["predict"]))
+    # a known recovery is lower priority than a NEW candidate
+    al_conf = build_alert(g, alert_id="x", night=60000, obscode="I11", status="CONFIRMED", tier="2visit",
+                          chi2=1.0, a_au=1.0, ecc=0.1, rms_arcsec=0.3, match_obj="2025 NY2", match_frac=1.0)
+    _check("CONFIRMED recovery is priority 3 (below NEW)", al_conf["priority"] == 3)
+    n = write_alerts([al, al_conf], "/tmp/_alert_test.jsonl")
+    _check("write_alerts emits one JSON line per alert", n == 2 and
+           sum(1 for _ in open("/tmp/_alert_test.jsonl")) == 2)
+
+
 # ---------------------------------------------------------------- resume dedup
 def test_resume_dedup_key():
     # mirrors discover_stream's idempotent merge: a duplicated panel collapses on (visit,detector,x,y,score)
@@ -157,7 +182,8 @@ def test_resume_dedup_key():
 
 TESTS = [test_radec_to_unit_and_chord, test_trail_velocity_ra_wrap, test_chord_seed_across_ra0_equals_ra180,
          test_crossmatch_kd_equals_brute_and_ra0, test_pair_chi2_true_low_false_high,
-         test_physical_check_gate_and_nan, test_orbit_ok_runs_and_flags, test_resume_dedup_key]
+         test_physical_check_gate_and_nan, test_orbit_ok_runs_and_flags,
+         test_alert_build_predict_and_wrap, test_resume_dedup_key]
 
 
 if __name__ == "__main__":

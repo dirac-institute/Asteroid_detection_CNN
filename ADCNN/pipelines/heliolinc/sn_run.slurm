@@ -25,6 +25,7 @@ set -eo pipefail
 #      Two tiers: 3+visit (full linear check) and 2visit (Heinze minimum; tighter pa_tol_2v + trail-vs-
 #      trail velocity agreement). physical_check rejects false links.
 #   -> tracks.csv : CONFIRMED (known recoveries) + NEW (uncatalogued same-night candidates), tagged by tier.
+#   -> alerts.jsonl : actionable same-night alert stream (per candidate: endpoints, motion, forward ephemeris).
 # ---- resolved config (single source of truth; every value overridable via env -- see pipeline_config.sh) ----
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck disable=SC1091
@@ -98,3 +99,5 @@ python -m ADCNN.pipelines.heliolinc.trail_state_link --dets "$RUN/adcnn_dets_mas
   --npt 2 --min-epochs 2 --seed-2v chord ${SCORE_MIN:+--score-min "$SCORE_MIN"}
 [ -f "$RUN/tracks.csv" ] || { echo "[sn_run] ERROR: linker did not write tracks.csv"; exit 1; }
 echo "SN_RUN DONE -> $RUN/tracks.csv ($(( $(wc -l < "$RUN/tracks.csv") - 1 )) tracks)"
+# Actionable same-night alert stream (one JSON candidate/line: endpoints + motion + forward ephemeris).
+[ -f "$RUN/alerts.jsonl" ] && echo "SN_RUN ALERTS -> $RUN/alerts.jsonl ($(wc -l < "$RUN/alerts.jsonl") alerts)"

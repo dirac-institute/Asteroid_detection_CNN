@@ -477,6 +477,9 @@ def main():
                     help="JSON op-point config (link_op_point.json): sets the calibrated 2v/3v params; any CLI flag overrides its value")
     ap.add_argument("--max-visit-pairs", type=int, default=200,
                     help="cap on same-night visit PAIRS the 2-visit chord seeder enumerates (O(V^2)); guards against a deep-drilling night (~100 visits -> ~5000 pairs). Keeps the nearest-in-time pairs and warns when it triggers")
+    ap.add_argument("--alerts-out", default=None,
+                    help="JSONL same-night alert stream (one actionable candidate per line: endpoints, motion vector, forward-predicted ephemeris, confidence). Default: alerts.jsonl beside --out. --no-alerts to disable")
+    ap.add_argument("--no-alerts", action="store_true", help="do not emit the JSONL alert stream")
     a = ap.parse_args()
     # Overlay the calibrated op-point JSON: it sets each param UNLESS that flag was passed explicitly on the CLI.
     if a.op_point and os.path.exists(a.op_point):
@@ -509,6 +512,10 @@ def main():
     print(f"[trail-link] {n0} dets -> {len(d)} after cuts | nights {sorted(d.night.unique())}", flush=True)
 
     rows = []
+    alerts = []
+    emit_alerts = not a.no_alerts
+    if emit_alerts:
+        from ADCNN.pipelines.heliolinc.alert_stream import build_alert, write_alerts
     for night, dn in d.groupby("night"):
         dn = dn.reset_index(drop=True)
         if a.recur_max is not None:
@@ -554,17 +561,32 @@ def main():
                 c2, ci = pair_chi2(g, a.exptime); chi2v, av, ev = c2, ci["a"], ci["e"]
             else:
                 chi2v, av, ev = np.nan, np.nan, np.nan
+            tier = "2visit" if n_ep == 2 else "3+visit"
+            status = "CONFIRMED" if obj else "NEW"
             rows.append(dict(night=int(night), ndet=len(members), nvisit=g.visit.nunique(),
-                             n_epochs=n_ep, tier=("2visit" if n_ep == 2 else "3+visit"),
+                             n_epochs=n_ep, tier=tier,
                              arc_hr=(g.mjd.max() - g.mjd.min()) * 24, rms_arcsec=rms, speed_degday=speed,
                              chi2=chi2v, a_au=av, ecc=ev, ra=g.ra.mean(), dec=g.dec.mean(), check=info,
-                             match_obj=obj, match_frac=frac, status="CONFIRMED" if obj else "NEW"))
+                             match_obj=obj, match_frac=frac, status=status))
+            if emit_alerts:
+                _oc = str(g["obscode"].iloc[0]) if "obscode" in g.columns else os.environ.get("OBSCODE", "I11")
+                alerts.append(build_alert(g, alert_id=f"{tier[:2]}_{int(night)}_{len(rows)-1:06d}",
+                                          night=night, obscode=_oc, status=status, tier=tier,
+                                          chi2=chi2v, a_au=av, ecc=ev, rms_arcsec=rms,
+                                          match_obj=obj, match_frac=frac))
         print(f"  night {night}: {len(dn)} dets -> {len(cand)} candidates, {npass} passed", flush=True)
     TRACK_COLS = ["night", "ndet", "nvisit", "n_epochs", "tier", "arc_hr", "rms_arcsec", "speed_degday",
                   "chi2", "a_au", "ecc", "ra", "dec", "check", "match_obj", "match_frac", "status"]
     T = pd.DataFrame(rows, columns=TRACK_COLS)   # always carry the header, so an empty result is a valid CSV
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     T.to_csv(a.out, index=False)
+    if emit_alerts:
+        apath = a.alerts_out or str(Path(a.out).with_name("alerts.jsonl"))
+        # priority 1 (3+visit NEW) -> 2 (2visit NEW) -> 3 (recovery), then ascending orbit-fit chi2
+        alerts.sort(key=lambda al: (al["priority"], al["orbit"]["chi2"] if al["orbit"]["chi2"] is not None else 1e9))
+        write_alerts(alerts, apath)
+        n2new = sum(1 for al in alerts if al["tier"] == "2visit" and al["status"] == "NEW")
+        print(f"[trail-link] alert stream: {len(alerts)} alerts ({n2new} same-night 2-visit NEW) -> {apath}", flush=True)
     if len(T):
         conf = sorted(T[T.status == "CONFIRMED"].match_obj.unique())
         new = T[T.status == "NEW"]

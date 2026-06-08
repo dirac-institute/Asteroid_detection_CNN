@@ -106,6 +106,20 @@ hypothesis grid and NO candidate explosion — O(N log N). `physical_check` reje
 speed_degday, chi2, a_au, ecc, ra, dec, check, match_obj, match_frac, status(CONFIRMED|NEW)`. The 2-visit
 **NEW** rows are a follow-up candidate stream — rank by ascending `chi2`.
 
+**`alerts.jsonl`** — the actionable same-night alert stream (one JSON object per line, beside `tracks.csv`;
+`--alerts-out` to relocate, `--no-alerts` to skip). Each track becomes a self-describing alert with the
+content a follow-up coordinator needs, while the linker still holds the member detections (`alert_stream.py`):
+- `epochs[]` — per-visit `mjd, ra, dec, mag, snr, trail_len_px, score`,
+- `motion` — `rate_degday, pa_deg, dra_degday, ddec_degday` (RA-wrap / cos-dec safe, least-squares over epochs),
+- `predict[]` — a **forward ephemeris** (+30 min / +1 h / +4 h / +1 night) with a 2-point lever-arm
+  `err_arcsec` (`s·√(1+2(dt/arc)²)`, so a +1-night extrapolation honestly carries a large reported error),
+- `orbit` (`chi2, a_au, ecc`), `match` (known-object recovery), and a `priority` (1 = 3+visit NEW 3-σ grade,
+  2 = 2-visit NEW candidate, 3 = known recovery) — the file is sorted by `(priority, chi2)`, headline first.
+
+The **2-visit `NEW`** alerts are the primary same-night product: a fast mover ADCNN caught exactly twice over
+one night, with enough motion to point a same-/next-night follow-up. They are CANDIDATES, not discoveries
+(see below). `asOfMjd` is the second visit's MJD — the earliest the alert could fire.
+
 **Interpretation:** a single night's 2 detections cannot self-confirm a NEO (no survey confirms from 2 same-
 night points) — 3+visit tracks are 3-σ discoveries; 2-visit are candidates that a 3rd epoch (same-night
 triplet, 17%; or next night → tracklet→track) confirms. See `SAME_NIGHT_2v_3sigma.md` for the full
