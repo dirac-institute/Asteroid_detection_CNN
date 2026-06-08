@@ -28,6 +28,13 @@ set -eo pipefail
 #   -> alerts.jsonl : actionable same-night alert stream (per candidate: endpoints, motion, forward ephemeris).
 # ---- resolved config (single source of truth; every value overridable via env -- see pipeline_config.sh) ----
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# under sbatch the script is copied to a spool dir, so BASH_SOURCE can't see pipeline_config.sh. Resolve
+# the heliolinc dir from $ADCNN_REPO (passed through --export=ALL by a parent job) else the submit dir.
+if [ ! -f "$HERE/pipeline_config.sh" ]; then
+  if [ -n "$ADCNN_REPO" ] && [ -f "$ADCNN_REPO/ADCNN/pipelines/heliolinc/pipeline_config.sh" ]; then
+    HERE="$ADCNN_REPO/ADCNN/pipelines/heliolinc"
+  else HERE="${SLURM_SUBMIT_DIR:-$HERE}"; fi
+fi
 # shellcheck disable=SC1091
 source "$HERE/pipeline_config.sh"
 : "${RUN:?set RUN=<out dir>}"
