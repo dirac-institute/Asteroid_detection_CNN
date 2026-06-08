@@ -1,0 +1,17 @@
+{
+  "_comment": "Calibrated 2-visit/3-visit linking operating point for the same-night NEO discovery pipeline. Read by trail_state_link.py via --op-point (CLI flags override individual values). sn_run.slurm passes this file so the op-point is versioned config, not magic numbers in the launcher.",
+  "model_version": "seg_v2 depth-4 (iter08) segmentation + focal-cutout CNN postproc",
+  "data_release": "Rubin DP2 v30_0_0 DM-53881 stage4",
+  "calibrated_on": "80 off-ecliptic injection fields, 2026-06, realistic ~34-min WFD same-night cadence",
+  "score_min": 0.80,
+  "chi2_2v_max": 5.0,
+  "mfsnr_min_2v": 10.0,
+  "rate_lo_2v": 1.0,
+  "rate_hi_2v": 8.0,
+  "pa_tol": 20.0,
+  "pa_tol_2v": 10.0,
+  "max_rms": 1.0,
+  "pos_tol_3v": 0.05,
+  "max_arc_2v_min": 40.0,
+  "notes": "chi2_2v_max=5 is the PRIMARY geometric purity lever: tightening 10->5 gives +45% 3-sigma completeness (0.070->~0.10) at no purity cost (true-pair chi2 median ~4 vs false ~39). mfsnr_min_2v is a CADENCE DIAL: keep ~10 at the 34-min WFD pair gap to hold 3-sigma; lower to ~5 at rapid/deep-drilling cadence (sparse FP) to recover fast FAINT movers, whose long trails have low matched-filter SNR (~point_SNR*sqrt(PSF/trail_area)). 3+visit tier = 3-sigma discoveries; 2-visit = 3-sigma-purity candidates (~10% completeness, detection-ceiling limited)."
+}

@@ -24,8 +24,49 @@ RUN=/sdf/.../out  sbatch --export=ALL,RUN sn_run.slurm
 | 4 | link | `trail_state_link.py` | asteroid_cnn | masked dets → `tracks.csv` (CONFIRMED + NEW, tagged by tier) |
 
 Stage 1 runs on the preemptible `ampere` GPU partition; `discover_stream` is resumable (per-shard `.done`),
-and `sn_run` resubmits it through preemptions. Envs: Butler/Sorcha stages use the cvmfs LSST stack
-(`loadLSST.sh; setup lsst_distrib`); detection/linking use the `asteroid_cnn` conda env.
+and `sn_run` resubmits it through preemptions (exponential backoff, `$MAX_DETECT_ATTEMPTS` cap). Envs:
+Butler stages use the cvmfs LSST stack; detection/linking use the `asteroid_cnn` conda env.
+
+## Production / operations
+
+**Configuration — one source of truth (`pipeline_config.sh`).** All deployment-specific values are env vars
+with SDF/DP2 defaults, overridable without editing code:
+
+| var | default | meaning |
+|---|---|---|
+| `ADCNN_REPO` | inferred from script location | repo root |
+| `BUTLER_REPO` / `BUTLER_COLLECTION` | `dp2_prep` / `…DM-53881/stage4` | data-release vintage |
+| `ADCNN_CONDA_ENV` / `LSST_STACK_SETUP` | `asteroid_cnn` / cvmfs `w_2026_09` | environments |
+| `OBSCODE` | `I11` | observatory code in the catalogue |
+| `LINK_OP_POINT` | `link_op_point.json` | calibrated linking op-point |
+| `SCORE_MIN` | (op-point) | per-run score-floor override |
+
+Run at another site/release: `BUTLER_COLLECTION=… ADCNN_REPO=… sbatch … sn_run.slurm`. Every run writes
+`$RUN/run_config.json` (resolved config) for provenance.
+
+**The operating point is versioned config, not magic numbers.** `link_op_point.json` holds the calibrated
+2v/3v params (`score_min 0.80, chi2_2v_max 5, mfsnr_min_2v 10, rate 1–8, …`) with `model_version` /
+`data_release` / `calibrated_on` tags. `trail_state_link --op-point` reads it; any `--flag` overrides one
+value. **Re-calibrate (and bump the tags) whenever the ADCNN model is retrained or the cadence/data release
+changes.** `chi2_2v_max=5` is the primary geometric purity lever; `mfsnr_min_2v` is a cadence dial (≈10 at the
+34-min WFD pair gap for 3-σ purity; ≈5 at rapid/deep-drilling cadence to recover fast faint movers).
+
+**Prerequisites.** A readable Butler repo + the `$BUTLER_COLLECTION` (diffims + `preloaded_ss_object_visit`);
+the cvmfs LSST stack; the `asteroid_cnn` env (`requirements.txt`, core numerics pinned); the two model files
+(`models/segmentation_model.pt`, `models/cnn_postproc.pt` + its `.json` op-point sidecar). `discover_stream`
+fails fast if a model/sidecar is missing.
+
+**Scale & resources (per night).** WFD ≈ 1000 visits × 189 detectors ≈ 200k panels. Detection is the cost:
+GPU-sharded + resumable, ~0.2 panel/s/GPU. The linker is O(N log N) and crossmatch is KD-tree accelerated
+(scales to ~1M known sightings); the full detection catalogue is loaded in RAM (the memory floor — chunk if a
+night exceeds node RAM). **Cadence caveat:** the 2-visit chord seeder is O(V²) in same-night visits;
+`--max-visit-pairs` (default 200) caps a pathological deep-drilling night and logs when it triggers.
+
+**Fail-loud.** Every stage gates on non-empty output (`sn_run` aborts with a clear message on an empty
+manifest / detect catalogue / mask output); `discover_stream` reports panel coverage and warns past
+`$MAX_CORRUPT_FRAC`; `build_known_catalog` warns when visits lack ephemerides; the linker writes a
+header-only `tracks.csv` + WARNING when 0 tracks pass (never a silent success). Verified: the hardened linker
+recovers **2025 NY2** on `run_night8731` and the KD-tree crossmatch is bit-identical to the brute-force scan.
 
 ## The linker (`trail_state_link.py`) — two tiers, one pass
 

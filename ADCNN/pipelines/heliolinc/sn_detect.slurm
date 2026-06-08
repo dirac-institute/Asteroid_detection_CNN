@@ -14,11 +14,12 @@ set -eo pipefail
 # Canonical same-night pipeline, Stage 1: ADCNN (segmentation + focal cutout CNN) over the manifest's
 # diffims -> sky detections + trail endpoints. Resumable (per-panel .done) so a preemption + resubmit
 # (driven by sn_run.slurm) continues. $RUN must point at a dir containing manifest.csv.
-REPO=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck disable=SC1091
+source "$HERE/pipeline_config.sh"
 : "${RUN:?set RUN=<dir with manifest.csv>}"
-source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
-conda activate asteroid_cnn
-cd "$REPO"
-python ADCNN/pipelines/heliolinc/discover_stream.py --n-gpus 4 \
+adcnn_activate || exit 1
+cd "$ADCNN_REPO"
+python ADCNN/pipelines/heliolinc/discover_stream.py --n-gpus "${DETECT_N_GPUS:-4}" \
   --manifest "$RUN/manifest.csv" --out "$RUN/adcnn_dets.csv"
 echo "SN_DETECT DONE"

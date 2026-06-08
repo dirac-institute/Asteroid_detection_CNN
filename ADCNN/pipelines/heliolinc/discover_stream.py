@@ -31,9 +31,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-REPO = Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
+# Repo root: $ADCNN_REPO if set, else inferred from this file's location (ADCNN/pipelines/heliolinc/ -> root).
+# Portable across deployments; only override ADCNN_REPO for a relocated checkout.
+REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
 sys.path.insert(0, str(REPO))  # so spawned workers can import ADCNN regardless of cwd
-OBSCODE = "I11"  # Rubin Observatory / LSST
+OBSCODE = os.environ.get("OBSCODE", "I11")  # Rubin Observatory / LSST (override via OBSCODE env or --obscode)
 COLFORMAT = "IDCOL 1\nMJDCOL 2\nRACOL 3\nDECCOL 4\nMAGCOL 5\nBANDCOL 6\nOBSCODECOL 7\n"
 
 
@@ -183,7 +185,18 @@ def main():
     ap.add_argument("--out", default=str(REPO / "ADCNN/pipelines/heliolinc/run_disco/adcnn_dets.csv"))
     ap.add_argument("--limit", type=int, default=0, help="first N panels only (smoke test)")
     ap.add_argument("--inject", default=None, help="inject.csv (objID,visit,detector,x,y,trail_length,beta,mag): add synthetic trails into each panel before detection (test2 injection-recovery)")
+    ap.add_argument("--obscode", default=None, help="observatory MPC code carried into the catalogue (default $OBSCODE or I11)")
     a = ap.parse_args()
+    if a.obscode:                              # propagate to spawned worker processes (they re-read $OBSCODE)
+        os.environ["OBSCODE"] = a.obscode
+        globals()["OBSCODE"] = a.obscode       # and this (main) process, without the `global` keyword
+    # Fail fast: validate model files + the op-point sidecar exist BEFORE allocating GPUs (else the worker
+    # crashes seconds in with an opaque torch error).
+    for _m, _label in ((a.seg_model, "segmentation model"), (a.cnn, "focal-cutout CNN")):
+        if not os.path.exists(_m):
+            raise SystemExit(f"[discover] ERROR: {_label} not found: {_m} (set --seg-model/--cnn or $ADCNN_REPO)")
+    if a.cnn_thr is None and not os.path.exists(str(Path(a.cnn).with_suffix(".json"))):
+        raise SystemExit(f"[discover] ERROR: op-point sidecar {Path(a.cnn).with_suffix('.json')} missing; pass --cnn-thr explicitly")
     inject_map = None
     if a.inject:
         from ADCNN.pipelines.heliolinc.inject_trails import load_inject_map
@@ -229,8 +242,12 @@ def main():
         for p in procs:
             p.join()
 
-    cat = pd.concat([pd.read_csv(c, low_memory=False) for c in shard_csvs
-                     if Path(c).exists() and os.path.getsize(c) > 1], ignore_index=True)
+    _frames = [pd.read_csv(c, low_memory=False) for c in shard_csvs
+               if Path(c).exists() and os.path.getsize(c) > 1]
+    if not _frames:
+        raise SystemExit(f"[discover] ERROR: no shard produced any detections ({len(shards)} shards, "
+                         f"{man.shape[0]} panels) -- all FITS unreadable or every panel empty. Not writing {a.out}.")
+    cat = pd.concat(_frames, ignore_index=True)
     # defensive: drop any torn/misaligned rows (visit must be a 13-digit visit id); coerce to int
     vnum = pd.to_numeric(cat.visit, errors="coerce")
     bad = ~(vnum.notna() & (vnum >= 1e12) & (vnum < 1e13))
@@ -246,7 +263,16 @@ def main():
     for c in shard_csvs:
         Path(c).unlink(missing_ok=True)
         Path(c + ".done").unlink(missing_ok=True)   # resume sidecars (only here, after success)
-    print(f"[discover] {len(cat)} detections over {man.shape[0]} panels (cnn@{thr}) -> {a.out}", flush=True)
+    # coverage guard: how many of the manifest's panels actually contributed (read OK). A low fraction means
+    # widespread FITS-read failure -> the catalogue is silently incomplete; warn (or fail past a threshold).
+    n_panels = man.drop_duplicates(["visit", "detector"]).shape[0] if {"visit", "detector"}.issubset(man.columns) else man.shape[0]
+    seen = cat.drop_duplicates(["visit", "detector"]).shape[0]
+    cov = seen / max(n_panels, 1)
+    max_corrupt = float(os.environ.get("MAX_CORRUPT_FRAC", "0.10"))
+    print(f"[discover] {len(cat)} detections; panel coverage {seen}/{n_panels} ({cov:.1%}) (cnn@{thr}) -> {a.out}", flush=True)
+    if cov < (1.0 - max_corrupt):
+        print(f"[discover] WARNING: only {cov:.1%} of panels contributed (> {max_corrupt:.0%} unread/empty) -- "
+              f"catalogue may be incomplete (corrupt FITS or empty panels).", flush=True)
     nights = len({int(str(v)[:8]) for v in cat.visit})
     print(f"[discover] {cat.visit.nunique()} visits, {nights} nights", flush=True)
 

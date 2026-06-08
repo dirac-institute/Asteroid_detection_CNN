@@ -2,9 +2,11 @@ torch==2.7.0+cu128
 torchvision==0.22.0+cu128
 torchaudio==2.7.0+cu128
 triton==3.3.0
-numpy
-scipy
-pandas
+# Core numerics pinned to major versions: the discovery pipeline relies on the numpy<2 ABI + pandas 2.x
+# groupby/IO behaviour; an unpinned re-install months later can break the linker silently.
+numpy>=1.26,<2.0
+scipy>=1.10,<2.0
+pandas>=2.0,<3.0
 h5py
 matplotlib
 scikit-learn

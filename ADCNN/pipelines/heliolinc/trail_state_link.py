@@ -25,12 +25,15 @@ TWO confidence tiers (physical_check):
 """
 from __future__ import annotations
 import argparse
+import json
+import os
+import sys
 from pathlib import Path
 import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
 
-REPO = Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
+REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
 HL = REPO / "ADCNN/pipelines/heliolinc"
 SOLARDAY = 86400.0
 
@@ -159,7 +162,7 @@ def link(dets, *, exptime_s=30.0, tref=None, pos_tol_deg=0.017, vel_frac=0.30, v
     return labels, tracks
 
 
-def chord_seed_pairs(dets, *, max_arc_min=40.0, rate_min=0.3, rate_max=10.0):
+def chord_seed_pairs(dets, *, max_arc_min=40.0, rate_min=0.3, rate_max=10.0, max_visit_pairs=None):
     """Seed 2-visit candidate pairs by the POSITION CHORD, not the noisy trail-velocity. For each pair of
     adjacent same-night visits (gap <= max_arc_min) enumerate detection pairs whose sky separation is
     consistent with a rate_min..rate_max deg/day mover, via a k-d tree. Returns [i,j] member-index lists
@@ -179,23 +182,32 @@ def chord_seed_pairs(dets, *, max_arc_min=40.0, rate_min=0.3, rate_max=10.0):
     # zip(uv[:-1],uv[1:]) missed real movers detected in NON-adjacent visits -- e.g. a deep-drilling night
     # with many same-night revisits where a faint mover is detected in visits 3 & 7 (4,5,6 below threshold).
     # No-op for the WFD 2-visit-per-night case (one pair); recovers the multi-visit movers otherwise.
+    # SCALE GUARD: V visits -> O(V^2) pairs; a deep-drilling night (~100 visits) -> ~5000 pairs x KD queries.
+    # Cap to the nearest-in-time pairs (the real same-night tracklets) and warn, so a pathological cadence
+    # can't blow up the per-pair orbit-solve cost downstream.
+    vpairs = []
     for ai in range(len(uv)):
         for bi in range(ai + 1, len(uv)):
-            a_, b_ = uv[ai], uv[bi]
-            dt = vmjd[b_] - vmjd[a_]
-            if dt <= 0 or dt * 1440.0 > max_arc_min:
-                continue
-            ia, ib = idx_by[a_], idx_by[b_]
-            if not len(ia) or not len(ib):
-                continue
-            cd = float(np.cos(np.radians(dec[ib].mean())))
-            tree = cKDTree(np.column_stack([ra[ib] * cd, dec[ib]]))
-            dmin, dmax = rate_min * dt, rate_max * dt             # deg
-            for i in ia:
-                for jp in tree.query_ball_point([ra[i] * cd, dec[i]], dmax):
-                    j = int(ib[jp])
-                    if np.hypot((ra[j] - ra[i]) * cd, dec[j] - dec[i]) >= dmin:
-                        pairs.append([int(i), j])
+            dt = vmjd[uv[bi]] - vmjd[uv[ai]]
+            if 0 < dt <= max_arc_min / 1440.0:
+                vpairs.append((dt, uv[ai], uv[bi]))
+    if max_visit_pairs is not None and len(vpairs) > max_visit_pairs:
+        vpairs.sort(key=lambda t: t[0])   # smallest time-gap first = the genuine same-night tracklets
+        print(f"[chord-seed] dense cadence: capping {len(vpairs)} visit-pairs -> {max_visit_pairs} "
+              f"(nearest-in-time)", flush=True)
+        vpairs = vpairs[:max_visit_pairs]
+    for dt, a_, b_ in vpairs:
+        ia, ib = idx_by[a_], idx_by[b_]
+        if not len(ia) or not len(ib):
+            continue
+        cd = float(np.cos(np.radians(dec[ib].mean())))
+        tree = cKDTree(np.column_stack([ra[ib] * cd, dec[ib]]))
+        dmin, dmax = rate_min * dt, rate_max * dt             # deg
+        for i in ia:
+            for jp in tree.query_ball_point([ra[i] * cd, dec[i]], dmax):
+                j = int(ib[jp])
+                if np.hypot((ra[j] - ra[i]) * cd, dec[j] - dec[i]) >= dmin:
+                    pairs.append([int(i), j])
     return pairs
 
 
@@ -373,20 +385,43 @@ def fit_residual(dets, members, exptime_s=30.0):
     return rms, float(np.hypot(sx, sy))
 
 
-def crossmatch(dets, members, known, tol_arcsec, tol_day):
-    """Best-matching known ObjID for a track's member detections (or '' if none)."""
+def build_known_index(known):
+    """Pre-build a spatial cKDTree over the known-object sightings ONCE so crossmatch() is O(log M) per
+    detection instead of O(M). At LSST scale known.csv is ~1M sightings/night and there are thousands of
+    tracks, so the old per-track nested scan (O(tracks x members x M)) was the linker's worst hotspot."""
+    from scipy.spatial import cKDTree
+    if known is None or not len(known):
+        return None
+    kra = known.ra.to_numpy(); kdec = known.dec.to_numpy()
+    cosd = float(np.cos(np.radians(np.nanmean(kdec)))) if len(kdec) else 1.0
+    return dict(tree=cKDTree(np.c_[kra * cosd, kdec]), kmjd=known.mjd.to_numpy(),
+                kra=kra, kdec=kdec, kobj=known.ObjID.astype(str).to_numpy(), cosd=cosd)
+
+
+def crossmatch(dets, members, known, tol_arcsec, tol_day, index=None):
+    """Best-matching known ObjID for a track's member detections (or '' if none). Pass a prebuilt `index`
+    (build_known_index) to avoid rebuilding the tree per track. Results are IDENTICAL to a brute-force
+    nearest-neighbour-within-tolerance scan: the tree query uses an inflated radius (superset) and the exact
+    angular separation + time window are re-checked per candidate."""
     g = dets.iloc[members]
-    kmjd = known.mjd.to_numpy(); kra = known.ra.to_numpy(); kdec = known.dec.to_numpy()
-    kobj = known.ObjID.astype(str).to_numpy()
+    ix = index if index is not None else build_known_index(known)
+    if ix is None:
+        return "", 0.0
+    tree, kmjd, kra, kdec, kobj, cosd = ix["tree"], ix["kmjd"], ix["kra"], ix["kdec"], ix["kobj"], ix["cosd"]
+    tol_deg = tol_arcsec / 3600.0
     hits = []
     for _, r in g.iterrows():
-        sel = np.abs(kmjd - r.mjd) <= tol_day
-        if not sel.any():
+        cand = tree.query_ball_point([r.ra * cosd, r.dec], tol_deg * 1.5)   # inflated -> superset of true matches
+        if not cand:
             continue
-        sep = np.hypot((kra[sel] - r.ra) * np.cos(np.radians(r.dec)), kdec[sel] - r.dec) * 3600
-        j = np.argmin(sep)
-        if sep[j] <= tol_arcsec:
-            hits.append(kobj[sel][j])
+        cand = np.asarray(cand)
+        cand = cand[np.abs(kmjd[cand] - r.mjd) <= tol_day]                  # time window
+        if not cand.size:
+            continue
+        sep = np.hypot((kra[cand] - r.ra) * np.cos(np.radians(r.dec)), kdec[cand] - r.dec) * 3600
+        jm = int(np.argmin(sep))
+        if sep[jm] <= tol_arcsec:                                          # exact angular check
+            hits.append(kobj[cand[jm]])
     if not hits:
         return "", 0.0
     vc = pd.Series(hits).value_counts()
@@ -426,7 +461,22 @@ def main():
     ap.add_argument("--min-epochs", type=int, default=2, help="distinct time epochs (snaps merged); 2 enables 2-visit linking")
     ap.add_argument("--tol-arcsec", type=float, default=5.0)
     ap.add_argument("--tol-day", type=float, default=0.02)
+    ap.add_argument("--op-point", default=os.environ.get("LINK_OP_POINT"),
+                    help="JSON op-point config (link_op_point.json): sets the calibrated 2v/3v params; any CLI flag overrides its value")
+    ap.add_argument("--max-visit-pairs", type=int, default=200,
+                    help="cap on same-night visit PAIRS the 2-visit chord seeder enumerates (O(V^2)); guards against a deep-drilling night (~100 visits -> ~5000 pairs). Keeps the nearest-in-time pairs and warns when it triggers")
     a = ap.parse_args()
+    # Overlay the calibrated op-point JSON: it sets each param UNLESS that flag was passed explicitly on the CLI.
+    if a.op_point and os.path.exists(a.op_point):
+        _op = json.load(open(a.op_point))
+        _flag = {"score_min": "--score-min", "chi2_2v_max": "--chi2-2v-max", "mfsnr_min_2v": "--mfsnr-min-2v",
+                 "rate_lo_2v": "--rate-lo-2v", "rate_hi_2v": "--rate-hi-2v", "pa_tol": "--pa-tol",
+                 "pa_tol_2v": "--pa-tol-2v", "max_rms": "--max-rms", "pos_tol_3v": "--pos-tol-3v",
+                 "max_arc_2v_min": "--max-arc-2v-min"}
+        _applied = [f"{k}={_op[k]}" for k, fl in _flag.items()
+                    if k in _op and fl not in sys.argv and (setattr(a, k, _op[k]) or True)]
+        if _applied:
+            print(f"[trail-link] op-point {a.op_point}: {', '.join(_applied)}", flush=True)
 
     d = pd.read_csv(a.dets)
     n0 = len(d)
@@ -442,6 +492,7 @@ def main():
     if miss:
         raise SystemExit(f"--dets missing {miss}")
     known = pd.read_csv(a.known)
+    kindex = build_known_index(known)   # one cKDTree over all known sightings (crossmatch O(log M)/det at scale)
     d["night"] = np.floor(d.mjd - 0.5).astype(int)
     print(f"[trail-link] {n0} dets -> {len(d)} after cuts | nights {sorted(d.night.unique())}", flush=True)
 
@@ -459,7 +510,8 @@ def main():
             cand = list(clus)
             if a.min_epochs <= 2:
                 cand += chord_seed_pairs(dn, max_arc_min=(a.max_arc_2v_min or 1e9),
-                                         rate_min=a.rate_min, rate_max=a.rate_max)
+                                         rate_min=a.rate_min, rate_max=a.rate_max,
+                                         max_visit_pairs=a.max_visit_pairs)
         else:
             _, cand = link(dn, exptime_s=a.exptime, npt=a.npt, pos_tol_deg=a.pos_tol,
                            vel_frac=a.vel_frac, min_visits=a.npt)
@@ -482,7 +534,7 @@ def main():
             used.update(members)
             npass += 1
             rms, speed = fit_residual(dn, members, a.exptime)
-            obj, frac = crossmatch(dn, members, known, a.tol_arcsec, a.tol_day)
+            obj, frac = crossmatch(dn, members, known, a.tol_arcsec, a.tol_day, index=kindex)
             g = dn.iloc[members]
             # numeric orbit-fit columns for ranking the (candidate-grade) 2-visit stream
             if n_ep == 2:
@@ -495,7 +547,9 @@ def main():
                              chi2=chi2v, a_au=av, ecc=ev, ra=g.ra.mean(), dec=g.dec.mean(), check=info,
                              match_obj=obj, match_frac=frac, status="CONFIRMED" if obj else "NEW"))
         print(f"  night {night}: {len(dn)} dets -> {len(cand)} candidates, {npass} passed", flush=True)
-    T = pd.DataFrame(rows)
+    TRACK_COLS = ["night", "ndet", "nvisit", "n_epochs", "tier", "arc_hr", "rms_arcsec", "speed_degday",
+                  "chi2", "a_au", "ecc", "ra", "dec", "check", "match_obj", "match_frac", "status"]
+    T = pd.DataFrame(rows, columns=TRACK_COLS)   # always carry the header, so an empty result is a valid CSV
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     T.to_csv(a.out, index=False)
     if len(T):
@@ -511,7 +565,9 @@ def main():
             print(f"[trail-link] NEW candidates (best first; 3+visit are 3-sigma, 2visit are follow-up candidates):", flush=True)
             print(new[['ra','dec','tier','speed_degday','arc_hr','chi2','a_au','ecc','nvisit','match_frac']].head(20).to_string(index=False), flush=True)
     else:
-        print("[trail-link] no tracks", flush=True)
+        print(f"[trail-link] WARNING: 0 tracks passed physical_check over {len(d)} dets / "
+              f"{d.night.nunique() if len(d) else 0} nights -> empty (header-only) {a.out}. "
+              f"Check the input is non-empty and the op-point/cadence are sane.", flush=True)
 
 
 if __name__ == "__main__":

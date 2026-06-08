@@ -25,38 +25,55 @@ set -eo pipefail
 #      Two tiers: 3+visit (full linear check) and 2visit (Heinze minimum; tighter pa_tol_2v + trail-vs-
 #      trail velocity agreement). physical_check rejects false links.
 #   -> tracks.csv : CONFIRMED (known recoveries) + NEW (uncatalogued same-night candidates), tagged by tier.
-REPO=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN
+# ---- resolved config (single source of truth; every value overridable via env -- see pipeline_config.sh) ----
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck disable=SC1091
+source "$HERE/pipeline_config.sh"
 : "${RUN:?set RUN=<out dir>}"
-LSST="source /cvmfs/sw.lsst.eu/almalinux-x86_64/lsst_distrib/w_2026_09/loadLSST.sh; setup lsst_distrib"
-cd "$REPO"
+cd "$ADCNN_REPO"
 mkdir -p "$RUN"
+# record the exact configuration this run used (reproducibility / provenance)
+cat > "$RUN/run_config.json" <<JSON
+{"adcnn_repo":"$ADCNN_REPO","butler_repo":"$BUTLER_REPO","butler_collection":"$BUTLER_COLLECTION",
+ "obscode":"$OBSCODE","link_op_point":"$LINK_OP_POINT","conda_env":"$ADCNN_CONDA_ENV",
+ "day":"${DAY:-}","tracts":"${TRACTS:-}","score_min_override":"${SCORE_MIN:-}"}
+JSON
+echo "[sn_run] REPO=$ADCNN_REPO | COLLECTION=$BUTLER_COLLECTION | OBSCODE=$OBSCODE | OP_POINT=$LINK_OP_POINT"
 
 # 0. manifest for DAY + TRACTS (LSST stack env) if missing
-if [ ! -f "$RUN/manifest.csv" ]; then
+if [ ! -s "$RUN/manifest.csv" ]; then
   : "${DAY:?set DAY=<day_obs, e.g. 20250706> (or pre-build $RUN/manifest.csv)}"
   : "${TRACTS:?set TRACTS=<tract list/ranges, e.g. 8489> (or pre-build $RUN/manifest.csv)}"
   echo "[sn_run] building manifest for DAY=$DAY TRACTS=$TRACTS"
-  bash -c "$LSST; cd $REPO; python -m ADCNN.pipelines.heliolinc.build_manifest --tracts $TRACTS --day-start $DAY --day-end $((DAY+1)) --out $RUN/manifest.csv"
+  bash -c "$LSST_STACK_SETUP; cd $ADCNN_REPO; python -m ADCNN.pipelines.heliolinc.build_manifest \
+    --tracts $TRACTS --day-start $DAY --day-end $((DAY+1)) --butler-repo '$BUTLER_REPO' \
+    --collection '$BUTLER_COLLECTION' --out $RUN/manifest.csv"
 fi
+# preflight gate: a manifest with only a header means no diffims resolved for this DAY/TRACTS/collection.
+[ -s "$RUN/manifest.csv" ] && [ "$(wc -l < "$RUN/manifest.csv")" -gt 1 ] || {
+  echo "[sn_run] ERROR: empty manifest -- no diffims for DAY=${DAY:-?} TRACTS=${TRACTS:-?} in $BUTLER_COLLECTION"; exit 1; }
 
-# 1. ADCNN detect, resubmitting through preemptions (resumable via .done)
+# 1. ADCNN detect, resubmitting through preemptions (resumable via .done), exponential backoff
 n=0
-while [ ! -f "$RUN/adcnn_dets.csv" ] && [ $n -lt 30 ]; do
-  n=$((n+1)); echo "[sn_run] ADCNN detect attempt $n"
-  RUN="$RUN" sbatch --export=ALL,RUN --wait ADCNN/pipelines/heliolinc/sn_detect.slurm || true
+while [ ! -s "$RUN/adcnn_dets.csv" ] && [ "$n" -lt "${MAX_DETECT_ATTEMPTS:-30}" ]; do
+  n=$((n+1)); echo "[sn_run] ADCNN detect attempt $n/${MAX_DETECT_ATTEMPTS:-30}"
+  RUN="$RUN" sbatch --export=ALL,RUN --wait "$HERE/sn_detect.slurm" || true
+  [ -s "$RUN/adcnn_dets.csv" ] && break
+  sleep $(( n < 6 ? (1 << n) : 60 ))   # 2,4,8,16,32,60,60,... s
 done
-[ -f "$RUN/adcnn_dets.csv" ] || { echo "[sn_run] ERROR: detect did not complete after $n attempts"; exit 1; }
+[ -s "$RUN/adcnn_dets.csv" ] || { echo "[sn_run] ERROR: detect produced no non-empty catalog after $n attempts"; exit 1; }
 
 # 2. known.csv (LSST stack env) if missing
 if [ ! -f "$RUN/known.csv" ]; then
-  bash -c "$LSST; cd $REPO; python -m ADCNN.pipelines.heliolinc.build_known_catalog --manifest $RUN/manifest.csv --out $RUN/known.csv"
+  bash -c "$LSST_STACK_SETUP; cd $ADCNN_REPO; python -m ADCNN.pipelines.heliolinc.build_known_catalog \
+    --manifest $RUN/manifest.csv --butler-repo '$BUTLER_REPO' --collection '$BUTLER_COLLECTION' --out $RUN/known.csv"
 fi
 
 # 3 + 4. mask cut + single-night trail-state linking (torch env)
-source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
-conda activate asteroid_cnn
+adcnn_activate || exit 1
 python -m ADCNN.pipelines.heliolinc.mask_flags --dets "$RUN/adcnn_dets.csv" \
-  --manifest "$RUN/manifest.csv" --out "$RUN/adcnn_dets_masked.csv" --workers 64
+  --manifest "$RUN/manifest.csv" --out "$RUN/adcnn_dets_masked.csv" --workers "${MASK_WORKERS:-64}"
+[ -s "$RUN/adcnn_dets_masked.csv" ] || { echo "[sn_run] ERROR: mask stage produced empty output"; exit 1; }
 # --score-min 0.80 = the 3-SIGMA discovery operating point (FPP Monte-Carlo, link_fpp.json): the 3+visit
 # tier has lambda_FP <= 1.35e-3/night at this floor (recovers 2025 NY2). LINKER ARCHITECTURE (2026-06):
 #   * 2-visit seeded by the precise position CHORD (--seed-2v chord) not the noisy trail-velocity -> ~4x
@@ -73,9 +90,11 @@ python -m ADCNN.pipelines.heliolinc.mask_flags --dets "$RUN/adcnn_dets.csv" \
 # 3+visit tracks at this floor are 3-sigma discoveries; 2visit at S0.80 + chi2<=5 + mfsnr>=10 are 3-sigma-PURITY
 # at ~10%% completeness (detection ceiling -- BOTH same-night sightings must clear the score floor; reaching
 # >=50%% requires a 3rd epoch / multi-night arc, NOT a looser 2-visit cut).
+# The calibrated 2v/3v op-point (score floor, chi2<=5, mfsnr>=10, rate band, tolerances) lives in
+# link_op_point.json (versioned config, $LINK_OP_POINT) -- NOT magic numbers here. SCORE_MIN env overrides
+# the score floor for a given run; any individual param can also be overridden by adding its --flag below.
 python -m ADCNN.pipelines.heliolinc.trail_state_link --dets "$RUN/adcnn_dets_masked.csv" \
-  --known "$RUN/known.csv" --out "$RUN/tracks.csv" \
-  --npt 2 --min-epochs 2 --max-rms 1.0 --pa-tol 20 --pa-tol-2v 10 --score-min "${SCORE_MIN:-0.80}" \
-  --seed-2v chord --chi2-2v-max 5 --mfsnr-min-2v 10 --rate-lo-2v 1 --rate-hi-2v 8 \
-  --pos-tol-3v 0.05 --max-arc-2v-min 40
-echo "SN_RUN DONE -> $RUN/tracks.csv"
+  --known "$RUN/known.csv" --out "$RUN/tracks.csv" --op-point "$LINK_OP_POINT" \
+  --npt 2 --min-epochs 2 --seed-2v chord ${SCORE_MIN:+--score-min "$SCORE_MIN"}
+[ -f "$RUN/tracks.csv" ] || { echo "[sn_run] ERROR: linker did not write tracks.csv"; exit 1; }
+echo "SN_RUN DONE -> $RUN/tracks.csv ($(( $(wc -l < "$RUN/tracks.csv") - 1 )) tracks)"

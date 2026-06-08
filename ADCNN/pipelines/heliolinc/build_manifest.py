@@ -11,12 +11,14 @@ Examples:
 """
 from __future__ import annotations
 import argparse
+import os
 from pathlib import Path
 import pandas as pd
 from lsst.daf.butler import Butler
 
-REPO = Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
-STAGE4 = "LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage4"
+REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
+STAGE4 = os.environ.get("BUTLER_COLLECTION", "LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage4")
+BUTLER_REPO = os.environ.get("BUTLER_REPO", "dp2_prep")
 
 
 def parse_tracts(s):
@@ -39,12 +41,14 @@ def main():
     ap.add_argument("--exclude", default=str(REPO / "ADCNN/pipelines/heliolinc/train_visit_detector.csv"),
                     help="CSV of train (visit,detector) to exclude (leakage guard)")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--butler-repo", default=BUTLER_REPO, help="Butler repo (default $BUTLER_REPO or dp2_prep)")
+    ap.add_argument("--collection", default=STAGE4, help="diffim collection (default $BUTLER_COLLECTION)")
     a = ap.parse_args()
 
     tracts = parse_tracts(a.tracts); tl = ",".join(map(str, tracts))
-    b = Butler("dp2_prep")
+    b = Butler(a.butler_repo)
     refs = list(b.registry.queryDatasets(
-        "difference_image", collections=STAGE4, findFirst=True,
+        "difference_image", collections=a.collection, findFirst=True,
         where=(f"instrument='LSSTCam' AND skymap='{a.skymap}' AND tract IN ({tl}) "
                f"AND visit.day_obs>={a.day_start} AND visit.day_obs<{a.day_end}")))
     exclude = set()
