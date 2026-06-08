@@ -242,8 +242,11 @@ def main():
         for p in procs:
             p.join()
 
-    _frames = [pd.read_csv(c, low_memory=False) for c in shard_csvs
-               if Path(c).exists() and os.path.getsize(c) > 1]
+    # Read ALL shard files for this output (glob, not just the current n_gpus list): a preempted run that
+    # resumed with a DIFFERENT --n-gpus would otherwise orphan the old shards. The dedup below then makes the
+    # merge idempotent regardless of how the work was partitioned across resubmits.
+    all_shards = sorted(tmp.glob(f"_shard_{_tag}_*.csv"))
+    _frames = [pd.read_csv(c, low_memory=False) for c in all_shards if os.path.getsize(c) > 1]
     if not _frames:
         raise SystemExit(f"[discover] ERROR: no shard produced any detections ({len(shards)} shards, "
                          f"{man.shape[0]} panels) -- all FITS unreadable or every panel empty. Not writing {a.out}.")
@@ -256,13 +259,20 @@ def main():
         cat = cat[~bad].copy()
     cat["visit"] = pd.to_numeric(cat.visit).astype(np.int64)
     cat["detector"] = pd.to_numeric(cat.detector, errors="coerce").astype("Int64")
+    # RESUME IDEMPOTENCY: a panel whose CSV rows were written but whose .done line was not (crash between the
+    # two, or the panel reassigned to another shard after an n_gpus change) is re-detected and appended again.
+    # Detection is deterministic, so the duplicate rows are byte-identical -> dedup on the panel+position key.
+    _n = len(cat)
+    cat = cat.drop_duplicates(["visit", "detector", "x", "y", "score"]).reset_index(drop=True)
+    if len(cat) < _n:
+        print(f"[discover] dedup: dropped {_n - len(cat)} duplicate detections (resume/re-detect)", flush=True)
     cat = cat.sort_values(["mjd", "visit", "detector"]).reset_index(drop=True)
-    cat.insert(0, "detid", range(len(cat)))
+    cat.insert(0, "detid", range(len(cat)))   # deterministic: assigned post-dedup, post-sort
     cat.to_csv(a.out, index=False)
     (Path(a.out).parent / "colformat.txt").write_text(COLFORMAT)
-    for c in shard_csvs:
+    for c in all_shards:                        # clean ALL shards (incl. any orphaned by an n_gpus change)
         Path(c).unlink(missing_ok=True)
-        Path(c + ".done").unlink(missing_ok=True)   # resume sidecars (only here, after success)
+        Path(str(c) + ".done").unlink(missing_ok=True)   # resume sidecars (only here, after success)
     # coverage guard: how many of the manifest's panels actually contributed (read OK). A low fraction means
     # widespread FITS-read failure -> the catalogue is silently incomplete; warn (or fail past a threshold).
     n_panels = man.drop_duplicates(["visit", "detector"]).shape[0] if {"visit", "detector"}.issubset(man.columns) else man.shape[0]

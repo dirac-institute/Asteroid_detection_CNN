@@ -103,6 +103,7 @@ def main():
     nmiss = int(out.art_frac.isna().sum())
     for c in mcols + ["art_frac"]:
         out[c] = out[c].fillna(0.0)
+    out = out.drop(columns=[c for c in ("_err",) if c in out.columns])   # internal error marker, not a data column
     out.to_csv(a.out, index=False)
     if nmiss:
         print(f"[mask] WARNING: {nmiss} dets had no mask (FITS read fail) -> art_frac=0 (kept)", flush=True)

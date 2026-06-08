@@ -213,6 +213,8 @@ def fit_orbit(t1, ra1, dec1, vx1, vy1, t2, ra2, dec2, vx2, vy2, rate_frac=0.35):
     if best_state is None:
         return dict(cost=np.inf, rate_resid=np.inf, a=np.nan, e=np.nan, bound=False, rho1=np.nan, rho2=np.nan)
     a, e, energy = _elements(*best_state)
+    if not (np.isfinite(a) and np.isfinite(e) and np.isfinite(energy)):   # numerical failure -> not a valid orbit
+        return dict(cost=np.inf, rate_resid=np.inf, a=np.nan, e=np.nan, bound=False, rho1=np.nan, rho2=np.nan)
     return dict(cost=float(best_r / rate_sig), rate_resid=float(best_r), a=float(a), e=float(e),
                 bound=bool(energy < 0), rho1=float(best_rho), rho2=float(best_rho))
 

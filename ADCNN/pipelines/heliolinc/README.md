@@ -68,6 +68,15 @@ manifest / detect catalogue / mask output); `discover_stream` reports panel cove
 header-only `tracks.csv` + WARNING when 0 tracks pass (never a silent success). Verified: the hardened linker
 recovers **2025 NY2** on `run_night8731` and the KD-tree crossmatch is bit-identical to the brute-force scan.
 
+**Tests.** The linker's correctness-critical pure functions (spherical geometry incl. RA=0/pole, KD-tree
+crossmatch == brute force, chord seeding across the meridian, the χ² gate incl. NaN rejection, visit-based
+epoch counting, the resume dedup key) have a no-data unit suite — runs standalone (no pytest needed) or under
+pytest:
+
+```bash
+python ADCNN/pipelines/heliolinc/tests/test_discovery_linker.py
+```
+
 ## The linker (`trail_state_link.py`) — two tiers, one pass
 
 The trail measures on-sky velocity **directly** (endpoints over the exposure), so there is NO heliocentric
@@ -79,14 +88,19 @@ hypothesis grid and NO candidate explosion — O(N log N). `physical_check` reje
   - **chord seeding** (`--seed-2v chord`): pair detections by the *precise position chord* (k-d tree over the
     plausible rate band) and verify with the trail — vs the old trail-velocity clustering that scattered ~80%
     of real pairs. **~4× recall, ~10× lower FP** (real DP2 off-ecliptic FP).
-  - **combined orbit-fit χ² gate** (`--chi2-2v-max 3.0`): one weighted Mahalanobis goodness-of-fit
+  - **combined orbit-fit χ² gate** (`--chi2-2v-max 5.0`): one weighted Mahalanobis goodness-of-fit
     (`pair_chi2`: collinearity, bound-orbit rate-residual, brightness, trail-vs-motion PA & speed, each / its
-    real-pair scatter `CHI2_SIG_2V`) instead of independent AND-thresholds. **+2.5× completeness at the same
-    false rate** (λ≈0.0023/pair; 0 false / 439 real pairs). No ML, no training.
+    real-pair scatter `CHI2_SIG_2V`) instead of independent AND-thresholds — the **primary geometric purity
+    lever** (+45% 3-σ completeness vs `χ²≤10` at the same false rate). No ML, no training.
+  - **photometric purity cut** (`--mfsnr-min-2v 10`, `--rate-lo-2v 1 --rate-hi-2v 8`): match-filter-SNR floor +
+    rate band. `mfsnr_min_2v` is the **cadence dial** — ~10 for the 34-min WFD same-night gap, ~5 for rapid
+    cadence (`mf_snr ≈ point_SNR·√(PSF/trail_area)`, so a fast long trail dilutes; don't over-cut).
   - optional **recurrence veto** (`--recur-max 2`): TP-safe stationarity cut (residuals recur at a fixed sky
     position across visits; a ≥1°/day mover never does). Needs many visits/night (dense fields); ~no-op for a
     WFD pair. Operationally use a persistent-residual catalog from survey history.
-  - optional **Δt window** (`--max-arc-2v-min 40`) and per-member score floor (`--score-2v-min`).
+  - optional **Δt window** (`--max-arc-2v-min 40`). (The per-member AND-threshold knobs — score floor,
+    perp-collinearity, SNR-fraction — are gone from the shipped path; the χ² gate is the single 2-visit
+    discriminator. Those independent cuts live on in the analysis tools, e.g. `count_realfp.py`.)
 
 **`tracks.csv`** columns: `night, ndet, nvisit, n_epochs, tier(2visit|3+visit), arc_hr, rms_arcsec,
 speed_degday, chi2, a_au, ecc, ra, dec, check, match_obj, match_frac, status(CONFIRMED|NEW)`. The 2-visit

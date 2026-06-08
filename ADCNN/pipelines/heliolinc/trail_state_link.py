@@ -38,12 +38,27 @@ HL = REPO / "ADCNN/pipelines/heliolinc"
 SOLARDAY = 86400.0
 
 
+def radec_to_unit(ra_deg, dec_deg):
+    """(ra,dec) deg -> unit 3-vector(s) on the sphere. Used for cKDTrees so seeding/crossmatch are correct
+    ACROSS RA=0/360 and near the poles (a 2-D ra*cos(dec) tree breaks at the meridian). Scalar -> (3,);
+    array -> (N,3). An angular radius theta(deg) maps to a chord-length query radius 2*sin(theta/2)."""
+    ra = np.radians(np.asarray(ra_deg, dtype=float)); dec = np.radians(np.asarray(dec_deg, dtype=float))
+    cd = np.cos(dec)
+    return np.stack([cd * np.cos(ra), cd * np.sin(ra), np.sin(dec)], axis=-1)
+
+
+def _chord_radius(theta_deg):
+    """Euclidean (chord) radius on the unit sphere for an angular separation theta (deg)."""
+    return 2.0 * np.sin(np.radians(theta_deg) / 2.0)
+
+
 def trail_velocity(d, exptime_s):
     """On-sky angular velocity (deg/day) from the trail endpoints, in the local tangent plane.
     vx is the RA*cos(Dec) rate, vy the Dec rate. Trail spans the exposure (endpoints exptime_s apart)."""
     dt = exptime_s / SOLARDAY
     cosd = np.cos(np.radians(d.dec.to_numpy()))
-    vx = (d.ra1.to_numpy() - d.ra0.to_numpy()) * cosd / dt
+    dra = (d.ra1.to_numpy() - d.ra0.to_numpy() + 180.0) % 360.0 - 180.0   # wrap so an RA=0 straddle can't flip sign
+    vx = dra * cosd / dt
     vy = (d.dec1.to_numpy() - d.dec0.to_numpy()) / dt
     return vx, vy
 
@@ -200,13 +215,15 @@ def chord_seed_pairs(dets, *, max_arc_min=40.0, rate_min=0.3, rate_max=10.0, max
         ia, ib = idx_by[a_], idx_by[b_]
         if not len(ia) or not len(ib):
             continue
-        cd = float(np.cos(np.radians(dec[ib].mean())))
-        tree = cKDTree(np.column_stack([ra[ib] * cd, dec[ib]]))
-        dmin, dmax = rate_min * dt, rate_max * dt             # deg
+        tree = cKDTree(radec_to_unit(ra[ib], dec[ib]))       # 3-D unit-sphere: correct across RA=0 + poles
+        dmin, dmax = rate_min * dt, rate_max * dt             # deg (angular)
+        qmax = _chord_radius(dmax)
         for i in ia:
-            for jp in tree.query_ball_point([ra[i] * cd, dec[i]], dmax):
+            cd = float(np.cos(np.radians(dec[i])))
+            for jp in tree.query_ball_point(radec_to_unit(ra[i], dec[i]), qmax):
                 j = int(ib[jp])
-                if np.hypot((ra[j] - ra[i]) * cd, dec[j] - dec[i]) >= dmin:
+                dra = (ra[j] - ra[i] + 180.0) % 360.0 - 180.0
+                if np.hypot(dra * cd, dec[j] - dec[i]) >= dmin:   # rate floor (RA-wrap-safe)
                     pairs.append([int(i), j])
     return pairs
 
@@ -294,7 +311,7 @@ def physical_check(dets, members, exptime_s=30.0, pa_tol_deg=20.0, speed_frac=0.
         c2, ci = pair_chi2(g, exptime_s, chi2_sig)
         if not ci["bound"]:
             return False, f"2v no bound orbit", n_ep
-        if c2 > chi2_2v_max:
+        if not np.isfinite(c2) or c2 > chi2_2v_max:   # NaN must REJECT (a>max comparison is False for NaN)
             return False, f"2v chi2 {c2:.1f}>{chi2_2v_max}", n_ep
         return True, f"OK 2v chi2 {c2:.1f} a{ci['a']:.2f} e{ci['e']:.2f}", n_ep
     # 2. LINEAR fit residual over ALL member detections (degenerate only for <=2 points)
@@ -389,13 +406,11 @@ def build_known_index(known):
     """Pre-build a spatial cKDTree over the known-object sightings ONCE so crossmatch() is O(log M) per
     detection instead of O(M). At LSST scale known.csv is ~1M sightings/night and there are thousands of
     tracks, so the old per-track nested scan (O(tracks x members x M)) was the linker's worst hotspot."""
-    from scipy.spatial import cKDTree
     if known is None or not len(known):
         return None
     kra = known.ra.to_numpy(); kdec = known.dec.to_numpy()
-    cosd = float(np.cos(np.radians(np.nanmean(kdec)))) if len(kdec) else 1.0
-    return dict(tree=cKDTree(np.c_[kra * cosd, kdec]), kmjd=known.mjd.to_numpy(),
-                kra=kra, kdec=kdec, kobj=known.ObjID.astype(str).to_numpy(), cosd=cosd)
+    return dict(tree=cKDTree(radec_to_unit(kra, kdec)), kmjd=known.mjd.to_numpy(),   # 3-D: RA=0/pole-safe
+                kra=kra, kdec=kdec, kobj=known.ObjID.astype(str).to_numpy())
 
 
 def crossmatch(dets, members, known, tol_arcsec, tol_day, index=None):
@@ -407,18 +422,19 @@ def crossmatch(dets, members, known, tol_arcsec, tol_day, index=None):
     ix = index if index is not None else build_known_index(known)
     if ix is None:
         return "", 0.0
-    tree, kmjd, kra, kdec, kobj, cosd = ix["tree"], ix["kmjd"], ix["kra"], ix["kdec"], ix["kobj"], ix["cosd"]
-    tol_deg = tol_arcsec / 3600.0
+    tree, kmjd, kra, kdec, kobj = ix["tree"], ix["kmjd"], ix["kra"], ix["kdec"], ix["kobj"]
+    qr = _chord_radius(tol_arcsec / 3600.0 * 1.5)                          # inflated chord radius -> superset
     hits = []
     for _, r in g.iterrows():
-        cand = tree.query_ball_point([r.ra * cosd, r.dec], tol_deg * 1.5)   # inflated -> superset of true matches
+        cand = tree.query_ball_point(radec_to_unit(r.ra, r.dec), qr)
         if not cand:
             continue
         cand = np.asarray(cand)
         cand = cand[np.abs(kmjd[cand] - r.mjd) <= tol_day]                  # time window
         if not cand.size:
             continue
-        sep = np.hypot((kra[cand] - r.ra) * np.cos(np.radians(r.dec)), kdec[cand] - r.dec) * 3600
+        dra = (kra[cand] - r.ra + 180.0) % 360.0 - 180.0                    # RA-wrap-safe small-angle sep
+        sep = np.hypot(dra * np.cos(np.radians(r.dec)), kdec[cand] - r.dec) * 3600
         jm = int(np.argmin(sep))
         if sep[jm] <= tol_arcsec:                                          # exact angular check
             hits.append(kobj[cand[jm]])
@@ -438,22 +454,18 @@ def main():
     ap.add_argument("--art-frac-max", type=float, default=0.3, help="LSST mask cut")
     ap.add_argument("--score-min", type=float, default=0.0, help="ADCNN stage-2 CNN (trained real/bogus) score floor; raise to thin FP density for 2-visit linking")
     ap.add_argument("--npt", type=int, default=2, help="min detections (distinct visits) per track")
-    ap.add_argument("--pos-tol", type=float, default=0.017, help="deg; propagated-position cluster radius")
     ap.add_argument("--vel-frac", type=float, default=0.30)
     ap.add_argument("--max-rms", type=float, default=1.0, help="arcsec; LINEAR motion fit RMS (physical_check, >=3 epochs)")
     ap.add_argument("--pa-tol", type=float, default=20.0, help="deg; trail PA vs motion PA agreement (>=3 epochs)")
     ap.add_argument("--pa-tol-2v", type=float, default=10.0, help="deg; TIGHTER trail-PA tol for 2-visit tier + trail-vs-trail agreement")
-    ap.add_argument("--score-2v-min", type=float, default=0.0, help="min ADCNN score for BOTH members of a 2-visit link (purity/recall dial; set ~0.90 for a clean candidate stream; 3+visit tier unaffected)")
     ap.add_argument("--max-arc-2v-min", type=float, default=40.0, help="2-visit Δt window (min): only pair within the scheduler pair gap; the single strongest 2v FP cut (purity 0.28->0.71). None to disable")
     ap.add_argument("--orbit-rate-tol", type=float, default=0.25, help="2-visit bound-orbit velocity-residual tol (frac of trail speed); 0.25 is the purity/recall knee (0.5 was too loose). Tighter=purer")
-    ap.add_argument("--perp-collinear-2v", type=float, default=0.30, help="2-visit 4-trail-endpoint COLLINEARITY RMS tol (arcsec): real movers' two trail segments lie on ONE line (~0.08), FP merely parallel; recall-safe ~3x FP cut. None to disable")
-    ap.add_argument("--snr-frac-2v", type=float, default=None, help="2-visit brightness consistency |dSNR|/min; OFF by default (costs recall). ~0.6 for extra purity")
     ap.add_argument("--epoch-gap-s", type=float, default=40.0, help="seconds; detections closer than this in time are merged into ONE epoch (intra-visit snaps). MUST be < the same-night revisit gap or genuine separate visits merge and 2-visit links are rejected as '1 epoch' -- the shipped 120s WRONGLY merged the ~1-min deep-drilling cadence. 40s separates >=40s-apart visits, merges true back-to-back snaps; no-op for WFD's ~34-min pairs.")
     ap.add_argument("--chi2-2v-max", type=float, default=5.0, help="2-visit COMBINED orbit-fit chi^2 gate -- THE primary purity lever. The GEOMETRIC chi2 (collinearity + trail-vs-motion PA & speed) is the STRONG true/false discriminator (true median ~4 vs false ~39, FAST movers); TIGHTENING it 10->5 lifts the 3sigma completeness at the realistic 34-min WFD cadence from 0.070 to ~0.10 (+~45%%, validated on 80 off-ecliptic lambda fields) at NO purity cost. 0 to disable")
     ap.add_argument("--mfsnr-min-2v", type=float, default=10.0, help="2-visit photometric purity floor: fainter member's matched-filter TRAIL SNR >= this. CADENCE-DEPENDENT DIAL: at the realistic ~34-min WFD pair gap the residual chance-FP need this floor to reach 3sigma -> keep ~10. At RAPID cadence (deep-drilling/short dt, sparse FP) the geometric chi2 alone carries purity -> lower to ~5 to recover the fast FAINT movers (mf_snr ~ point_SNR*sqrt(PSF/trail_area) is low for long trails, so a high floor rejects exactly them). 0 to disable")
     ap.add_argument("--rate-lo-2v", type=float, default=1.0, help="2-visit NEO apparent-rate band low (deg/day)")
     ap.add_argument("--rate-hi-2v", type=float, default=8.0, help="2-visit NEO apparent-rate band high (deg/day)")
-    ap.add_argument("--seed-2v", choices=["chord", "cluster"], default="chord", help="2-visit seeding: 'chord' (position-chord pairs + trail verify; ~4x recall, ~10x lower FP than 'cluster' trail-velocity clustering)")
+    ap.add_argument("--seed-2v", choices=["chord"], default="chord", help="2-visit seeding (position-chord pairs + trail verify). Only 'chord' is supported; the inferior trail-velocity 'cluster' path was removed")
     ap.add_argument("--pos-tol-3v", type=float, default=0.05, help="3+visit cluster radius (deg); 0.05 ~doubles 3v recall vs 0.017 at zero purity cost (physical_check is the gate)")
     ap.add_argument("--rate-min", type=float, default=0.3, help="chord seeder min apparent rate (deg/day)")
     ap.add_argument("--rate-max", type=float, default=10.0, help="chord seeder max apparent rate (deg/day)")
@@ -503,27 +515,28 @@ def main():
             from ADCNN.pipelines.heliolinc.recurrence import add_recurrence
             dn = add_recurrence(dn)
             dn = dn[dn.recur < a.recur_max].reset_index(drop=True)   # TP-safe (real movers have recur==0)
-        if a.seed_2v == "chord":
-            # 3+visit via (looser) trail-velocity clustering; 2-visit via precise position-chord seeding
-            _, clus = link(dn, exptime_s=a.exptime, npt=3, pos_tol_deg=a.pos_tol_3v,
-                           vel_frac=a.vel_frac, min_visits=3)
-            cand = list(clus)
-            if a.min_epochs <= 2:
-                cand += chord_seed_pairs(dn, max_arc_min=(a.max_arc_2v_min or 1e9),
-                                         rate_min=a.rate_min, rate_max=a.rate_max,
-                                         max_visit_pairs=a.max_visit_pairs)
-        else:
-            _, cand = link(dn, exptime_s=a.exptime, npt=a.npt, pos_tol_deg=a.pos_tol,
-                           vel_frac=a.vel_frac, min_visits=a.npt)
+        # 3+visit via (looser) trail-velocity clustering; 2-visit via precise position-chord seeding.
+        # (The old `--seed-2v cluster` 2-visit path was removed: it linked ~4x fewer real pairs at ~10x higher
+        # FP than chord seeding and was never used in production.)
+        _, clus = link(dn, exptime_s=a.exptime, npt=3, pos_tol_deg=a.pos_tol_3v,
+                       vel_frac=a.vel_frac, min_visits=3)
+        cand = list(clus)
+        if a.min_epochs <= 2:
+            cand += chord_seed_pairs(dn, max_arc_min=(a.max_arc_2v_min or 1e9),
+                                     rate_min=a.rate_min, rate_max=a.rate_max,
+                                     max_visit_pairs=a.max_visit_pairs)
         cand.sort(key=len, reverse=True)   # 3+visit (longer) first; a triplet's dets aren't re-reported as pairs
         npass = 0; used = set()
         for members in cand:
+            # NB: purity is carried by the chi2 gate; the independent AND-threshold discriminators
+            # (score_2v_min, perp_collinear, snr_frac) are off in the shipped op-point (analysis tools that
+            # bypass chi2 set them directly when calling physical_check).
             ok, info, n_ep = physical_check(dn, members, a.exptime, pa_tol_deg=a.pa_tol,
                                             lin_rms_arcsec=a.max_rms, min_epochs=a.min_epochs,
                                             epoch_gap_s=a.epoch_gap_s,
-                                            pa_tol_2v_deg=a.pa_tol_2v, score_2v_min=a.score_2v_min,
+                                            pa_tol_2v_deg=a.pa_tol_2v, score_2v_min=0.0,
                                             max_arc_2v_min=a.max_arc_2v_min, orbit_rate_tol=a.orbit_rate_tol,
-                                            perp_collinear_2v_arcsec=a.perp_collinear_2v, snr_frac_2v=a.snr_frac_2v,
+                                            perp_collinear_2v_arcsec=None, snr_frac_2v=None,
                                             chi2_2v_max=(a.chi2_2v_max if a.chi2_2v_max and a.chi2_2v_max > 0 else None),
                                             mfsnr_min_2v=(a.mfsnr_min_2v if a.mfsnr_min_2v and a.mfsnr_min_2v > 0 else None),
                                             rate_lo_2v=a.rate_lo_2v, rate_hi_2v=a.rate_hi_2v)
