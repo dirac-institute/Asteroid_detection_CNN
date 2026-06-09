@@ -17,7 +17,7 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 from ADCNN.pipelines.heliolinc.trail_state_link import (
     radec_to_unit, _chord_radius, trail_velocity, pair_chi2, physical_check,
-    chord_seed_pairs, crossmatch, build_known_index,
+    chord_seed_pairs, crossmatch, build_known_index, extend_to_triplets,
 )
 from ADCNN.pipelines.heliolinc.orbit_check import orbit_ok
 from ADCNN.pipelines.heliolinc.alert_stream import build_alert, write_alerts
@@ -170,6 +170,31 @@ def test_alert_build_predict_and_wrap():
            sum(1 for _ in open("/tmp/_alert_test.jsonl")) == 2)
 
 
+# ---------------------------------------------------------------- 2v->3v promotion
+def test_extend_to_triplets():
+    # 3-visit collinear mover at 34-min gaps: chord seeds pair adjacent visits (visit0-2 is 68min > arc),
+    # extend must attach the 3rd visit's detection onto the precise 2-centroid track -> a 3-member track.
+    g3 = _mover_dets(180.0, -20.0, 3.0, 45.0, n_visits=3, gap_min=34.0)
+    pairs = chord_seed_pairs(g3, max_arc_min=40.0)
+    trips = extend_to_triplets(g3, pairs, pos_tol_arcsec=5.0)
+    best = max((len(set(t)) for t in trips), default=0)
+    _check("3-visit mover: a chord pair extends to a >=3-detection track", best >= 3)
+    # the promoted triplet passes physical_check as a 3+visit (>=3 epoch) track
+    if trips:
+        t = max(trips, key=lambda m: len(set(m)))
+        ok, _info, nep = physical_check(g3, t, EXPT, min_epochs=2, lin_rms_arcsec=1.0)
+        _check("promoted triplet passes physical_check as 3+visit", ok and nep >= 3)
+    # 2-visit (WFD) night -> no-op (no third visit to attach)
+    g2 = _mover_dets(180.0, -20.0, 3.0, 45.0, n_visits=2)
+    _check("2-visit night yields no promotions (no-op)", extend_to_triplets(g2, chord_seed_pairs(g2, max_arc_min=40.0)) == [])
+    # a 3rd-visit detection displaced far OFF the predicted track is NOT attached
+    g_off = _mover_dets(180.0, -20.0, 3.0, 45.0, n_visits=3, gap_min=34.0)
+    g_off.loc[2, "ra"] = g_off.loc[2, "ra"] + 0.5      # ~1800" off the line
+    g_off.loc[2, "dec"] = g_off.loc[2, "dec"] - 0.5
+    off_trips = extend_to_triplets(g_off, chord_seed_pairs(g_off, max_arc_min=40.0), pos_tol_arcsec=5.0)
+    _check("off-track 3rd detection is NOT attached", all(2 not in t for t in off_trips))
+
+
 # ---------------------------------------------------------------- resume dedup
 def test_resume_dedup_key():
     # mirrors discover_stream's idempotent merge: a duplicated panel collapses on (visit,detector,x,y,score)
@@ -183,7 +208,7 @@ def test_resume_dedup_key():
 TESTS = [test_radec_to_unit_and_chord, test_trail_velocity_ra_wrap, test_chord_seed_across_ra0_equals_ra180,
          test_crossmatch_kd_equals_brute_and_ra0, test_pair_chi2_true_low_false_high,
          test_physical_check_gate_and_nan, test_orbit_ok_runs_and_flags,
-         test_alert_build_predict_and_wrap, test_resume_dedup_key]
+         test_alert_build_predict_and_wrap, test_extend_to_triplets, test_resume_dedup_key]
 
 
 if __name__ == "__main__":

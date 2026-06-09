@@ -228,6 +228,56 @@ def chord_seed_pairs(dets, *, max_arc_min=40.0, rate_min=0.3, rate_max=10.0, max
     return pairs
 
 
+def extend_to_triplets(dets, pairs, *, pos_tol_arcsec=5.0):
+    """Promote 2-visit chord pairs to 3+visit tracks WHEN a consistent 3rd same-night detection exists.
+
+    For each pair, extrapolate the PRECISE 2-centroid linear track (not the noisy trail velocity) to every
+    other same-night visit and attach the nearest detection within pos_tol of the predicted position. A
+    3-point track is far purer than a pair: requiring a real 3rd detection on the 2-point line at the
+    predicted time is the (FP)^N collapse, so this is ~free purity for the subset that has a recoverable 3rd.
+    The merged member list is handed to physical_check (3v linear-RMS + PA gate), which rejects bad attaches;
+    if the triplet fails, the original pair is still evaluated downstream (no recall lost). No-op for a
+    2-visit (WFD) night. Distinct from forced photometry: the 3rd is a REAL CNN detection, not a pixel measure."""
+    d = dets.reset_index(drop=True)
+    mjd = d.mjd.to_numpy(); ra = d.ra.to_numpy(); dec = d.dec.to_numpy(); vis = d.visit.to_numpy()
+    uv = sorted(set(vis.tolist()))
+    if len(uv) < 3:
+        return []
+    idx_by = {v: np.where(vis == v)[0] for v in uv}
+    vmjd = {v: float(np.median(mjd[vis == v])) for v in uv}
+    trees = {v: cKDTree(radec_to_unit(ra[idx_by[v]], dec[idx_by[v]])) for v in uv}
+    tol_chord = _chord_radius(pos_tol_arcsec / 3600.0)
+    out = []
+    for pr in pairs:
+        i, j = pr
+        if mjd[i] > mjd[j]:
+            i, j = j, i
+        ti, tj = mjd[i], mjd[j]; dt = tj - ti
+        if dt <= 0:
+            continue
+        cdi = np.cos(np.radians(dec[i]))
+        vx = (((ra[j] - ra[i] + 180.0) % 360.0 - 180.0)) * cdi / dt    # RA*cosDec rate (deg/day), wrap-safe
+        vy = (dec[j] - dec[i]) / dt
+        extra = []
+        for v in uv:
+            if v == vis[i] or v == vis[j]:
+                continue
+            tk = vmjd[v]
+            pra = ra[i] + vx * (tk - ti) / cdi
+            pdec = dec[i] + vy * (tk - ti)
+            nb = trees[v].query_ball_point(radec_to_unit(pra, pdec), tol_chord)
+            if not nb:
+                continue
+            # nearest detection in this visit to the predicted position
+            uvi = radec_to_unit(pra, pdec)
+            k = int(idx_by[v][min(nb, key=lambda p: float(np.sum((radec_to_unit(ra[int(idx_by[v][p])],
+                                                                                dec[int(idx_by[v][p])]) - uvi) ** 2)))])
+            extra.append(k)
+        if extra:
+            out.append([int(i), int(j)] + extra)
+    return out
+
+
 def physical_check(dets, members, exptime_s=30.0, pa_tol_deg=20.0, speed_frac=0.5,
                    lin_rms_arcsec=1.0, min_epochs=2, epoch_gap_s=120.0, pa_tol_2v_deg=10.0,
                    orbit_check_2v=True, orbit_rate_tol=0.5, score_2v_min=0.0, max_arc_2v_min=None,
@@ -477,6 +527,10 @@ def main():
                     help="JSON op-point config (link_op_point.json): sets the calibrated 2v/3v params; any CLI flag overrides its value")
     ap.add_argument("--max-visit-pairs", type=int, default=200,
                     help="cap on same-night visit PAIRS the 2-visit chord seeder enumerates (O(V^2)); guards against a deep-drilling night (~100 visits -> ~5000 pairs). Keeps the nearest-in-time pairs and warns when it triggers")
+    ap.add_argument("--promote-3v", action=argparse.BooleanOptionalAction, default=True,
+                    help="promote a passing 2-visit chord pair to the PURE 3+visit tier when a real same-night detection lies on its precise 2-centroid track (the (FP)^N collapse). Free purity for the multi-visit subset; no-op for a WFD pair. --no-promote-3v to disable")
+    ap.add_argument("--promote-tol-arcsec", type=float, default=5.0,
+                    help="position tolerance (arcsec) for attaching the 3rd detection to the chord-extrapolated track in --promote-3v")
     ap.add_argument("--alerts-out", default=None,
                     help="JSONL same-night alert stream (one actionable candidate per line: endpoints, motion vector, forward-predicted ephemeris, confidence). Default: alerts.jsonl beside --out. --no-alerts to disable")
     ap.add_argument("--no-alerts", action="store_true", help="do not emit the JSONL alert stream")
@@ -529,9 +583,15 @@ def main():
                        vel_frac=a.vel_frac, min_visits=3)
         cand = list(clus)
         if a.min_epochs <= 2:
-            cand += chord_seed_pairs(dn, max_arc_min=(a.max_arc_2v_min or 1e9),
-                                     rate_min=a.rate_min, rate_max=a.rate_max,
-                                     max_visit_pairs=a.max_visit_pairs)
+            cpairs = chord_seed_pairs(dn, max_arc_min=(a.max_arc_2v_min or 1e9),
+                                      rate_min=a.rate_min, rate_max=a.rate_max,
+                                      max_visit_pairs=a.max_visit_pairs)
+            cand += cpairs
+            # PROMOTE 2v->3v: attach a consistent 3rd same-night detection on the precise chord track.
+            # A real 3rd on the 2-point line -> pure 3v tier (free purity for the multi-visit subset);
+            # no-op for a 2-visit WFD night. The pair stays in `cand` as a fallback if the triplet fails.
+            if a.promote_3v:
+                cand += extend_to_triplets(dn, cpairs, pos_tol_arcsec=a.promote_tol_arcsec)
         cand.sort(key=len, reverse=True)   # 3+visit (longer) first; a triplet's dets aren't re-reported as pairs
         npass = 0; used = set()
         for members in cand:
@@ -549,7 +609,10 @@ def main():
                                             rate_lo_2v=a.rate_lo_2v, rate_hi_2v=a.rate_hi_2v)
             if not ok:
                 continue
-            if n_ep == 2 and any(m in used for m in members):
+            # dedup across ALL tiers: cand is sorted longest-first, so the best (longest) track claims its
+            # detections; shorter overlapping candidates -- a 2v pair under a 3v track, OR two promoted
+            # triplets sharing an object's detections -- are skipped (prevents reporting one object N times).
+            if any(m in used for m in members):
                 continue
             used.update(members)
             npass += 1
