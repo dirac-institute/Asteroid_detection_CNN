@@ -541,7 +541,8 @@ def main():
         _flag = {"score_min": "--score-min", "chi2_2v_max": "--chi2-2v-max", "mfsnr_min_2v": "--mfsnr-min-2v",
                  "rate_lo_2v": "--rate-lo-2v", "rate_hi_2v": "--rate-hi-2v", "pa_tol": "--pa-tol",
                  "pa_tol_2v": "--pa-tol-2v", "max_rms": "--max-rms", "pos_tol_3v": "--pos-tol-3v",
-                 "max_arc_2v_min": "--max-arc-2v-min"}
+                 "max_arc_2v_min": "--max-arc-2v-min", "promote_3v": "--promote-3v",
+                 "promote_tol_arcsec": "--promote-tol-arcsec"}
         _applied = [f"{k}={_op[k]}" for k, fl in _flag.items()
                     if k in _op and fl not in sys.argv and (setattr(a, k, _op[k]) or True)]
         if _applied:

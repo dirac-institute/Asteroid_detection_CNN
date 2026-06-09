@@ -44,9 +44,16 @@ with SDF/DP2 defaults, overridable without editing code:
 Run at another site/release: `BUTLER_COLLECTION=… ADCNN_REPO=… sbatch … sn_run.slurm`. Every run writes
 `$RUN/run_config.json` (resolved config) for provenance.
 
+**The ADCNN threshold is decided by evidence, not chosen by hand** — see [`THRESHOLD_DECISION.md`](THRESHOLD_DECISION.md):
+for the faint-fast science bin (SNR 2–10, rate>1°/day) the purity-floor rule lands on **`score_min = 0.80`**,
+with **3+visit (incl. promotions) = 3-σ discovery (purity ≈100%)** and **2-visit = chi2-ranked alert/candidate
+stream (purity caps ~8%, never a discovery claim)**. The full single-night lever audit (parallax, orbit-prior,
+sky-region, partner-recovery, pixel forced-photometry, CNN fine-tune — all dead) is in
+[`PHYSICAL_LEVERS_2V.md`](PHYSICAL_LEVERS_2V.md) and [`RHO_FP_SKYMAP.md`](RHO_FP_SKYMAP.md).
+
 **The operating point is versioned config, not magic numbers.** `link_op_point.json` holds the calibrated
-2v/3v params (`score_min 0.80, chi2_2v_max 5, mfsnr_min_2v 10, rate 1–8, …`) with `model_version` /
-`data_release` / `calibrated_on` tags. `trail_state_link --op-point` reads it; any `--flag` overrides one
+2v/3v params (`score_min 0.80, chi2_2v_max 5, mfsnr_min_2v 10, rate 1–8, promote_3v, …`) with `model_version` /
+`data_release` / `calibrated_on` / `threshold_decision` tags. `trail_state_link --op-point` reads it; any `--flag` overrides one
 value. **Re-calibrate (and bump the tags) whenever the ADCNN model is retrained or the cadence/data release
 changes.** `chi2_2v_max=5` is the primary geometric purity lever; `mfsnr_min_2v` is a cadence dial (≈10 at the
 34-min WFD pair gap for 3-σ purity; ≈5 at rapid/deep-drilling cadence to recover fast faint movers).
@@ -84,6 +91,10 @@ hypothesis grid and NO candidate explosion — O(N log N). `physical_check` reje
 
 - **3+visit tier** — trail-velocity clustering (`--pos-tol-3v 0.05`) + linear-fit + bound-orbit check.
   At `--score-min 0.80` this is the **3-σ discovery** op-point (λ_FP ≲ 1.35×10⁻³/field-night; recovers 2025 NY2).
+  - **2v→3v promotion** (`--promote-3v`, default on): a passing 2-visit chord pair is upgraded to this pure
+    tier when a real same-night detection lies on its *precise 2-centroid track* (`extend_to_triplets`). A real
+    3rd on the 2-point line at the predicted time is the (FP)ⁿ collapse → ~free purity: validated 33% of true
+    2v candidates promoted, **0 false** (pos tol `--promote-tol-arcsec 5`). No-op for a WFD 2-visit night.
 - **2-visit tier** — the survey's native same-night product. Shipped op-point:
   - **chord seeding** (`--seed-2v chord`): pair detections by the *precise position chord* (k-d tree over the
     plausible rate band) and verify with the trail — vs the old trail-velocity clustering that scattered ~80%

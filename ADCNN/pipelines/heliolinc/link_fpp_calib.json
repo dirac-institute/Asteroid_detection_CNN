@@ -1,0 +1,89 @@
+{
+  "target_far": 0.00135,
+  "sigma": "3 (one-sided)",
+  "fit_slope": 2.0112125861356183,
+  "rho_star": 34.32311029896724,
+  "S_star": 0.97,
+  "table": [
+    {
+      "score": 0.6,
+      "dets_per_night": 16252.0,
+      "lambda_fp": 343.75,
+      "lambda_err": 29.618054741435444,
+      "nreal": 4,
+      "known_recovered": 8,
+      "new": 365,
+      "ny2": true
+    },
+    {
+      "score": 0.7,
+      "dets_per_night": 6914.0,
+      "lambda_fp": 56.75,
+      "lambda_err": 3.966001344763598,
+      "nreal": 4,
+      "known_recovered": 7,
+      "new": 52,
+      "ny2": true
+    },
+    {
+      "score": 0.8,
+      "dets_per_night": 2401.0,
+      "lambda_fp": 6.9,
+      "lambda_err": 1.0268614533832907,
+      "nreal": 10,
+      "known_recovered": 1,
+      "new": 7,
+      "ny2": true
+    },
+    {
+      "score": 0.85,
+      "dets_per_night": 1245.0,
+      "lambda_fp": 1.675,
+      "lambda_err": 0.20377054717852602,
+      "nreal": 40,
+      "known_recovered": 1,
+      "new": 0,
+      "ny2": true
+    },
+    {
+      "score": 0.9,
+      "dets_per_night": 490.0,
+      "lambda_fp": 0.285,
+      "lambda_err": 0.025466819535291556,
+      "nreal": 400,
+      "known_recovered": 1,
+      "new": 0,
+      "ny2": true
+    },
+    {
+      "score": 0.93,
+      "dets_per_night": 257.0,
+      "lambda_fp": 0.0825,
+      "lambda_err": 0.013773476199440044,
+      "nreal": 400,
+      "known_recovered": 1,
+      "new": 0,
+      "ny2": true
+    },
+    {
+      "score": 0.95,
+      "dets_per_night": 149.0,
+      "lambda_fp": 0.02,
+      "lambda_err": 0.007008766440504623,
+      "nreal": 400,
+      "known_recovered": 0,
+      "new": 0,
+      "ny2": false
+    },
+    {
+      "score": 0.97,
+      "dets_per_night": 78.0,
+      "lambda_fp": 0.005,
+      "lambda_err": 0.003531100632833621,
+      "nreal": 400,
+      "known_recovered": 0,
+      "new": 0,
+      "ny2": false
+    }
+  ]
+}
