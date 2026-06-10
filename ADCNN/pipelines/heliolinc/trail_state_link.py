@@ -536,6 +536,8 @@ def main():
     ap.add_argument("--no-alerts", action="store_true", help="do not emit the JSONL alert stream")
     ap.add_argument("--alerts-top-n", type=int, default=None,
                     help="cap the alert stream to the top-N by priorityScore (per-night follow-up budget); default unlimited")
+    ap.add_argument("--seed-3v-arc-min", type=float, default=120.0,
+                    help="3v-FIRST seeding: also seed chord pairs up to this arc (min) and use them ONLY to extend to triplets (3-epoch-gated), so a mover with no pair inside the 2v window (e.g. visits 0/50/100 min) is still found. 0 to disable")
     a = ap.parse_args()
     # Overlay the calibrated op-point JSON: it sets each param UNLESS that flag was passed explicitly on the CLI.
     if a.op_point and os.path.exists(a.op_point):
@@ -544,7 +546,8 @@ def main():
                  "rate_lo_2v": "--rate-lo-2v", "rate_hi_2v": "--rate-hi-2v", "pa_tol": "--pa-tol",
                  "pa_tol_2v": "--pa-tol-2v", "max_rms": "--max-rms", "pos_tol_3v": "--pos-tol-3v",
                  "max_arc_2v_min": "--max-arc-2v-min", "promote_3v": "--promote-3v",
-                 "promote_tol_arcsec": "--promote-tol-arcsec", "alerts_top_n": "--alerts-top-n"}
+                 "promote_tol_arcsec": "--promote-tol-arcsec", "alerts_top_n": "--alerts-top-n",
+                 "seed_3v_arc_min": "--seed-3v-arc-min"}
         _applied = [f"{k}={_op[k]}" for k, fl in _flag.items()
                     if k in _op and fl not in sys.argv and (setattr(a, k, _op[k]) or True)]
         if _applied:
@@ -595,6 +598,18 @@ def main():
             # no-op for a 2-visit WFD night. The pair stays in `cand` as a fallback if the triplet fails.
             if a.promote_3v:
                 cand += extend_to_triplets(dn, cpairs, pos_tol_arcsec=a.promote_tol_arcsec)
+                # 3v-FIRST seeding: the 40-min 2v arc cap is an FP lever for the PAIR tier, not a physical
+                # constraint on triplets -- a real mover seen in visits at e.g. 0/50/100 min has NO pair
+                # inside the 2v window and was previously unfindable. Seed pairs in a WIDER window
+                # (seed_3v_arc_min) and use them ONLY to extend to triplets (the wide pairs themselves are
+                # NOT kept as 2v candidates); the triplets face the same 3-epoch physical_check (linear-RMS
+                # + trail-PA + speed) as every other 3+visit track -- geometry carries the purity, and NO
+                # constituent 2v pair is required to pass the 2v alert gates.
+                if a.seed_3v_arc_min and a.seed_3v_arc_min > (a.max_arc_2v_min or 0):
+                    wide = chord_seed_pairs(dn, max_arc_min=a.seed_3v_arc_min,
+                                            rate_min=a.rate_min, rate_max=a.rate_max,
+                                            max_visit_pairs=a.max_visit_pairs)
+                    cand += extend_to_triplets(dn, wide, pos_tol_arcsec=a.promote_tol_arcsec)
         cand.sort(key=len, reverse=True)   # 3+visit (longer) first; a triplet's dets aren't re-reported as pairs
         npass = 0; used = set()
         for members in cand:

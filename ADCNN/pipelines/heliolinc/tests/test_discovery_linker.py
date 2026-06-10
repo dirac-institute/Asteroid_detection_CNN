@@ -195,6 +195,41 @@ def test_extend_to_triplets():
     _check("off-track 3rd detection is NOT attached", all(2 not in t for t in off_trips))
 
 
+# ---------------------------------------------------------------- 3v-FIRST seeding (wide arc window)
+def test_seed_3v_first_wide_arc():
+    # mover seen at 0 / 50 / 100 min: NO pair lies inside the 40-min 2v window, so the standard
+    # chord+promote path can never seed it -- the wide 3v-first window must.
+    g = _mover_dets(180.0, -20.0, 3.0, 45.0, n_visits=3, gap_min=50.0)
+    _check("no chord pair exists inside the 40-min 2v window",
+           chord_seed_pairs(g, max_arc_min=40.0) == [])
+    wide = chord_seed_pairs(g, max_arc_min=180.0)
+    _check("wide (3v-first) window seeds the 50/100-min pairs", len(wide) >= 1)
+    trips = extend_to_triplets(g, wide, pos_tol_arcsec=5.0)
+    best = max((len(set(t)) for t in trips), default=0)
+    _check("wide pair extends to the full 3-detection track", best >= 3)
+    t = max(trips, key=lambda m: len(set(m)))
+    ok, _info, nep = physical_check(g, t, EXPT, min_epochs=2, lin_rms_arcsec=1.0)
+    _check("3v-first triplet passes the 3-epoch geometric gate", ok and nep >= 3)
+    # CRITICAL design rule: the triplet is accepted even though its constituent pairs would FAIL the 2v
+    # alert gates (here: arc > max_arc_2v_min). The 3-epoch geometry is the only gate.
+    okp, _i, nepp = physical_check(g, list(wide[0]), EXPT, min_epochs=2, chi2_2v_max=5.0,
+                                   max_arc_2v_min=40.0)
+    _check("constituent wide pair itself FAILS the 2v gates (as designed)", not okp)
+    # RA-wrap: same mover straddling RA=0 seeds + extends identically
+    gw = _mover_dets(359.99, -10.0, 3.0, 90.0, n_visits=3, gap_min=50.0)
+    tw = extend_to_triplets(gw, chord_seed_pairs(gw, max_arc_min=180.0), pos_tol_arcsec=5.0)
+    _check("3v-first works across RA=0", max((len(set(t)) for t in tw), default=0) >= 3)
+    # random scattered dets in the same visits do NOT form a passing triplet
+    rng = np.random.default_rng(7)
+    gr = g.copy()
+    gr["ra"] = 180.0 + rng.uniform(-0.3, 0.3, len(gr))
+    gr["dec"] = -20.0 + rng.uniform(-0.3, 0.3, len(gr))
+    rtrips = extend_to_triplets(gr, chord_seed_pairs(gr, max_arc_min=180.0), pos_tol_arcsec=5.0)
+    bad = [t for t in rtrips if len(set(t)) >= 3 and physical_check(gr, t, EXPT, min_epochs=2,
+                                                                    lin_rms_arcsec=1.0)[0]]
+    _check("random scatter does not yield a passing 3v-first triplet", bad == [])
+
+
 # ---------------------------------------------------------------- resume dedup
 def test_resume_dedup_key():
     # mirrors discover_stream's idempotent merge: a duplicated panel collapses on (visit,detector,x,y,score)
@@ -208,7 +243,8 @@ def test_resume_dedup_key():
 TESTS = [test_radec_to_unit_and_chord, test_trail_velocity_ra_wrap, test_chord_seed_across_ra0_equals_ra180,
          test_crossmatch_kd_equals_brute_and_ra0, test_pair_chi2_true_low_false_high,
          test_physical_check_gate_and_nan, test_orbit_ok_runs_and_flags,
-         test_alert_build_predict_and_wrap, test_extend_to_triplets, test_resume_dedup_key]
+         test_alert_build_predict_and_wrap, test_extend_to_triplets, test_seed_3v_first_wide_arc,
+         test_resume_dedup_key]
 
 
 if __name__ == "__main__":

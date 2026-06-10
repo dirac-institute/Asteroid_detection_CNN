@@ -17,6 +17,7 @@
   "max_arc_2v_min": 40.0,
   "promote_3v": true,
   "promote_tol_arcsec": 5.0,
-  "notes": "score_min=0.70 (not lower) because lambda_3v at 0.6 is 0.0575/night (nonzero) and 0.0025 at 0.7 -- 0.70 keeps the tier FAR-clean while gaining recall over 0.80. mfsnr_min_2v=0 (disabled): the 2v photometric cut costs ~2.5x faint-fast completeness and 3v geometry replaces its purity role. KNOWN GAP (planned): 3v candidates currently arise only via 2v chord pairs + promotion; a 3v-FIRST seeder (RANSAC/Hough constant-angular-velocity triplets at this lower floor) would also catch objects whose 2v pair fails the 2v gates -- not yet implemented.",
+  "seed_3v_arc_min": 180.0,
+  "notes": "score_min=0.70 (not lower) because lambda_3v at 0.6 is 0.0575/night (nonzero) and 0.0025 at 0.7 -- 0.70 keeps the tier FAR-clean while gaining recall over 0.80. mfsnr_min_2v=0 (disabled): the 2v photometric cut costs ~2.5x faint-fast completeness and 3v geometry replaces its purity role. 3v-FIRST SEEDING (seed_3v_arc_min=180): chord pairs are ALSO seeded in a wide 3h window and used ONLY to extend to triplets (gated by the 3-epoch linear-RMS/PA/speed checks, NEVER the 2v alert gates) -- a mover with no pair inside the 40-min 2v window (e.g. visits 0/50/100 min) is still found. Structural note: promotion has always run on UNGATED chord pairs, so 3v candidates never required a passing 2v parent; the wide window closes the remaining arc-coverage gap.",
   "links": "link_fpp_calib_3visit.json, THRESHOLD_DECISION.md"
 }
