@@ -59,6 +59,13 @@ def _detect_one(seg, cnn, img, device, config: InferenceConfig):
     """
     import torch
     from ADCNN.inference.predict import predict_panel_overlap_3ch_full
+    # ch3 = 0 in production. ABLATION CLOSED (2026-06-10, 6 test panels, stored clean-diffim mask vs
+    # zeros): recall IDENTICAL (85/120 vs 84/120) -> ch3=0 is NOT a recall bug, no retrain needed; all
+    # shipped calibrations (injection sweeps via discover_stream) also ran ch3=0, so production and
+    # calibration are consistent. Measured upside: stored context suppresses HIGH-SCORE FP ~1.5x at fixed
+    # recall (n(S>=0.8) 111 vs 167) -> wiring the real DIA mask plane (diffim HDU2, cf. mask_flags.py) in
+    # here is an OPTIONAL FP-density lever for reopening lower score floors, behind the length-split
+    # hybrid linker in priority. Do not re-open this as a correctness issue.
     rl = np.zeros_like(img, dtype=np.uint16)  # real-data stream has no DIA mask channel
     t0 = time.perf_counter()
     prob, _sin, _cos, agg = predict_panel_overlap_3ch_full(
