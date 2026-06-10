@@ -15,18 +15,32 @@ from scipy.spatial import cKDTree
 from ADCNN.pipelines.heliolinc.trail_state_link import radec_to_unit, _chord_radius
 
 
+def _nearest_vk(mjd, kvks, tol_day=35.0 / 86400.0):
+    """Snap each mjd to the NEAREST known visit-key within tol (handles trail-as-tracklet endpoint
+    pseudo-obs at mjd +/- exptime/2, which break exact visit-key equality). Returns vk array (NaN = none)."""
+    kv = np.sort(np.unique(kvks))
+    i = np.clip(np.searchsorted(kv, mjd), 1, len(kv) - 1)
+    lo, hi = kv[i - 1], kv[i]
+    near = np.where(np.abs(mjd - lo) <= np.abs(mjd - hi), lo, hi)
+    return np.where(np.abs(mjd - near) <= tol_day, near, np.nan)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", default="run_band/mn_box")
     ap.add_argument("--tag", required=True)
     ap.add_argument("--known", default="run_band/known.csv")
+    ap.add_argument("--dets-file", default=None,
+                    help="explicit input-dets CSV for the truth denominator (default {dir}/dets_{tag}.csv; "
+                         "NOTE run_heliolinx overwrites that name with its heliolinx-format file -- pass the "
+                         "original culled catalog here for trail-as-tracklet runs)")
     ap.add_argument("--tol-arcsec", type=float, default=5.0)
     a = ap.parse_args()
 
-    dets = pd.read_csv(f"{a.dir}/dets_{a.tag}.csv")          # ordered as fed; row i == heliolinx index i
+    dets = pd.read_csv(a.dets_file or f"{a.dir}/dets_{a.tag}.csv")   # ordered as fed; row i == heliolinx index i
     dets["night"] = np.floor(dets.mjd - 0.5).astype(int)
-    dets["vk"] = dets.mjd.round(5)
     k = pd.read_csv(a.known); k["night"] = np.floor(k.mjd - 0.5).astype(int); k["vk"] = k.mjd.round(5)
+    dets["vk"] = _nearest_vk(dets.mjd.to_numpy(), k.vk.to_numpy())
     # restrict known to the box footprint (by RA/Dec span of dets) so the denominator is in-box
     ramin, ramax = dets.ra.min() - 0.05, dets.ra.max() + 0.05
     dmin, dmax = dets.dec.min() - 0.05, dets.dec.max() + 0.05
@@ -64,7 +78,7 @@ def main():
         print(f"NO LINKAGE FILE {lp} (link_purify produced none or failed)"); return
     pdf = pd.read_csv(pdf_path)
     pdf.columns = [c.lstrip("#") for c in pdf.columns]       # '#MJD' -> 'MJD'
-    pdf["vk"] = pdf.MJD.round(5)
+    pdf["vk"] = _nearest_vk(pdf.MJD.to_numpy(), k.vk.to_numpy())
     # label each pairdets row with matched ObjID (per visit KD match to known)
     pobj = np.full(len(pdf), None, dtype=object)
     pidx = dict(tuple(pdf.reset_index().groupby("vk")))
