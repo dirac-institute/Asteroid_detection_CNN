@@ -85,3 +85,22 @@ proxy (top-20 truth 117 vs 137) — within the chi2<=5 survivors the FP chi2 dis
 over truth. chi2 is excellent for REJECTION, bad as a strong RANKING weight inside its own gate.
 -> priorityScore recalibration task: chi2 stays a hard gate; ranking re-weighted toward weakest-member
 score + trail-consistency terms (field-grouped CV, top-N metrics, interpretable linear form).
+
+# ADDENDUM 2 (2026-06-10): priorityScore RECALIBRATED — weakest-member score is the ranking
+Field-grouped 5-fold CV on the v2 per-pair table (shipped stream: mfsnr>=5, rate band, chi2<=5 gate;
+1219 pairs / 937 TP / faint-fast denom 2618). Faint-fast truth objects inside per-field top-N:
+
+| ranking                          | top-5 | top-10 | top-20 | med truth rank |
+|----------------------------------|-------|--------|--------|----------------|
+| OLD priorityScore (chi2-weighted)| 40    | 72     | 115    | 11 |
+| **weakest-member score (NEW)**   | **71**| **98** | **126**| **7** |
+| logistic any-TP (no/clip/raw chi2)| 49-51| 72     | 115-116| 13 |
+| logistic faint-fast-targeted      | 54   | 83     | 122    | 10 |
+
+Every multi-term combination LOSES to the plain weakest-member CNN score: chi2 has a fat low tail for
+chance 2-point FP fits (gate-good, rank-bad); mfsnr ranks BRIGHT truth up and the faint-fast target down;
+trail residuals add variance. Shipped change (alert_stream.priority_score): variable term = 0.95 *
+score_min only; tier bases unchanged (3+visit 3.0 > 2v NEW 2.0+ > recovery 0.5+; separation preserved,
+2v max 2.95 < 3.0). chi2 REMAINS the hard acceptance gate; mfsnr>=5 REMAINS the alert-op cut. API
+unchanged (chi2/mfsnr args kept, unused in ranking). 11/11 tests pass. Effect on the shipped stream:
++78% faint-fast truth in top-5 (40->71), med truth rank 11->7, at identical alert content.

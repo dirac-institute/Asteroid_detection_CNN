@@ -110,15 +110,18 @@ def _f(x):
 
 
 def priority_score(status, tier, chi2, score_min, mfsnr_min):
-    """CONTINUOUS follow-up priority (higher = point a telescope sooner). Monotone in the evidence:
-    tier base (3+visit 3-sigma-grade > 2-visit NEW candidate > known recovery) + geometric quality
-    exp(-chi2/5) + detector confidence of the WEAKEST member + photometric solidity. Use for top-N
-    ranking under a per-night follow-up budget; the integer `priority` stays for coarse routing."""
+    """CONTINUOUS follow-up priority (higher = point a telescope sooner). RECALIBRATED 2026-06-10 on the
+    v2 per-pair table (82 injection fields, exact FP, field-grouped CV; ALERT_SWEEP_DECISION.md addendum):
+    within the gated stream the WEAKEST-MEMBER CNN score is the entire useful ranking signal -- it beat the
+    old chi2-weighted formula (top-5 faint-fast truth 71 vs 40; med rank 7 vs 11) AND every logistic
+    combination of [chi2, mfsnr, trail-PA/rate residuals] (each added term injects more variance than
+    information; chance 2-point fits give FPs a fat LOW-chi2 tail, so chi2 is a GATE, not a ranking
+    weight). chi2/mfsnr args are kept for API stability but intentionally NOT used in the variable term.
+    Tier base (3+visit > 2-visit NEW > known recovery) + 0.95*score_min keeps tiers separated
+    (2v NEW max 2.95 < 3.0 = 3+visit base)."""
     base = 0.5 if status == "CONFIRMED" else (3.0 if tier == "3+visit" else 2.0)
-    c2 = float(chi2) if (chi2 is not None and np.isfinite(chi2)) else 50.0
     sc = float(score_min) if (score_min is not None and np.isfinite(score_min)) else 0.0
-    mf = float(mfsnr_min) if (mfsnr_min is not None and np.isfinite(mfsnr_min)) else 0.0
-    return float(base + 0.5 * np.exp(-c2 / 5.0) + 0.3 * sc + 0.2 * min(mf / 10.0, 1.0))
+    return float(base + 0.95 * min(max(sc, 0.0), 1.0))
 
 
 def build_alert(g, *, alert_id, night, obscode, status, tier, chi2, a_au, ecc, rms_arcsec,
