@@ -90,7 +90,32 @@ def field_pairs_exact(ds, exptime_s=30.0):
         dpa_tt = np.abs(((tpa[I] - tpa[J] + 90) % 180) - 90)
         dspeed = np.maximum(np.abs(tsp[I] - msp), np.abs(tsp[J] - msp)) / np.maximum(msp, 0.3)
         g = (dpa_tm <= 20.0) & (dpa_tt <= 15.0) & (dspeed <= 0.6)
-        out_i.append(I[g]); out_j.append(J[g])
+        I, J, dpa_tm, dspeed = I[g], J[g], dpa_tm[g], dspeed[g]
+        if not len(I):
+            continue
+        # EXACT partial-chi2 reject (the orbit-resid term is >=0, so partial>5 => chi2>5 => reject without
+        # the 135ms rho-scan orbit fit). Terms identical to pair_chi2 with CHI2_SIG_2V sigmas:
+        #   perp = sqrt(min-eigenvalue of the 2x2 covariance (/N) of the 4 trail endpoints (arcsec))
+        #   dsnr = |mf_i - mf_j| / max(min(mf_i,mf_j), 1e-3)
+        ra0 = ds.ra0.to_numpy(); de0 = ds.dec0.to_numpy(); ra1 = ds.ra1.to_numpy(); de1 = ds.dec1.to_numpy()
+        mfs_ = ds.mf_snr.to_numpy() if "mf_snr" in ds else np.ones(len(ds))
+        dm = (dec[I] + dec[J]) / 2.0                      # pair_chi2 uses g.dec.mean() of the 2 members
+        c0 = np.cos(np.radians(dm))
+        ram = (ra[I] + ra[J]) / 2.0                       # g.ra.mean()
+        # 4 endpoint points per pair, arcsec about the member-mean (matches pair_chi2's P construction)
+        Px = np.stack([(ra0[I] - ram) * c0, (ra1[I] - ram) * c0,
+                       (ra0[J] - ram) * c0, (ra1[J] - ram) * c0], 1) * 3600.0
+        Py = np.stack([de0[I] - dm, de1[I] - dm, de0[J] - dm, de1[J] - dm], 1) * 3600.0
+        Px -= Px.mean(1, keepdims=True); Py -= Py.mean(1, keepdims=True)
+        sxx = (Px * Px).mean(1); syy = (Py * Py).mean(1); sxy = (Px * Py).mean(1)
+        lam_min = 0.5 * (sxx + syy) - np.sqrt(np.maximum(0.25 * (sxx - syy) ** 2 + sxy ** 2, 0.0))
+        perp = np.sqrt(np.maximum(lam_min, 0.0))
+        smn = np.minimum(mfs_[I], mfs_[J]); smx = np.maximum(mfs_[I], mfs_[J])
+        dsnr = (smx - smn) / np.maximum(smn, 1e-3)
+        partial = ((perp / 0.127) ** 2 + (dsnr / 0.558) ** 2 +
+                   (dpa_tm / 4.869) ** 2 + (dspeed / 0.237) ** 2)
+        g2 = partial <= PCHECK["chi2_2v_max"]
+        out_i.append(I[g2]); out_j.append(J[g2])
     if not out_i:
         return np.empty(0, int), np.empty(0, int), 0
     n_seed = int(sum(len(x) for x in out_i))   # survivors only; raw seed count not retained (vectorized)
