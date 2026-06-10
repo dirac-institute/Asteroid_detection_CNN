@@ -58,3 +58,30 @@ from the blinded injection-on-real test (planned; see op_multinight_discovery.js
 
 Reproduce: `trail_state_link --dets <night dets> --known <known.csv> --op-point op_2v_alert.json
 [--mfsnr-min-2v 7] --out <dir>/tracks.csv` → `alerts.jsonl` (ranked) + `summarize_alert_sweep.py`.
+
+---
+# ADDENDUM (2026-06-10): mfsnr 5->0 flip REJECTED — the bounded-alert gate failed
+
+Question: drop mfsnr>=5 entirely and rely on ranked top-N? Evidence: v2 per-pair table (82 injection
+fields, exact FP, full priorityScore inputs incl. pair_chi2), ranked by the REAL alert_stream priority.
+
+| config                  | faint-fast C | alerts/field | top-N purity |
+|-------------------------|--------------|--------------|--------------|
+| shipped mfsnr>=5 (uncapped) | **6.07% (159 objs)** | 15.2 | 76.9% |
+| mfsnr=0 (uncapped)      | 6.99% (183)  | 54.2         | 22.4% |
+| mfsnr=0 top-10/field    | 2.44% (64)   | 9.1          | 67.7% |
+| mfsnr=0 top-20/field    | 4.47% (117)  | 16.5         | 53.3% |
+| shipped + top-up to 20  | 4.70% (123)  | 16.5         | 55.1% |
+
+VERDICT — **shipped default FROZEN: S>=0.80, mfsnr>=5, uncapped per-field, global top-50/night.**
+The mfsnr<5 band DOES hold truth (+24 objects; NY2-night check even recovered an extra real object,
+2006 QX198, at mfsnr=0) — but that truth lives too deep in the FP-heavy tail to surface under any
+realistic per-field budget (needs 40+ alerts/field). mfsnr=0 is documented ONLY as a high-budget
+diagnostic / follow-up-rich mode, never the default.
+
+DIAGNOSTIC (drives the next fix): the current priorityScore RANKS WORSE than a plain weakest-member-score
+proxy (top-20 truth 117 vs 137) — within the chi2<=5 survivors the FP chi2 distribution has a fat LOW tail
+(chance 2-point fits can be perfect), so the dominant exp(-chi2/5) term injects variance that lifts FPs
+over truth. chi2 is excellent for REJECTION, bad as a strong RANKING weight inside its own gate.
+-> priorityScore recalibration task: chi2 stays a hard gate; ranking re-weighted toward weakest-member
+score + trail-consistency terms (field-grouped CV, top-N metrics, interpretable linear form).
