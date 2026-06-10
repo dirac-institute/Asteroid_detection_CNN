@@ -1,0 +1,2 @@
+night,ndet,nvisit,n_epochs,tier,arc_hr,rms_arcsec,speed_degday,chi2,a_au,ecc,ra,dec,check,match_obj,match_frac,status
+60862,3,3,3,3+visit,0.8868990881019272,0.6722940782529391,3.4374628509644127,,,,343.31307991832364,-5.216017109995604,"OK linrms 0.67"" PA 19 3.44deg/day 3ep",2025 NY2,1.0,CONFIRMED

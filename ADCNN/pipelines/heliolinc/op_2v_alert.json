@@ -17,5 +17,6 @@
   "max_arc_2v_min": 40.0,
   "promote_3v": true,
   "promote_tol_arcsec": 5.0,
-  "notes": "Measured operating points at S=0.80 (faint-fast bin SNR 2-10, rate>1 deg/day): mfsnr>=5 -> C=6.1%, lambda=3.4 false/field-night; mfsnr>=7 -> C=3.9%, lambda=1.0; mfsnr>=10 -> C=1.7%, lambda=0.12. Alert tier accepts the higher false rate because alerts are RANKED (chi2 / priority) and CAPPED per night, and a 3rd observation confirms or kills each candidate ((FP)^N: 3v promotion measured 0 false). mfsnr=7 is the conservative fallback if 3.4/field-night exceeds follow-up capacity."
+  "alerts_top_n": 50,
+  "notes": "DECIDED 2026-06-10 (ALERT_SWEEP_DECISION.md, real-night sweep band-box + NY2 night): default mfsnr>=5 with alerts_top_n=50/night. Measured operating points at S=0.80 (faint-fast bin SNR 2-10, rate>1 deg/day): mfsnr>=5 -> C=6.1%, lambda=3.4 false/field-night (dense-field UPPER bound; real nights measured 1-2 alerts/night); mfsnr>=7 -> C=3.9%, lambda=1.0; mfsnr>=10 -> C=1.7%, lambda=0.12. Alert tier accepts the higher false rate because alerts are RANKED (priorityScore) and CAPPED per night, and a 3rd observation confirms or kills each candidate ((FP)^N: 3v promotion measured 0 false). mfsnr=7 is the documented fallback knob if follow-up capacity saturates. NY2 regression intact at both settings."
 }

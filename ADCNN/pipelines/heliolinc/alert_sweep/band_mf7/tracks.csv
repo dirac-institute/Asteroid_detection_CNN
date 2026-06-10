@@ -1,0 +1,2 @@
+night,ndet,nvisit,n_epochs,tier,arc_hr,rms_arcsec,speed_degday,chi2,a_au,ecc,ra,dec,check,match_obj,match_frac,status
+60874,3,3,3,3+visit,1.5129434347618371,0.221591212385845,5.645739915485336,,,,345.2718553469916,-6.202819975284715,"OK linrms 0.22"" PA 173 5.65deg/day 3ep",,0.0,NEW
