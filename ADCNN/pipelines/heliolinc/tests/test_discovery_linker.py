@@ -230,6 +230,34 @@ def test_seed_3v_first_wide_arc():
     _check("random scatter does not yield a passing 3v-first triplet", bad == [])
 
 
+# ---------------------------------------------------------------- vectorized 2v pre-filter exactness
+def test_prefilter_2v_exactness():
+    from ADCNN.pipelines.heliolinc.trail_state_link import prefilter_2v_pairs
+    # mover + random scatter -> chord pairs; the pre-filter must change NOTHING about which pairs pass
+    # physical_check (it may only remove pairs that physical_check would reject anyway).
+    rng = np.random.default_rng(11)
+    g = _mover_dets(180.0, -20.0, 3.0, 45.0)
+    extra = []
+    for i in range(30):
+        r = g.iloc[i % 2].copy()
+        r["detid"] = 100 + i
+        r["ra"] = 180.0 + rng.uniform(-0.05, 0.05); r["dec"] = -20.0 + rng.uniform(-0.05, 0.05)
+        r["ra0"] = r.ra - rng.uniform(0, 1e-3); r["ra1"] = r.ra + rng.uniform(0, 1e-3)
+        r["dec0"] = r.dec - rng.uniform(0, 1e-3); r["dec1"] = r.dec + rng.uniform(0, 1e-3)
+        r["mf_snr"] = rng.uniform(2, 30)
+        extra.append(r)
+    d = pd.concat([g, pd.DataFrame(extra)], ignore_index=True)
+    pairs = chord_seed_pairs(d, max_arc_min=60.0)
+    _check("fixture yields a healthy pair pool", len(pairs) >= 10)
+    kw = dict(min_epochs=2, chi2_2v_max=5.0, max_arc_2v_min=60.0)
+    pass_all = {tuple(p) for p in pairs if physical_check(d, p, EXPT, **kw)[0]}
+    filt = prefilter_2v_pairs(d, pairs, 5.0, exptime_s=EXPT)
+    pass_filt = {tuple(p) for p in filt if physical_check(d, p, EXPT, **kw)[0]}
+    _check("pre-filter is EXACT: identical passing-pair set", pass_all == pass_filt)
+    _check("pre-filter actually removes chance pairs", len(filt) < len(pairs))
+    _check("chi2_max=None is a no-op", prefilter_2v_pairs(d, pairs, None) == pairs)
+
+
 # ---------------------------------------------------------------- resume dedup
 def test_resume_dedup_key():
     # mirrors discover_stream's idempotent merge: a duplicated panel collapses on (visit,detector,x,y,score)
@@ -243,7 +271,7 @@ def test_resume_dedup_key():
 TESTS = [test_radec_to_unit_and_chord, test_trail_velocity_ra_wrap, test_chord_seed_across_ra0_equals_ra180,
          test_crossmatch_kd_equals_brute_and_ra0, test_pair_chi2_true_low_false_high,
          test_physical_check_gate_and_nan, test_orbit_ok_runs_and_flags,
-         test_alert_build_predict_and_wrap, test_extend_to_triplets, test_seed_3v_first_wide_arc,
+         test_alert_build_predict_and_wrap, test_extend_to_triplets, test_seed_3v_first_wide_arc, test_prefilter_2v_exactness,
          test_resume_dedup_key]
 
 

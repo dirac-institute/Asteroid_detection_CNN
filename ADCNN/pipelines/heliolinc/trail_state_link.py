@@ -228,6 +228,58 @@ def chord_seed_pairs(dets, *, max_arc_min=40.0, rate_min=0.3, rate_max=10.0, max
     return pairs
 
 
+def prefilter_2v_pairs(dets, pairs, chi2_max, exptime_s=30.0):
+    """EXACT vectorized pre-filter for 2-visit chord pairs: drop every pair whose PARTIAL chi2 (the four
+    cheap pair_chi2 terms: perp-collinearity, dsnr, trail-vs-motion PA, trail-vs-chord speed) already
+    exceeds chi2_max. The orbit-residual term is non-negative, so partial > chi2_max => chi2 > chi2_max
+    => physical_check would reject -- removing the pair changes NOTHING (validated bit-identical to the
+    python chain on 4/4 fields at S0.80 and 74/74 fields vs an independent run at S0.70; see
+    exact_lowS_pairs). This turns the per-pair 135ms rho-scan orbit fit into a numpy pass for the ~99% of
+    chance pairs -- the LSST-scale fast path for low score floors. Formulas/sigmas identical to pair_chi2.
+    Apply ONLY to the 2v candidate list, never to the promotion/triplet-seeding input."""
+    if chi2_max is None or not pairs:
+        return pairs
+    d = dets.reset_index(drop=True)
+    P2 = np.asarray([p for p in pairs if len(p) == 2], int)
+    if not len(P2):
+        return pairs
+    I, J = P2[:, 0], P2[:, 1]
+    mjd = d.mjd.to_numpy(); ra = d.ra.to_numpy(); dec = d.dec.to_numpy()
+    dt_exp = exptime_s / SOLARDAY
+    cosd = np.cos(np.radians(dec))
+    tvx = (d.ra1.to_numpy() - d.ra0.to_numpy()) * cosd / dt_exp
+    tvy = (d.dec1.to_numpy() - d.dec0.to_numpy()) / dt_exp
+    tpa = np.degrees(np.arctan2(tvy, tvx)) % 180.0
+    tsp = np.hypot(tvx, tvy)
+    mdt = mjd[J] - mjd[I]
+    cdI = np.cos(np.radians(dec[I]))
+    mx = (ra[J] - ra[I]) * cdI / mdt
+    my = (dec[J] - dec[I]) / mdt
+    mpa = np.degrees(np.arctan2(my, mx)) % 180.0
+    msp = np.hypot(mx, my)
+    dpa_tm = np.maximum(np.abs(((tpa[I] - mpa + 90) % 180) - 90),
+                        np.abs(((tpa[J] - mpa + 90) % 180) - 90))
+    dspeed = np.maximum(np.abs(tsp[I] - msp), np.abs(tsp[J] - msp)) / np.maximum(msp, 0.3)
+    ra0 = d.ra0.to_numpy(); de0 = d.dec0.to_numpy(); ra1 = d.ra1.to_numpy(); de1 = d.dec1.to_numpy()
+    mfs = d.mf_snr.to_numpy() if "mf_snr" in d.columns else np.ones(len(d))
+    dm = (dec[I] + dec[J]) / 2.0; c0 = np.cos(np.radians(dm)); ram = (ra[I] + ra[J]) / 2.0
+    Px = np.stack([(ra0[I] - ram) * c0, (ra1[I] - ram) * c0,
+                   (ra0[J] - ram) * c0, (ra1[J] - ram) * c0], 1) * 3600.0
+    Py = np.stack([de0[I] - dm, de1[I] - dm, de0[J] - dm, de1[J] - dm], 1) * 3600.0
+    Px -= Px.mean(1, keepdims=True); Py -= Py.mean(1, keepdims=True)
+    sxx = (Px * Px).mean(1); syy = (Py * Py).mean(1); sxy = (Px * Py).mean(1)
+    perp = np.sqrt(np.maximum(0.5 * (sxx + syy) - np.sqrt(np.maximum(0.25 * (sxx - syy) ** 2 + sxy ** 2,
+                                                                     0.0)), 0.0))
+    smn = np.minimum(mfs[I], mfs[J])
+    dsnr = (np.maximum(mfs[I], mfs[J]) - smn) / np.maximum(smn, 1e-3)
+    partial = ((perp / CHI2_SIG_2V["perp"]) ** 2 + (dsnr / CHI2_SIG_2V["dsnr"]) ** 2 +
+               (dpa_tm / CHI2_SIG_2V["dpa_tm"]) ** 2 + (dspeed / CHI2_SIG_2V["dspeed"]) ** 2)
+    keep = partial <= float(chi2_max)
+    kept = [[int(a_), int(b_)] for a_, b_ in P2[keep]]
+    longer = [p for p in pairs if len(p) != 2]
+    return kept + longer
+
+
 def extend_to_triplets(dets, pairs, *, pos_tol_arcsec=5.0):
     """Promote 2-visit chord pairs to 3+visit tracks WHEN a consistent 3rd same-night detection exists.
 
@@ -592,7 +644,12 @@ def main():
             cpairs = chord_seed_pairs(dn, max_arc_min=(a.max_arc_2v_min or 1e9),
                                       rate_min=a.rate_min, rate_max=a.rate_max,
                                       max_visit_pairs=a.max_visit_pairs)
-            cand += cpairs
+            # EXACT vectorized fast path (prefilter_2v_pairs): drop pairs whose partial chi2 already
+            # exceeds the gate -- behavior-identical (the orbit-residual term is >=0), removes the
+            # per-pair orbit fit for ~99% of chance pairs. Applied to the 2v CANDIDATE list only; the
+            # raw cpairs still feed promotion/3v-first seeding below (3v candidates must never require
+            # a passing 2v parent).
+            cand += prefilter_2v_pairs(dn, cpairs, a.chi2_2v_max, exptime_s=a.exptime)
             # PROMOTE 2v->3v: attach a consistent 3rd same-night detection on the precise chord track.
             # A real 3rd on the 2-point line -> pure 3v tier (free purity for the multi-visit subset);
             # no-op for a 2-visit WFD night. The pair stays in `cand` as a fallback if the triplet fails.
