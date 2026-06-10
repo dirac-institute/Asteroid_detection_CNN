@@ -35,6 +35,8 @@ def main():
                          "NOTE run_heliolinx overwrites that name with its heliolinx-format file -- pass the "
                          "original culled catalog here for trail-as-tracklet runs)")
     ap.add_argument("--tol-arcsec", type=float, default=5.0)
+    ap.add_argument("--out-json", default=None,
+                    help="write {recovered:[ObjID...], n_true, n_false, nlink, truth3:[...]} for chain union")
     a = ap.parse_args()
 
     dets = pd.read_csv(a.dets_file or f"{a.dir}/dets_{a.tag}.csv")   # ordered as fed; row i == heliolinx index i
@@ -113,6 +115,12 @@ def main():
     print(f"linkages: {nlink}  TRUE(real obj): {n_true}  FALSE(chance): {n_false}")
     print(f"distinct knowns recovered: {len(true_objs)}")
     print(f"COMPLETENESS (vs ADCNN-det>=3n) = {comp:.3f}   PURITY = {purity:.3f}   false-tracks = {n_false}")
+    if a.out_json:
+        import json
+        json.dump(dict(tag=a.tag, recovered=sorted(str(o) for o in true_objs), n_true=int(n_true),
+                       n_false=int(n_false), nlink=int(nlink), truth3=sorted(str(o) for o in truth3)),
+                  open(a.out_json, "w"))
+        print(f"-> {a.out_json}")
 
 
 if __name__ == "__main__":
