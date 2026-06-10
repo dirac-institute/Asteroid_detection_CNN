@@ -62,6 +62,7 @@ def eval_field(d_dir, k, smin, max_seed_pairs=None):
         fp_subsample_f = 1.0 / stride
     else:
         fp_subsample_f = 1.0
+    lens = ds.len_db.to_numpy() if "len_db" in ds else np.full(len(ds), np.nan)
     rows = []
     for m in seeds:
         ok, _info, nep = physical_check(ds, m, **PCHECK)
@@ -74,8 +75,11 @@ def eval_field(d_dir, k, smin, max_seed_pairs=None):
         n_fp = int(pd.isna(oid[i])) + int(pd.isna(oid[j]))
         label = "tp" if same else "fp"
         obj = oid[i] if same else None
+        # row: (min_score, min_mfsnr, rate, label, n_fp, obj, max_score, min_len) -- max_score enables the
+        # ANCHORED reservoir mode (one strong + one weak member); min_len the low-low fast-trail mode.
         rows.append((float(min(sc[i], sc[j])), float(min(mfs[i], mfs[j])), float(rate), label, n_fp,
-                     obj if obj is not None else ""))
+                     obj if obj is not None else "", float(max(sc[i], sc[j])),
+                     float(min(lens[i], lens[j]))))
     return rows, recoverable, n_seed, n_capped, fp_subsample_f
 
 
@@ -148,7 +152,7 @@ def main():
     for mf_thresh in [0.0, 5.0, 7.0, 10.0]:
         for S in scores:
             recset = set(); fpfp = 0.0; injfp = 0.0
-            for (k, smin_s, mfmin, rate, label, n_fp, obj) in allrows:
+            for (k, smin_s, mfmin, rate, label, n_fp, obj, *_extra) in allrows:
                 if smin_s < S:
                     continue
                 if rate < rate_lo or rate > rate_hi:

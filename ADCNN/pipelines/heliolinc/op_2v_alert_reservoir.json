@@ -1,0 +1,36 @@
+{
+  "_comment": "EXPERIMENTAL low-threshold 2v ALERT RESERVOIR -- NOT a default, NOT discovery. Same architecture that reopened multi-night S>=0.60 (HYBRID_LADDER_RESULT.md): low threshold is allowed ONLY after geometry becomes the filter. Raw global score_min=0.5 2v pairing is explicitly forbidden (the base-rate wall, proven in THRESHOLD_DECISION.md / PHYSICAL_LEVERS_2V.md); the reservoir admits weak detections only through tiered ROUTING RULES (modes below) and emits ranked, capped alerts. PRIOR ART (honest): catalog-level anchored pairing was tested at the DISCOVERY-purity objective and failed it (asym_sweep: S_low 0.95->0.70 lifted completeness 7.1%->11.5% while purity fell 6.9%->0.55%); the OPEN question this config targets is ALERT yield -- does the truth rank inside the top-N follow-up budget?",
+  "product": "same_night_2v_alert_reservoir_EXPERIMENTAL",
+  "claim": "ranked follow-up alert only; never discovery; never raw heliolinx input",
+  "status": "experiment (2026-06-10); promote to a shipped config only after the injection-on-real NEO test scores it as Product B",
+  "score_min": 0.60,
+  "score_min_note": "current catalog floors: run_lambda/run_band = 0.59-0.60; the S=0.50 rung needs a GPU re-detection pass and is folded into the injection-on-real NEO test",
+  "modes": {
+    "A_anchored": {
+      "rule": "one member S >= anchor_2v_min (0.80), partner down to score_min (0.60->0.50)",
+      "rationale": "confident single detection + marginal counterpart; best expected gain-to-FP ratio"
+    },
+    "B_lowlow_fasttrail": {
+      "rule": "both members may be low-score ONLY if both len_db >= 6 px AND trail PA/rate agree with the chord (pair_chi2 gate) AND art_frac clean",
+      "rationale": "the faint-fast regime is where the trail carries real velocity; random low-score blob pairs die on trail-vs-chord agreement"
+    },
+    "C_forced_counterpart": {
+      "rule": "catalog search restricted to the trail-PA/rate-predicted window of a strong first detection",
+      "note": "at catalog level this is ~equivalent to mode A (the pair_chi2 pre-gate already confines the partner to the along-trail wedge; advisor-confirmed during the lever audit); pixel-level forced photometry was tested and is DEAD (71-79% chance trail matches)"
+    }
+  },
+  "chi2_2v_max": 5.0,
+  "mfsnr_min_2v": 0,
+  "rate_lo_2v": 1.0,
+  "rate_hi_2v": 8.0,
+  "pa_tol": 20.0,
+  "pa_tol_2v": 10.0,
+  "max_rms": 1.0,
+  "pos_tol_3v": 0.05,
+  "max_arc_2v_min": 40.0,
+  "promote_3v": true,
+  "promote_tol_arcsec": 5.0,
+  "seed_3v_arc_min": 180.0,
+  "alerts_top_n": 50,
+  "notes": "Routing rules (modes) are evaluated post-hoc from the per-pair table (measure_nomfsnr smin=0.60 run with max_score/len fields); the linker itself is NOT yet wired for anchored gating -- wire anchor_2v_min only if the experiment shows ranked-alert value. TODO: regime-calibrated pair_chi2 sigmas (a 7px/SNR3 trail must not carry 40px/SNR10 weights) -- flagged in the linker critique, applies doubly here."
+}
