@@ -30,3 +30,18 @@ explosion, FP load bounded-bad by prior art. The reservoir architecture pays off
 EPOCHS supplies the purity (multi-night hybrid: S>=0.60 reopened, HYBRID_LADDER_RESULT.md); same-night 2v
 lacks the third epoch and the detection funnel caps the gain. The 0.50 rung + NEO-rich substrate remains
 folded into the blinded injection-on-real test as Product B, with LOW expectations stated up front.
+
+# FORCED-COUNTERPART SEARCH: CLOSED / FALSIFIED — DO NOT REBUILD (2026-06-10)
+Tested twice at pixel level (forced_phot_spike + forced_phot_v2, the v2 WITH the full gate set: thin
+search along the predicted motion line, PA-match +-3deg, rate prior, brightness prior; anchors at
+S>=0.95 — STRONGER than any proposed anchor tier):
+- 71-79% of FP-anchor prediction windows produce a chance >=5sigma forced trail match, FLAT to 6sigma
+  (the matches are REAL elongated artifacts, not noise) -> purity collapses to 0.07-0.08%.
+- Root causes (quantified, gate-independent): (1) anchor trail-PA error (~8deg) x ~1300px inter-visit arm
+  = +-180px prediction window vs ~100px FP streak spacing -> every window contains real streaks;
+  (2) at faint flux a trail template cannot distinguish a real faint trail from a faint elongated
+  subtraction residual (the per-detection ceiling); (3) trail-vs-chord / pair_chi2 / admissible-region
+  acceptance gates AUTO-PASS for a counterpart found ON the predicted line — zero rejection power;
+  (4) the forced-fit likelihood does not separate (flat 5->6sigma), so RANKING cannot rescue it.
+The visit-B pixels are ARTIFACT-limited, not noise-limited. Any future "force-search the second visit"
+proposal must first show a mechanism that beats (1)-(4); none of the gate-style variations does.

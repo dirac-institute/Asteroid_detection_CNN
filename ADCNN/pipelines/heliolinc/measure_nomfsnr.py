@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 
 import ADCNN.pipelines.heliolinc.sweep_S as sw
-from ADCNN.pipelines.heliolinc.trail_state_link import chord_seed_pairs, physical_check
+from ADCNN.pipelines.heliolinc.trail_state_link import chord_seed_pairs, physical_check, pair_chi2
 
 # Geometry op = shipped, MINUS the mfsnr cut and rate cut (swept/applied post-hoc).
 PCHECK = dict(pa_tol_deg=20.0, lin_rms_arcsec=1.0, min_epochs=2, pa_tol_2v_deg=10.0, orbit_check_2v=True,
@@ -28,7 +28,9 @@ PCHECK = dict(pa_tol_deg=20.0, lin_rms_arcsec=1.0, min_epochs=2, pa_tol_2v_deg=1
 
 
 def _cache_path(d_dir, k, smin):
-    return f"{d_dir}/_nomfsnr_cache/{k}_smin{smin}.json"
+    # v2: rows carry chi2 + geometry components (priorityScore inputs) -- new cache namespace so the
+    # old 6/8-field caches are not silently reused with the wrong row format.
+    return f"{d_dir}/_nomfsnr_cache/{k}_smin{smin}_v2.json"
 
 
 def eval_field(d_dir, k, smin, max_seed_pairs=None):
@@ -75,11 +77,15 @@ def eval_field(d_dir, k, smin, max_seed_pairs=None):
         n_fp = int(pd.isna(oid[i])) + int(pd.isna(oid[j]))
         label = "tp" if same else "fp"
         obj = oid[i] if same else None
-        # row: (min_score, min_mfsnr, rate, label, n_fp, obj, max_score, min_len) -- max_score enables the
-        # ANCHORED reservoir mode (one strong + one weak member); min_len the low-low fast-trail mode.
+        # v2 row: (min_score, min_mfsnr, rate, label, n_fp, obj, max_score, min_len, chi2, dpa_tm, dspeed,
+        # perp) -- the full priorityScore/ranking inputs. pair_chi2 re-fit only on PASSING pairs (~45/field,
+        # negligible cost); components: dpa_tm = trail-vs-motion PA residual (deg), dspeed = trail-rate vs
+        # chord-rate residual (frac), perp = collinearity rms (arcsec).
+        c2, ci = pair_chi2(ds.iloc[[i, j]], 30.0)
         rows.append((float(min(sc[i], sc[j])), float(min(mfs[i], mfs[j])), float(rate), label, n_fp,
                      obj if obj is not None else "", float(max(sc[i], sc[j])),
-                     float(min(lens[i], lens[j]))))
+                     float(min(lens[i], lens[j])), float(c2), float(ci.get("dpa_tm", np.nan)),
+                     float(ci.get("dspeed", np.nan)), float(ci.get("perp", np.nan))))
     return rows, recoverable, n_seed, n_capped, fp_subsample_f
 
 
