@@ -1,0 +1,24 @@
+{
+  "_comment": "PRODUCT CONFIG: MULTI-NIGHT DISCOVERY tier -- ADCNN detections -> heliolinx chain (run_heliolinx.py: make_tracklets -> heliolinc -> link_purify), minobsnights>=3 across nights. Measured on REAL DP2 (run_band, 9-night 3-deg box, main-belt grid, scored vs real known catalog by score_mn_linkage.py): S>=0.80 -> completeness 48.7%, purity 86.5%, 629 real asteroids, chain ~3 min; S>=0.70 -> 47.5%/85.4% at 2x compute (FLAT); S>=0.60 -> make_tracklets EXPLODES (O(N^2) same-night pairing on the 5x FP-dense list, >9.5 min CPU, no output). The (FP)^N collapse across nights delivers discovery-grade purity that same-night 2v provably cannot (~8% wall).",
+  "product": "multi_night_discovery",
+  "claim": "discovery-grade linked track (orbit-quality gate before any MPC-style report)",
+  "model_version": "seg_v2 depth-4 (iter08) segmentation + focal-cutout CNN postproc",
+  "data_release": "Rubin DP2 v30_0_0 DM-53881 stage4",
+  "calibrated_on": "run_band real-DP2 multi-night threshold sweep 2026-06-09 (results/multinight_linking_threshold_REALDATA.txt)",
+  "score_min": 0.80,
+  "heliolinx": {
+    "entry": "run_heliolinx.py",
+    "minobsnights": 3,
+    "mintimespan_days": 0.5,
+    "clustrad_km": 100000.0,
+    "maxgeodist_au": 4.0,
+    "hypothesis_NEO": "external/heliolinx-aux/tests/hypotheses/NEO/hihyp00aa_neo.txt",
+    "hypothesis_MB": "external/heliolinx-aux/tests/hypotheses/main_belt/hihyp00a_mb.txt",
+    "maxvel_degday": 15.0,
+    "maxtime_hr": 1.5,
+    "max_astrom_rms_arcsec": 1.0,
+    "minpointnum": 6
+  },
+  "notes": "score_min=0.80 is the CURRENT-IMPLEMENTATION optimum, not a physical one: completeness is flat 0.70-0.80 (the FP grow as fast as marginal real detections) and the wall at 0.60 is make_tracklets tractability. REOPEN S in [0.60,0.75] after EITHER (a) the trail-as-tracklet adapter (each measured trail emitted as two pseudo-observations at MJD +/- exptime/2 -> bypasses the O(N^2) make_tracklets pairing; ALSO lets 1-detection-per-night objects link) PLUS (b) a scalable O(N log N) pre-link FP cull (score floor + mask/reliability + Veres-fit sanity + length/rate bounds). (a) without (b) hands heliolinc every FP as a noisy-velocity tracklet -- both are required. CAVEAT: completeness/purity numbers are MAIN-BELT (run_band has 8 NEOs); the threshold/explosion conclusions are FP-density-driven and object-independent; NEO-specific numbers need the blinded injection-on-real test.",
+  "links": "results/multinight_linking_threshold_REALDATA.txt, score_mn_linkage.py, run_heliolinx.py"
+}

@@ -534,6 +534,8 @@ def main():
     ap.add_argument("--alerts-out", default=None,
                     help="JSONL same-night alert stream (one actionable candidate per line: endpoints, motion vector, forward-predicted ephemeris, confidence). Default: alerts.jsonl beside --out. --no-alerts to disable")
     ap.add_argument("--no-alerts", action="store_true", help="do not emit the JSONL alert stream")
+    ap.add_argument("--alerts-top-n", type=int, default=None,
+                    help="cap the alert stream to the top-N by priorityScore (per-night follow-up budget); default unlimited")
     a = ap.parse_args()
     # Overlay the calibrated op-point JSON: it sets each param UNLESS that flag was passed explicitly on the CLI.
     if a.op_point and os.path.exists(a.op_point):
@@ -542,7 +544,7 @@ def main():
                  "rate_lo_2v": "--rate-lo-2v", "rate_hi_2v": "--rate-hi-2v", "pa_tol": "--pa-tol",
                  "pa_tol_2v": "--pa-tol-2v", "max_rms": "--max-rms", "pos_tol_3v": "--pos-tol-3v",
                  "max_arc_2v_min": "--max-arc-2v-min", "promote_3v": "--promote-3v",
-                 "promote_tol_arcsec": "--promote-tol-arcsec"}
+                 "promote_tol_arcsec": "--promote-tol-arcsec", "alerts_top_n": "--alerts-top-n"}
         _applied = [f"{k}={_op[k]}" for k, fl in _flag.items()
                     if k in _op and fl not in sys.argv and (setattr(a, k, _op[k]) or True)]
         if _applied:
@@ -646,9 +648,9 @@ def main():
     T.to_csv(a.out, index=False)
     if emit_alerts:
         apath = a.alerts_out or str(Path(a.out).with_name("alerts.jsonl"))
-        # priority 1 (3+visit NEW) -> 2 (2visit NEW) -> 3 (recovery), then ascending orbit-fit chi2
-        alerts.sort(key=lambda al: (al["priority"], al["orbit"]["chi2"] if al["orbit"]["chi2"] is not None else 1e9))
-        write_alerts(alerts, apath)
+        # ranked by continuous priorityScore inside write_alerts (3+visit NEW > 2visit NEW > recovery,
+        # then geometric/detector/photometric quality); --alerts-top-n caps to the follow-up budget.
+        write_alerts(alerts, apath, top_n=a.alerts_top_n)
         n2new = sum(1 for al in alerts if al["tier"] == "2visit" and al["status"] == "NEW")
         print(f"[trail-link] alert stream: {len(alerts)} alerts ({n2new} same-night 2-visit NEW) -> {apath}", flush=True)
     if len(T):

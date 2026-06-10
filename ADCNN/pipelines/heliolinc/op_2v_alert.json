@@ -1,0 +1,21 @@
+{
+  "_comment": "PRODUCT CONFIG: same-night 2-VISIT ALERT tier. Optimized for FOLLOW-UP YIELD, not standalone purity (faint-fast 2v purity caps ~8% at ANY threshold -- base-rate wall, proven exhaustively; see THRESHOLD_DECISION.md / PHYSICAL_LEVERS_2V.md). Output = ranked follow-up packets (alerts.jsonl), NEVER a discovery claim. Pass to trail_state_link via --op-point. Differs from the discovery op: mfsnr relaxed 10->5 (measured at S=0.80: faint-fast completeness 1.7%->6.1% for false-link rate 0.12->3.4/field-night -- rankable, cappable volume), claim_tier=alert.",
+  "product": "same_night_2v_alert",
+  "claim": "follow-up candidate / alert -- NOT discovery",
+  "model_version": "seg_v2 depth-4 (iter08) segmentation + focal-cutout CNN postproc",
+  "data_release": "Rubin DP2 v30_0_0 DM-53881 stage4",
+  "calibrated_on": "82 off-ecliptic injection fields, 2026-06, realistic ~34-min WFD same-night cadence; mfsnr sweep measure_nomfsnr.py (results/mfsnr_completeness_vs_lambda_S080.txt)",
+  "score_min": 0.80,
+  "chi2_2v_max": 5.0,
+  "mfsnr_min_2v": 5.0,
+  "rate_lo_2v": 1.0,
+  "rate_hi_2v": 8.0,
+  "pa_tol": 20.0,
+  "pa_tol_2v": 10.0,
+  "max_rms": 1.0,
+  "pos_tol_3v": 0.05,
+  "max_arc_2v_min": 40.0,
+  "promote_3v": true,
+  "promote_tol_arcsec": 5.0,
+  "notes": "Measured operating points at S=0.80 (faint-fast bin SNR 2-10, rate>1 deg/day): mfsnr>=5 -> C=6.1%, lambda=3.4 false/field-night; mfsnr>=7 -> C=3.9%, lambda=1.0; mfsnr>=10 -> C=1.7%, lambda=0.12. Alert tier accepts the higher false rate because alerts are RANKED (chi2 / priority) and CAPPED per night, and a 3rd observation confirms or kills each candidate ((FP)^N: 3v promotion measured 0 false). mfsnr=7 is the conservative fallback if 3.4/field-night exceeds follow-up capacity."
+}

@@ -1,0 +1,22 @@
+{
+  "_comment": "PRODUCT CONFIG: same-night >=3-DETECTION CONFIRMATION tier. Purity comes from GEOMETRY across >=3 epochs (the (FP)^N collapse: lambda_3v=0/night at S>=0.8; 0.0575 at 0.6 -- link_fpp_calib_3visit.json; 2v->3v promotion measured 33% of true 2v promoted, 0 false), so the score floor is RELAXED below the 2v tiers and the photometric mfsnr cut is DROPPED. Cadence-limited at WFD (>=3 same-night visits rare by design) but big at deep-drilling/dense cadence. Output = high-confidence discovery CANDIDATE (still same-night short-arc: orbit is not determined; multi-night or follow-up seals it).",
+  "product": "same_night_3v_confirm",
+  "claim": "high-confidence confirmation candidate (3-sigma class)",
+  "model_version": "seg_v2 depth-4 (iter08) segmentation + focal-cutout CNN postproc",
+  "data_release": "Rubin DP2 v30_0_0 DM-53881 stage4",
+  "calibrated_on": "null-MC FPP calibration link_fpp_calib_3visit.json (lambda_3v vs S); promotion validation on 82 injection fields",
+  "score_min": 0.70,
+  "chi2_2v_max": 5.0,
+  "mfsnr_min_2v": 0,
+  "rate_lo_2v": 1.0,
+  "rate_hi_2v": 8.0,
+  "pa_tol": 20.0,
+  "pa_tol_2v": 10.0,
+  "max_rms": 1.0,
+  "pos_tol_3v": 0.05,
+  "max_arc_2v_min": 40.0,
+  "promote_3v": true,
+  "promote_tol_arcsec": 5.0,
+  "notes": "score_min=0.70 (not lower) because lambda_3v at 0.6 is 0.0575/night (nonzero) and 0.0025 at 0.7 -- 0.70 keeps the tier FAR-clean while gaining recall over 0.80. mfsnr_min_2v=0 (disabled): the 2v photometric cut costs ~2.5x faint-fast completeness and 3v geometry replaces its purity role. KNOWN GAP (planned): 3v candidates currently arise only via 2v chord pairs + promotion; a 3v-FIRST seeder (RANSAC/Hough constant-angular-velocity triplets at this lower floor) would also catch objects whose 2v pair fails the 2v gates -- not yet implemented.",
+  "links": "link_fpp_calib_3visit.json, THRESHOLD_DECISION.md"
+}
