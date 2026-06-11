@@ -102,27 +102,35 @@ identical pixels in every config):
 | **5σ ∪ ADCNN@0.50** | **28.8%** | 56.2% | **88.2%** | **60.1%** |
 | 5σ ∪ ADCNN@0.80 | 23.5% | 49.7% | 84.9% | 55.4% |
 
-Detection-level injection-set purity (T2) + load on the same panels (FP carry no injected SNR, so
-purity is per-config global; union loads are upper bounds — catalogs not positionally deduped,
-validation showed ADCNN FP are mostly stack-missed so the bound is tight; **exact deduplicated values
-replace this table when next-sprint item #249 completes — bounds are interpretation-only, not for
-the paper**):
+**EXACT deduplicated detection-level table (T2 purity)** — full 5σ/4σ peak catalogs
+(`stack_detect --full-catalog`), union = stack peaks + ADCNN detections positionally deduplicated
+(10 px) per panel, each physical detection counted once (`run_blind/exact_union.py`,
+`exact_union_table.csv`). FP carry no injected SNR, so purity is per-config global. (The table-1
+completeness uses either-detector-hit semantics; the C columns here are against the deduplicated
+catalog and differ by ≤0.5 pt where dedup replaces a near detection with a farther peak.)
 
-| config | detections | TP sightings | detection purity (T2) | dets/panel |
-|---|---|---|---|---|
-| stack 5σ | 282k | 5,032 | 1.78% | 64.7 |
-| stack 4σ | 954k | 5,781 | 0.61% | 218.9 |
-| ADCNN S≥0.50 | 551k | 4,364 | 0.79% | 126.4 |
-| **ADCNN S≥0.80** | **42k** | 3,589 | **8.53%** | **9.7** |
-| 5σ ∪ ADCNN@0.80 | ≤324k | 5,427 | ≥1.67% | ≤74.4 |
+| config | C 2–5 | C 5–10 | C 10–31 | C all | TP sightings | TP dets | FP dets | purity (T2) | dets/panel | ΔTP vs 5σ | ΔFP vs 5σ |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| stack 5σ | 20.0% | 46.4% | 80.0% | 51.3% | 5,032 | 4,916 | 277,192 | 1.74% | 64.7 | — | — |
+| stack 4σ | 28.8% | 57.1% | 84.8% | 59.0% | 5,781 | 5,683 | 948,802 | 0.60% | 218.9 | +749 | +671,610 |
+| ADCNN S≥0.50 | 22.7% | 41.0% | 64.5% | 44.5% | 4,364 | 4,324 | 546,656 | 0.78% | 126.4 | −668 | +269,464 |
+| ADCNN S≥0.80 | 15.5% | 31.5% | 57.0% | 36.6% | 3,589 | 3,588 | 38,504 | **8.52%** | **9.7** | −1,443 | −238,688 |
+| 5σ ∪ ADCNN@0.50 | 28.2% | 55.6% | 86.7% | 59.2% | 5,800 | 5,768 | 742,265 | 0.77% | 171.6 | +768 | +465,073 |
+| **5σ ∪ ADCNN@0.80** | 23.0% | 49.2% | 83.7% | 54.6% | 5,352 | 5,318 | 289,559 | 1.80% | 67.6 | **+320** | **+12,367** |
+| 4σ ∪ ADCNN@0.80 | 30.0% | 58.9% | 87.8% | 61.1% | 5,988 | 5,978 | 953,275 | 0.62% | 220.0 | +956 | +676,083 |
 
-Three readings: (1) **the union is complementary, not redundant** — 5σ∪ADCNN@0.50 reaches stack-4σ
-faint completeness (28.8%) and beats both detectors alone at high SNR (88.2%), without 4σ's purity
-collapse (0.61% at 219/panel); (2) **at the alert floor ADCNN is a different kind of object** — 8.5%
-detection purity (5× the 5σ stack, 14× 4σ) at 9.7 dets/panel with score+trail state, the only input
-from which a ranked linked alert stream can be built; (3) **the stack's mid/high-SNR per-sighting edge
-on this substrate is real** — the same domain shift as §4's diagnosis; deployment answer = run both:
-the stack carries the bright end, ADCNN adds the faint tail and the purity mechanism.
+Four readings: (1) **the marginal-cost argument, now exact** — adding ADCNN@0.80 to the standard 5σ
+stack buys +320 TP sightings for +12,367 FP = **38.6 FP per added TP**, while relaxing the stack to 4σ
+buys +749 TP for +671,610 FP = **897 FP per added TP**: per recovered sighting, ADCNN@0.80 is ~23×
+more FP-efficient than lowering the stack threshold — and union purity *rises* (1.74→1.80%) because
+the additions are 8.5% pure; (2) **the union is complementary, not redundant** — 5σ∪ADCNN reaches
+stack-4σ-class faint completeness and beats both detectors alone at high SNR, without 4σ's purity
+collapse; (3) **at the alert floor ADCNN is a different kind of object** — 8.5% detection purity (5×
+the 5σ stack, 14× 4σ) at 9.7 dets/panel with score+trail state, the only input from which a ranked
+linked alert stream can be built; (4) **the stack's mid/high-SNR per-sighting edge on this substrate
+is real** — the same domain shift as §4's diagnosis; deployment answer = run both: the stack carries
+the bright end, ADCNN adds the faint tail and the purity mechanism (maximum-completeness option
+4σ∪ADCNN@0.80 exists at 4σ-like load for surveys that can afford it).
 
 ## 4. Failure criterion and diagnosis (contract §5 — in order, NO tuning)
 
