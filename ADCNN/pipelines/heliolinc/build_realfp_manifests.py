@@ -33,6 +33,13 @@ def main():
                     help="use cadence_diffim.csv (tract,night,n_visits) as the source instead of the "
                          "pointing cadence.csv -- reaches the full off-ecliptic tract-night pool (~412)")
     ap.add_argument("--start-index", type=int, default=0, help="first manifest_<k> index (append to an existing run)")
+    ap.add_argument("--exclude-fields-from", default=None,
+                    help="csv with tract,night columns (a validation run's fields.csv): those TRACTS (on any "
+                         "night) are excluded -- the blind-test disjointness rule (EVALUATION_CONTRACT.md)")
+    ap.add_argument("--max-ecl-lat", type=float, default=None,
+                    help="ECLIPTIC mode: select |ecl_lat| <= this instead of > min-ecl-lat")
+    ap.add_argument("--night-min", type=int, default=None, help="earliest night (diffim retention window)")
+    ap.add_argument("--night-max", type=int, default=None, help="latest night (diffim retention window)")
     ap.add_argument("--out-dir", default=str(REPO / "ADCNN/pipelines/heliolinc/run_realfp"))
     a = ap.parse_args()
     out = Path(a.out_dir); out.mkdir(parents=True, exist_ok=True)
@@ -63,7 +70,18 @@ def main():
         c = pd.read_csv(a.cadence); c["has_tract"] = False
     sc = SkyCoord(ra=c.ra.values * u.deg, dec=c.dec.values * u.deg)
     c["ecl_lat"] = sc.barycentrictrueecliptic.lat.deg
-    off = c[(c.ecl_lat.abs() > a.min_ecl_lat) & (c.n_visits >= a.min_visits)].sort_values("n_visits", ascending=False)
+    lat_sel = (c.ecl_lat.abs() <= a.max_ecl_lat) if a.max_ecl_lat is not None else (c.ecl_lat.abs() > a.min_ecl_lat)
+    off = c[lat_sel & (c.n_visits >= a.min_visits)].sort_values("n_visits", ascending=False)
+    if a.night_min is not None:
+        off = off[off.night >= a.night_min]
+    if a.night_max is not None:
+        off = off[off.night <= a.night_max]
+    if a.exclude_fields_from:
+        ex = pd.read_csv(a.exclude_fields_from)
+        ex_tracts = set(ex.tract.astype(int))
+        n0 = len(off); off = off[~off.tract.astype(int).isin(ex_tracts)]
+        print(f"[realfp] BLIND disjointness: excluded {len(ex_tracts)} validation tracts "
+              f"({n0}->{len(off)} candidate field-nights)", flush=True)
 
     # when extending, drop (tract,night) already built so the new FP fields stay independent
     fcsv0 = out / "fields.csv"
@@ -110,8 +128,10 @@ def main():
     if a.start_index > 0 and fcsv.exists():        # appending to an existing run
         summ = pd.concat([pd.read_csv(fcsv), summ], ignore_index=True).drop_duplicates("field")
     summ.to_csv(fcsv, index=False)
+    tot_pairs = summ.pairs.sum() if len(summ) else 0
+    tot_pan = summ.n_panels.sum() if len(summ) else 0
     print(f"[realfp] wrote {len(rows)} new fields (total {len(summ)}) | new pairs {sum(r['pairs'] for r in rows)} | "
-          f"grand total {summ.pairs.sum()} pairs, {summ.n_panels.sum()} panels -> {fcsv}", flush=True)
+          f"grand total {tot_pairs} pairs, {tot_pan} panels -> {fcsv}", flush=True)
 
 
 if __name__ == "__main__":

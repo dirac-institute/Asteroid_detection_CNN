@@ -72,3 +72,16 @@ at the frozen op. If that happens, thresholds are NOT retuned first; diagnose in
   high-capacity mode but is not adopted for the default stream."
 - The operating point is described as the "adopted default alert operating point", not an "optimal
   threshold"; figures carry field-bootstrap 16–84% bands and the "full pair enumeration" provenance.
+
+## ADDENDUM — realized blind field list (2026-06-10, recorded BEFORE any detection run)
+Rule as executed: strict TRACT disjointness from the 82 validation fields (49 tracts excluded, zero
+overlap verified); train/train2 visits excluded from every manifest; diffim retention window
+20250424–20250717; min 10 visits/field-night (relaxed from the validation-era 20 because the validation
+campaign consumed nearly the entire dense off-ecliptic pool — 275→4 candidates at >=20; relaxation chosen
+BEFORE any detection or scoring). Result (`run_blind/fields.csv`): 8 field-nights, 2 off-ecliptic +
+6 ecliptic (tracts 2832, 4849, 7004, 7005, 6770, 6771; nights 20250709–20250716; 337 visits, 2,906
+panels, ~330 same-night pairs). The blind set is ECLIPTIC-DOMINATED — a deliberate, documented domain
+shift relative to the off-ecliptic validation set (crowding + real-asteroid density); per-product metrics
+are reported for the full set and per latitude class. Injection: sim_orbits per field, n=300 objects,
+rate 1–8°/day, detection-SNR target 2–30, deterministic seed = 3000+field. Detection: discover_stream
+--cnn-thr 0.50 (the S>=0.50 retention floor for the appendix reservoir control).
