@@ -11,7 +11,7 @@ to a real orbit through the real sky (the field is only a realistic-FP substrate
 the images are real, the orbit geometry is synthetic-but-self-consistent.
 """
 from __future__ import annotations
-import argparse, warnings
+import argparse, json, warnings
 warnings.filterwarnings("ignore")
 from pathlib import Path
 import numpy as np, pandas as pd
@@ -23,10 +23,30 @@ PIXSCALE = 0.2  # arcsec/px
 
 
 
+def _wcs_from_json(s):
+    """astropy WCS from a manifest `wcs_json` column (annotate_manifest_wcs.py: Butler SkyWcs ->
+    getFitsMetadata FITS-approximation cards as a JSON dict). None if missing/invalid/non-celestial."""
+    if not isinstance(s, str) or not s.strip():
+        return None
+    from astropy.wcs import WCS as _W
+    try:
+        h = fits.Header()
+        for k, v in json.loads(s).items():
+            if k in ("COMMENT", "HISTORY") or v is None:
+                continue
+            h[k] = v
+        w = _W(h)
+        return w if w.has_celestial else None
+    except Exception:
+        return None
+
+
 def _wcs_any(hdr):
-    """WCS from a diffim header: primary FITS-WCS (DP2 stage4) or the alternate 'A' WCS that newer
-    LSST DRP outputs write (exact SkyWcs lives in archive HDUs; 'A' is the FITS approximation --
-    self-consistent for inject+detect+link, which all use the same transform)."""
+    """WCS from a diffim header: primary FITS-WCS (DP2 stage4) or the alternate 'A' key if it is
+    celestial. RAISES if neither is a sky WCS -- newer DRP outputs (e.g. DM-53195) keep the exact
+    SkyWcs only in archive HDUs and write 'A' as a CTYPE='PIXEL' bookkeeping transform; silently
+    using that produced pixel-valued 'sky' coordinates. For those, annotate the manifest with
+    wcs_json (annotate_manifest_wcs.py) -- self-consistent across inject+detect+link."""
     from astropy.wcs import WCS as _W
     try:
         w = _W(hdr)
@@ -34,25 +54,40 @@ def _wcs_any(hdr):
             return w
     except Exception:
         pass
-    return _W(hdr, key="A")
+    w = _W(hdr, key="A")
+    if not w.has_celestial:
+        raise ValueError("no celestial WCS in FITS header (annotate manifest with wcs_json)")
+    return w
 
 def read_panels(manifest):
     """Return per-panel (visit, detector, mjd, wcs, nx, ny) + per-visit mjd."""
     m = pd.read_csv(manifest)
     panels = []
+    nbad = 0
     for _, r in m.iterrows():
         try:
+            wj = _wcs_from_json(getattr(r, "wcs_json", None))
             with fits.open(r.fits_path, memmap=True) as h:
                 hdr = h[1].header; h0 = h[0].header
-                w = _wcs_any(hdr); nx, ny = int(hdr["NAXIS1"]), int(hdr["NAXIS2"])
+                nx, ny = int(hdr["NAXIS1"]), int(hdr["NAXIS2"])
+                w = wj or _wcs_any(hdr)
                 mjd = h0.get("MJD-AVG") or h0.get("MJD-OBS")
                 if mjd is None:
                     da = h0.get("DATE-AVG"); mjd = Time(da, format="isot").mjd if da else np.nan
             c = w.all_pix2world([[nx/2, ny/2]], 0)[0]
+            # coordinate sanity: a sky position, not pixels (the failure mode wcs_json exists for)
+            if not (np.isfinite(c).all() and -90.0 <= float(c[1]) <= 90.0):
+                nbad += 1; continue
             panels.append(dict(visit=int(r.visit), detector=int(r.detector), mjd=float(mjd),
                                wcs=w, nx=nx, ny=ny, cra=float(c[0]), cdec=float(c[1])))
         except Exception:
+            nbad += 1
             continue
+    if nbad:
+        print(f"[orbits] WARNING: {nbad}/{len(m)} panels skipped (unreadable or no celestial WCS)", flush=True)
+    if not panels:
+        raise SystemExit("[orbits] FATAL: 0 usable panels -- no celestial WCS? (annotate_manifest_wcs.py)")
+    print(f"[orbits] {len(panels)}/{len(m)} manifest panels usable", flush=True)
     return panels
 
 
@@ -169,6 +204,8 @@ def main():
                                k_observable=int(len(obj_visits)),
                                n_sightings=n_sight, ra0=sra, dec0=sdec))
     inj = pd.DataFrame(inj_rows); truth = pd.DataFrame(truth_rows)
+    if inj.empty:  # fail loud BEFORE writing: 0 sightings = upstream geometry/WCS problem, not a result
+        raise SystemExit(f"[orbits] FATAL: {len(truth)} objects -> 0 sightings (footprint/WCS broken?)")
     Path(a.out_inject).parent.mkdir(parents=True, exist_ok=True)
     inj.to_csv(a.out_inject, index=False); truth.to_csv(a.out_truth, index=False)
     ns = truth.n_sightings

@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --partition=ada
-#SBATCH --account=kipac:kipac
+#SBATCH --account=rubin:commissioning
 #SBATCH --qos=normal
 #SBATCH --gres=gpu:l40s:4
 #SBATCH -c 32

@@ -13,6 +13,7 @@ ra0,dec0,ra1,dec1,beta,...] + colformat.txt. Next: build_known_catalog -> mask_f
 """
 from __future__ import annotations
 import argparse
+import json
 import os
 import sys
 import time
@@ -40,10 +41,31 @@ COLFORMAT = "IDCOL 1\nMJDCOL 2\nRACOL 3\nDECCOL 4\nMAGCOL 5\nBANDCOL 6\nOBSCODEC
 
 
 
+def _wcs_from_json(s):
+    """astropy WCS from a manifest `wcs_json` column (annotate_manifest_wcs.py: Butler SkyWcs ->
+    getFitsMetadata FITS-approximation cards as a JSON dict). None if missing/invalid/non-celestial."""
+    if not isinstance(s, str) or not s.strip():
+        return None
+    from astropy.io import fits
+    from astropy.wcs import WCS as _W
+    try:
+        h = fits.Header()
+        for k, v in json.loads(s).items():
+            if k in ("COMMENT", "HISTORY") or v is None:
+                continue
+            h[k] = v
+        w = _W(h)
+        return w if w.has_celestial else None
+    except Exception:
+        return None
+
+
 def _wcs_any(hdr):
-    """WCS from a diffim header: primary FITS-WCS (DP2 stage4) or the alternate 'A' WCS that newer
-    LSST DRP outputs write (exact SkyWcs lives in archive HDUs; 'A' is the FITS approximation --
-    self-consistent for inject+detect+link, which all use the same transform)."""
+    """WCS from a diffim header: primary FITS-WCS (DP2 stage4) or the alternate 'A' key if it is
+    celestial. RAISES if neither is a sky WCS -- newer DRP outputs (e.g. DM-53195) keep the exact
+    SkyWcs only in archive HDUs and write 'A' as a CTYPE='PIXEL' bookkeeping transform; silently
+    using that produced pixel-valued 'sky' coordinates. For those, annotate the manifest with
+    wcs_json (annotate_manifest_wcs.py) -- self-consistent across inject+detect+link."""
     from astropy.wcs import WCS as _W
     try:
         w = _W(hdr)
@@ -51,17 +73,21 @@ def _wcs_any(hdr):
             return w
     except Exception:
         pass
-    return _W(hdr, key="A")
+    w = _W(hdr, key="A")
+    if not w.has_celestial:
+        raise ValueError("no celestial WCS in FITS header (annotate manifest with wcs_json)")
+    return w
 
-def read_fits_panel(path: str):
-    """Read one diffim FITS directly: (image float32, astropy WCS, mjd-mid). HDU1=IMAGE (validated)."""
+def read_fits_panel(path: str, wcs_json=None):
+    """Read one diffim FITS directly: (image float32, astropy WCS, mjd-mid). HDU1=IMAGE (validated).
+    WCS preference: manifest wcs_json (exact-SkyWcs FITS approximation) > header WCS."""
     from astropy.io import fits
     from astropy.wcs import WCS
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         with fits.open(path, memmap=False) as hdul:
             img = np.nan_to_num(hdul[1].data.astype(np.float32))
-            wcs = _wcs_any(hdul[1].header)
+            wcs = _wcs_from_json(wcs_json) or _wcs_any(hdul[1].header)
             h0 = hdul[0].header
             mjd = h0.get("DATE-AVG") or h0.get("MJD-AVG") or h0.get("MJD-OBS") or h0.get("MJD-BEG")
             if isinstance(mjd, str):  # DATE-AVG is ISO; convert
@@ -71,21 +97,22 @@ def read_fits_panel(path: str):
 
 
 def _prefetch(paths, workers):
-    """Yield (idx, (img, wcs, mjd)) in submission order, prefetching up to `workers` ahead."""
+    """Yield (idx, (img, wcs, mjd)) in submission order, prefetching up to `workers` ahead.
+    `paths` items are (fits_path, wcs_json-or-None) tuples."""
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futs = {}
         nxt = 0
         for i in range(min(workers * 2, len(paths))):
-            futs[i] = ex.submit(read_fits_panel, paths[i])
+            futs[i] = ex.submit(read_fits_panel, *paths[i])
         submitted = len(futs)
         while nxt < len(paths):
             try:
                 res = futs.pop(nxt).result()
             except Exception as e:    # a corrupt/unreadable FITS must not kill the whole GPU shard
-                print(f"[prefetch] skip panel {nxt} ({paths[nxt]}): {type(e).__name__}: {e}", flush=True)
+                print(f"[prefetch] skip panel {nxt} ({paths[nxt][0]}): {type(e).__name__}: {e}", flush=True)
                 res = None
             if submitted < len(paths):  # keep the pipeline full
-                futs[submitted] = ex.submit(read_fits_panel, paths[submitted]); submitted += 1
+                futs[submitted] = ex.submit(read_fits_panel, *paths[submitted]); submitted += 1
             yield nxt, res
             nxt += 1
 
@@ -118,7 +145,7 @@ def run_shard(gpu_id, rows, seg_ckpt, cnn_model, thr, prefetch, out_csv, n_worke
     rows = [r for r in rows if (int(r["visit"]), int(r["detector"])) not in done]
     write_header = not (os.path.exists(out_csv) and os.path.getsize(out_csv) > 0)
     donef = open(done_path, "a")
-    paths = [r["fits_path"] for r in rows]
+    paths = [(r["fits_path"], r.get("wcs_json")) for r in rows]
     n_done = len(done); n_det = 0
     total = len(rows); t0 = time.time(); last = t0
     pending = deque()

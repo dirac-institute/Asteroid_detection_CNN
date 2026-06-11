@@ -46,7 +46,7 @@ def _panel(args):
     """Run 5sigma detection, then emit LEAN records: one per-panel FP-density summary row + one row per
     injected sighting on this panel (did the 5sigma stack recover it, at what SNR). Raw FP positions
     (~800/panel of subtraction noise) are NOT dumped -- only their count, the useful quantity."""
-    fits_path, recs, inject_rows, threshold, tol = args
+    fits_path, recs, inject_rows, threshold, tol, full = args
     from scipy.spatial import cKDTree
     import lsst.afw.image as afwImage
     v, det = recs["visit"], recs["detector"]
@@ -59,7 +59,13 @@ def _panel(args):
         table = afwTable.SourceTable.make(schema)
         res = task.run(table, exp)
         var = exp.variance.array; H, W = var.shape
+        wcs = exp.getWcs() if full else None
+        try:
+            mjd = float(exp.getInfo().getVisitInfo().getDate().toAstropy().mjd) if full else np.nan
+        except Exception:
+            mjd = np.nan
         pts, snrs = [], []
+        peakrows = []
         for src in res.sources:
             fp = src.getFootprint()
             if fp is None or not fp.getPeaks():
@@ -67,8 +73,17 @@ def _panel(args):
             pk = fp.getPeaks()[0]; x, y = float(pk.getFx()), float(pk.getFy())
             ix, iy = int(np.clip(round(x), 0, W - 1)), int(np.clip(round(y), 0, H - 1))
             sig = float(np.sqrt(var[iy, ix])) if var[iy, ix] > 0 else np.nan
-            pts.append((x, y)); snrs.append(float(pk.getPeakValue()) / sig if sig and np.isfinite(sig) else np.nan)
+            snr = float(pk.getPeakValue()) / sig if sig and np.isfinite(sig) else np.nan
+            pts.append((x, y)); snrs.append(snr)
+            if full and wcs is not None:                 # full 5sigma diaSource catalogue for heliolinc
+                try:
+                    sp = wcs.pixelToSky(x, y); ra = sp.getRa().asDegrees(); dec = sp.getDec().asDegrees()
+                    peakrows.append(dict(kind="peak", visit=v, detector=det, mjd=mjd,
+                                         ra=ra, dec=dec, x=x, y=y, snr=snr))
+                except Exception:
+                    pass
         out = [dict(kind="fpdensity", visit=v, detector=det, n_5sigma=len(pts))]
+        out.extend(peakrows)
         if inject_rows:
             tree = cKDTree(pts) if pts else None
             for r in inject_rows:
@@ -94,6 +109,9 @@ def main():
     ap.add_argument("--tol-px", type=float, default=10.0, help="match radius injected<->5sigma detection")
     ap.add_argument("--inject-panels-only", action="store_true",
                     help="run only on panels that carry injections (faster; FP density on a representative sample)")
+    ap.add_argument("--full-catalog", action="store_true",
+                    help="ALSO emit the full 5sigma peak catalogue (visit,detector,mjd,ra,dec,x,y,snr) to "
+                         "<out>_peaks.csv -- the diaSource stream heliolinc consumes (FP + injected). Heavier.")
     ap.add_argument("--workers", type=int, default=32)
     a = ap.parse_args()
 
@@ -107,7 +125,8 @@ def main():
         man = man[[(int(r.visit), int(r.detector)) in inj_map for r in man.itertuples()]]
 
     tasks = [(r.fits_path, dict(visit=int(r.visit), detector=int(r.detector)),
-              inj_map.get((int(r.visit), int(r.detector))), a.threshold, a.tol_px) for r in man.itertuples()]
+              inj_map.get((int(r.visit), int(r.detector))), a.threshold, a.tol_px, a.full_catalog)
+             for r in man.itertuples()]
     print(f"[stack] 5sigma detection over {len(tasks)} panels, {a.workers} workers", flush=True)
 
     rows = []
@@ -130,8 +149,14 @@ def main():
         inj["mjd"] = inj.visit.astype(int).map(rm)
     inj.to_csv(a.out, index=False)
     rec = int(inj.stack_det.sum()) if len(inj) else 0
+    npk = 0
+    if a.full_catalog and "kind" in df:
+        pk = df[df.kind == "peak"][["visit", "detector", "mjd", "ra", "dec", "x", "y", "snr"]].copy()
+        peaks_out = a.out.replace(".csv", "_peaks.csv")
+        pk.to_csv(peaks_out, index=False); npk = len(pk)
+        print(f"[stack] full 5sigma catalogue: {npk} peaks -> {peaks_out}", flush=True)
     print(f"[stack] panels={len(fpd)} median FP/panel={fpd.n_5sigma.median() if len(fpd) else 0:.0f} | "
-          f"injected sightings={len(inj)} stack-recovered={rec} (errs {nerr}) -> {a.out}", flush=True)
+          f"injected sightings={len(inj)} stack-recovered={rec} | full-peaks {npk} (errs {nerr}) -> {a.out}", flush=True)
 
 
 if __name__ == "__main__":

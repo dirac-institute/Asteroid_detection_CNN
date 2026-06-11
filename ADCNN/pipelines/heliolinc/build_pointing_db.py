@@ -40,7 +40,7 @@ def main():
     con = sqlite3.connect(a.out); df.to_sql("observations", con, if_exists="replace", index=False); con.close()
     nights = df.observationStartMJD.apply(lambda m: int(np.floor(m - 0.5))).nunique()
     print(f"[pointing] {len(df)} visits in ra[{a.ra_min},{a.ra_max}] dec[{a.dec_min},{a.dec_max}] over {nights} nights "
-          f"| filters {sorted(df.filter.unique())} -> {a.out}")
+          f"| filters {sorted(df['filter'].unique())} -> {a.out}")
 
 
 if __name__ == "__main__":

@@ -113,3 +113,18 @@ object. A short single-night arc is a candidate for follow-up, **not** a determi
 - The ADCNN operating point is **not** hardcoded: `discover_stream.py` reads the val2-calibrated
   `threshold` from the `models/cnn_postproc.json` sidecar (override with `--cnn-thr`).
 ```
+
+## Code boundary — what is ours vs Ari Heinze's (heliolinx)
+
+Keep these strictly separate; do not blur them.
+
+- **Ari Heinze's code (NOT ours):** everything under `external/heliolinx/` (binaries + C++ source) and
+  `external/heliolinx-aux/` (test data, hypothesis grids, Earth ephemeris, ObsCodes). It is **vendored
+  read-only, gitignored** (`.gitignore` line `external/`; 0 files tracked), and **never edited by us**.
+  Treat it as an upstream dependency: we only *invoke* the binaries and *consume* his shipped aux files.
+- **Our code (ours):** everything under `ADCNN/`. The only bridge to his binaries is the thin wrapper
+  `run_heliolinx.py`, which calls them by absolute path (`make_tracklets → heliolinc → link_purify`; use
+  plain `heliolinc`, not `heliolinc_omp` — sum-format skew) for the ADCNN-vs-stack head-to-head
+  (`h2h-heliolinx-campaign`). It reimplements none of his algorithm.
+- Rule: never fork his source into `ADCNN/`, never commit anything from `external/`. Linker changes go in
+  our wrapper (params/inputs) or upstream in his repo separately.

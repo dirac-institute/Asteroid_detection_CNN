@@ -171,6 +171,7 @@ def main():
     ap.add_argument("--art-frac-max", type=float, default=0.3)
     ap.add_argument("--recur-max", type=int, default=2)
     ap.add_argument("--max-arc", type=float, default=None, help="override Δt link window (min); must exceed the pair gap")
+    ap.add_argument("--chi2-max", type=float, default=3.0, help="orbit-fit chi2 gate; loosen (with mfsnr carrying purity) to recover noisy true movers")
     ap.add_argument("--mfsnr-min", type=float, default=None, help="LINKING purity cut: require fainter member mf_snr >= this")
     ap.add_argument("--rate-lo", type=float, default=None, help="NEO rate band low (deg/day); pair with --rate-hi")
     ap.add_argument("--rate-hi", type=float, default=10.0)
@@ -185,6 +186,7 @@ def main():
         PC["max_arc_2v_min"] = a.max_arc   # forked workers inherit this module global
     PC["mfsnr_min_2v"] = a.mfsnr_min
     PC["rate_lo_2v"] = a.rate_lo; PC["rate_hi_2v"] = a.rate_hi
+    PC["chi2_2v_max"] = a.chi2_max
 
     ks = [f.split("adcnn_dets_masked_")[1].split(".csv")[0]
           for f in sorted(glob.glob(f"{a.dir}/adcnn_dets_masked_*.csv"))]

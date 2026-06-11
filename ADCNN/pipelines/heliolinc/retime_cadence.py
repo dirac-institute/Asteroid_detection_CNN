@@ -49,13 +49,17 @@ def build_dt_dist(opsim_db=DEFAULT_DB, fov_deg=FOV_DEG, dt_max_min=DT_MAX_MIN):
     return dts
 
 
-def make_retime_map(visits, dt_dist, rng, base_mjd=60000.0, dt_cap_min=39.0):
-    """Assign synthetic MJDs: visits in chronological order (visit id sorts by time), consecutive gaps
-    sampled from dt_dist (clipped < dt_cap_min so every adjacent pair links under max_arc=40)."""
+def make_retime_map(visits, dt_dist, rng, base_mjd=60000.0, dt_cap_min=39.0, fixed_dt_min=None):
+    """Assign synthetic MJDs: visits in chronological order (visit id sorts by time). Consecutive gaps are
+    either a FIXED dt (fixed_dt_min, for a controlled lambda(dt) curve) or sampled from the real OpSim
+    same-night dt_dist (clipped < dt_cap_min). NOTE: this is a tool to characterise the cadence DEPENDENCE,
+    not to assert one cadence -- the operational point is read off lambda(dt) at the real OpSim pair gap."""
     vs = np.sort(np.asarray(visits, dtype=np.int64))
     n = len(vs)
-    gaps = rng.choice(dt_dist, size=max(n - 1, 0), replace=True)
-    gaps = np.clip(gaps, 1.0, dt_cap_min) / 1440.0          # minutes -> days
+    if fixed_dt_min is not None:
+        gaps = np.full(max(n - 1, 0), float(fixed_dt_min)) / 1440.0
+    else:
+        gaps = np.clip(rng.choice(dt_dist, size=max(n - 1, 0), replace=True), 1.0, dt_cap_min) / 1440.0
     mjd = base_mjd + np.concatenate([[0.0], np.cumsum(gaps)])
     return pd.DataFrame({"visit": vs, "mjd_retimed": mjd})
 
@@ -74,6 +78,7 @@ def main():
     ap.add_argument("--out", required=True, help="retime_map.csv output")
     ap.add_argument("--opsim-db", default=str(DEFAULT_DB))
     ap.add_argument("--base-mjd", type=float, default=60000.0)
+    ap.add_argument("--fixed-dt-min", type=float, default=None, help="fixed pair gap (min) for a lambda(dt) curve; default = sample the real OpSim dist")
     ap.add_argument("--seed", type=int, default=2026)
     a = ap.parse_args()
 
@@ -81,7 +86,7 @@ def main():
     print(f"[retime] OpSim same-night dt: n={dt.size} median={np.median(dt):.1f}min "
           f"[{np.percentile(dt,10):.0f},{np.percentile(dt,90):.0f}]", flush=True)
     visits = pd.read_csv(a.manifest, usecols=["visit"]).visit.astype(int).unique()
-    rm = make_retime_map(visits, dt, np.random.default_rng(a.seed), base_mjd=a.base_mjd)
+    rm = make_retime_map(visits, dt, np.random.default_rng(a.seed), base_mjd=a.base_mjd, fixed_dt_min=a.fixed_dt_min)
     rm.to_csv(a.out, index=False)
     span_h = (rm.mjd_retimed.max() - rm.mjd_retimed.min()) * 24.0
     print(f"[retime] {len(rm)} visits -> {a.out} | synthetic span {span_h:.1f}h "
