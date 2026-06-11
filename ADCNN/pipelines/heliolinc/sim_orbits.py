@@ -22,6 +22,20 @@ from astropy.time import Time
 PIXSCALE = 0.2  # arcsec/px
 
 
+
+def _wcs_any(hdr):
+    """WCS from a diffim header: primary FITS-WCS (DP2 stage4) or the alternate 'A' WCS that newer
+    LSST DRP outputs write (exact SkyWcs lives in archive HDUs; 'A' is the FITS approximation --
+    self-consistent for inject+detect+link, which all use the same transform)."""
+    from astropy.wcs import WCS as _W
+    try:
+        w = _W(hdr)
+        if w.has_celestial:
+            return w
+    except Exception:
+        pass
+    return _W(hdr, key="A")
+
 def read_panels(manifest):
     """Return per-panel (visit, detector, mjd, wcs, nx, ny) + per-visit mjd."""
     m = pd.read_csv(manifest)
@@ -30,7 +44,7 @@ def read_panels(manifest):
         try:
             with fits.open(r.fits_path, memmap=True) as h:
                 hdr = h[1].header; h0 = h[0].header
-                w = WCS(hdr); nx, ny = int(hdr["NAXIS1"]), int(hdr["NAXIS2"])
+                w = _wcs_any(hdr); nx, ny = int(hdr["NAXIS1"]), int(hdr["NAXIS2"])
                 mjd = h0.get("MJD-AVG") or h0.get("MJD-OBS")
                 if mjd is None:
                     da = h0.get("DATE-AVG"); mjd = Time(da, format="isot").mjd if da else np.nan
@@ -114,7 +128,9 @@ def main():
     dt_sub = a.exptime / 86400.0  # for beta (intra-exposure motion direction in pixel frame)
     for oid in range(a.n_objects):
         # start near footprint centre-ish (margin) so it stays in for several epochs
-        sra = rng.uniform(ra0 + 0.1, ra1 - 0.1); sdec = rng.uniform(dec0 + 0.1, dec1 - 0.1)
+        mra = min(0.1, max(0.0, (ra1 - ra0) * 0.25))    # adaptive margin: narrow footprints (field
+        mde = min(0.1, max(0.0, (dec1 - dec0) * 0.25))  # slivers) collapsed the fixed 0.1-deg margin
+        sra = rng.uniform(ra0 + mra, ra1 - mra); sdec = rng.uniform(dec0 + mde, dec1 - mde)
         rate = float(np.exp(rng.uniform(np.log(a.rate_min), np.log(a.rate_max))))  # deg/day, log-uniform
         pa = rng.uniform(0, 2*np.pi)
         cd = np.cos(np.radians(sdec))

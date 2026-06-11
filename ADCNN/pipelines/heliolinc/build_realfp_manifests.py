@@ -34,12 +34,19 @@ def main():
                          "pointing cadence.csv -- reaches the full off-ecliptic tract-night pool (~412)")
     ap.add_argument("--start-index", type=int, default=0, help="first manifest_<k> index (append to an existing run)")
     ap.add_argument("--exclude-fields-from", default=None,
-                    help="csv with tract,night columns (a validation run's fields.csv): those TRACTS (on any "
-                         "night) are excluded -- the blind-test disjointness rule (EVALUATION_CONTRACT.md)")
+                    help="csv with tract,night columns (a validation run's fields.csv): excluded per "
+                         "--exclude-mode -- the blind-test disjointness rule (EVALUATION_CONTRACT.md)")
+    ap.add_argument("--exclude-mode", default="tract", choices=["tract", "tract-night"],
+                    help="tract = exclude validation TRACTS on any night (strict, tier 1); tract-night = "
+                         "exclude only exact (tract,night) pairs (the contract's 'different nights where "
+                         "possible' fallback tier when the strict pool is exhausted)")
     ap.add_argument("--max-ecl-lat", type=float, default=None,
                     help="ECLIPTIC mode: select |ecl_lat| <= this instead of > min-ecl-lat")
     ap.add_argument("--night-min", type=int, default=None, help="earliest night (diffim retention window)")
     ap.add_argument("--night-max", type=int, default=None, help="latest night (diffim retention window)")
+    ap.add_argument("--collection", default="LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage4",
+                    help="Butler collection serving difference_image (the DP2 stage4 default is being "
+                         "decommissioned; DM-53195 d_2025_11_10 is the live replacement)")
     ap.add_argument("--out-dir", default=str(REPO / "ADCNN/pipelines/heliolinc/run_realfp"))
     a = ap.parse_args()
     out = Path(a.out_dir); out.mkdir(parents=True, exist_ok=True)
@@ -55,7 +62,7 @@ def main():
                     print(f"[realfp] WARN could not read {f}: {e}", flush=True)
         print(f"[realfp] excluding {len(excl)} leakage visits from {a.exclude_visits_from}", flush=True)
 
-    STAGE4 = "LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage4"
+    STAGE4 = a.collection
     b = Butler("dp2_prep")
     skymap = b.get("skyMap", skymap=a.skymap, collections="skymaps")
 
@@ -78,15 +85,25 @@ def main():
         off = off[off.night <= a.night_max]
     if a.exclude_fields_from:
         ex = pd.read_csv(a.exclude_fields_from)
-        ex_tracts = set(ex.tract.astype(int))
-        n0 = len(off); off = off[~off.tract.astype(int).isin(ex_tracts)]
-        print(f"[realfp] BLIND disjointness: excluded {len(ex_tracts)} validation tracts "
-              f"({n0}->{len(off)} candidate field-nights)", flush=True)
+        n0 = len(off)
+        if a.exclude_mode == "tract":
+            ex_tracts = set(ex.tract.astype(int))
+            off = off[~off.tract.astype(int).isin(ex_tracts)]
+            print(f"[realfp] BLIND disjointness (tract tier): excluded {len(ex_tracts)} validation tracts "
+                  f"({n0}->{len(off)} candidates)", flush=True)
+        else:
+            ex_tn = set(zip(ex.tract.astype(int), ex.night.astype(int)))
+            off = off[~off.apply(lambda r: (int(r.tract), int(r.night)) in ex_tn, axis=1)]
+            print(f"[realfp] BLIND disjointness (tract-night FALLBACK tier): excluded {len(ex_tn)} exact "
+                  f"(tract,night) pairs ({n0}->{len(off)} candidates)", flush=True)
 
     # when extending, drop (tract,night) already built so the new FP fields stay independent
     fcsv0 = out / "fields.csv"
     if a.start_index > 0 and fcsv0.exists() and "tract" in off.columns:
-        prev = pd.read_csv(fcsv0)
+        try:
+            prev = pd.read_csv(fcsv0)
+        except pd.errors.EmptyDataError:
+            prev = pd.DataFrame(columns=["tract", "night"])
         seen = set(zip(prev.tract.astype(int), prev.night.astype(int)))
         off = off[~off.apply(lambda r: (int(r.tract), int(r.night)) in seen, axis=1)]
         print(f"[realfp] extend: {len(off)} candidate (tract,night) after dropping {len(seen)} already-built", flush=True)
@@ -126,7 +143,11 @@ def main():
     summ = pd.DataFrame(rows)
     fcsv = out / "fields.csv"
     if a.start_index > 0 and fcsv.exists():        # appending to an existing run
-        summ = pd.concat([pd.read_csv(fcsv), summ], ignore_index=True).drop_duplicates("field")
+        try:
+            prev = pd.read_csv(fcsv)
+            summ = pd.concat([prev, summ], ignore_index=True).drop_duplicates("field")
+        except pd.errors.EmptyDataError:
+            pass
     summ.to_csv(fcsv, index=False)
     tot_pairs = summ.pairs.sum() if len(summ) else 0
     tot_pan = summ.n_panels.sum() if len(summ) else 0

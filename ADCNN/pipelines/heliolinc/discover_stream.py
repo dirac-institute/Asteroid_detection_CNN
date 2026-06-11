@@ -39,6 +39,20 @@ OBSCODE = os.environ.get("OBSCODE", "I11")  # Rubin Observatory / LSST (override
 COLFORMAT = "IDCOL 1\nMJDCOL 2\nRACOL 3\nDECCOL 4\nMAGCOL 5\nBANDCOL 6\nOBSCODECOL 7\n"
 
 
+
+def _wcs_any(hdr):
+    """WCS from a diffim header: primary FITS-WCS (DP2 stage4) or the alternate 'A' WCS that newer
+    LSST DRP outputs write (exact SkyWcs lives in archive HDUs; 'A' is the FITS approximation --
+    self-consistent for inject+detect+link, which all use the same transform)."""
+    from astropy.wcs import WCS as _W
+    try:
+        w = _W(hdr)
+        if w.has_celestial:
+            return w
+    except Exception:
+        pass
+    return _W(hdr, key="A")
+
 def read_fits_panel(path: str):
     """Read one diffim FITS directly: (image float32, astropy WCS, mjd-mid). HDU1=IMAGE (validated)."""
     from astropy.io import fits
@@ -47,7 +61,7 @@ def read_fits_panel(path: str):
         warnings.simplefilter("ignore")
         with fits.open(path, memmap=False) as hdul:
             img = np.nan_to_num(hdul[1].data.astype(np.float32))
-            wcs = WCS(hdul[1].header)
+            wcs = _wcs_any(hdul[1].header)
             h0 = hdul[0].header
             mjd = h0.get("DATE-AVG") or h0.get("MJD-AVG") or h0.get("MJD-OBS") or h0.get("MJD-BEG")
             if isinstance(mjd, str):  # DATE-AVG is ISO; convert
