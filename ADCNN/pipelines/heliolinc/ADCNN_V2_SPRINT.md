@@ -71,14 +71,20 @@ A checkpoint that lifts raw recall but explodes candidate load is REJECTED (that
   (cadence_ecliptic tracts have no retained DM-53195 diffims outside the blind 6) → training and dev
   eval are off-ecliptic-only; ecliptic generalization is assessed ONLY at the final one-shot blind
   eval — a known, pre-registered limitation.
-- **Training-data path decision:** fine-tune data is built with the CANONICAL `make_datasets`
-  chain (`ADCNN/data/dataset_creation/simulate.py`: ExposureInjectTask + re-subtraction, masks via
-  `draw_one_line` cv2 PSF/2-thickness, native `stack_detection` labels that the dataloader's
-  stratified anchor sampling and variant D consume) pointed at DM-53195 visits with blind-tract
-  exclusion — NOT a new converter from the runtime `add_trails` injector. Rationale: zero
-  mask-convention risk, full injection fidelity (re-subtracted pixels), and the stack-miss
-  stratification comes for free. `run_dev/` (add_trails chain) is reserved for the ALERT-LEVEL
-  eval ladder at the frozen op, where it is self-consistent with the blind methodology.
+- **Training-data path decision (REVISED after retention probe):** the canonical `make_datasets`
+  chain (ExposureInjectTask + re-subtraction) is IMPOSSIBLE on current data —
+  `preliminary_visit_image` is purged from every collection (probed 2026-06-12; templates+diffims
+  retained, PVIs gone). Fine-tune data is therefore built by a converter that replicates the
+  training contract exactly on retained DM-53195 diffims: dense per-panel `add_trails` injection
+  (same `_trail_profile` morphology family as the canonical renderer; constant-σ Gaussian PSF
+  approximation — honest limitation: trails are injected post-subtraction, but the DOMAIN being
+  adapted to is the diffim background statistics, which the retained diffims carry exactly, and the
+  dev/blind alert evals use the same injector → self-consistent), masks via the canonical
+  `draw_one_line` (cv2.LINE_8, thickness 2 ≈ PSF/2), `real_labels` = SourceDetectionTask footprints
+  on the CLEAN pre-injection diffim (uint16, the ch2 ignore plane), CSV with per-injection
+  `stack_detection` from 5σ on the injected panel (drives the loader's stratified anchor sampling +
+  variant D). Train panels = the 13 night-20250723 dev fields; val = the 8 night-20250704 fields
+  (field/night split). `run_dev` orbit-consistent injections remain the alert-level eval ladder.
 
 ## Explicitly NOT in this sprint
 
