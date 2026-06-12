@@ -1,0 +1,1 @@
+FROZEN 2026-06-11: ADCNN v1 blind-test evidence. Eval-only forever — no training, no tuning, no model selection on these 26 fields. One-shot v1-vs-v2 comparison only. Tag: adcnn-v1-blind-baseline.
