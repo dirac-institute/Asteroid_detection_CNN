@@ -1,0 +1,306 @@
+[
+ {
+  "field": 0,
+  "n_tracks": 10,
+  "n_3v": 4,
+  "n_3v_tp": 2,
+  "n_3v_fp": 2,
+  "n_2v": 6,
+  "n_2v_tp": 1,
+  "rec_obj": [
+   "SNEO00048",
+   "SNEO00231"
+  ]
+ },
+ {
+  "field": 1,
+  "n_tracks": 0
+ },
+ {
+  "field": 2,
+  "n_tracks": 74,
+  "n_3v": 27,
+  "n_3v_tp": 13,
+  "n_3v_fp": 14,
+  "n_2v": 47,
+  "n_2v_tp": 28,
+  "rec_obj": [
+   "SNEO00075",
+   "SNEO00083",
+   "SNEO00088",
+   "SNEO00093",
+   "SNEO00098",
+   "SNEO00128",
+   "SNEO00143",
+   "SNEO00186",
+   "SNEO00240",
+   "SNEO00242",
+   "SNEO00243",
+   "SNEO00289",
+   "SNEO00292"
+  ]
+ },
+ {
+  "field": 3,
+  "n_tracks": 39,
+  "n_3v": 11,
+  "n_3v_tp": 2,
+  "n_3v_fp": 9,
+  "n_2v": 28,
+  "n_2v_tp": 6,
+  "rec_obj": [
+   "SNEO00054",
+   "SNEO00127"
+  ]
+ },
+ {
+  "field": 4,
+  "n_tracks": 35,
+  "n_3v": 13,
+  "n_3v_tp": 4,
+  "n_3v_fp": 9,
+  "n_2v": 22,
+  "n_2v_tp": 5,
+  "rec_obj": [
+   "SNEO00009",
+   "SNEO00069",
+   "SNEO00252",
+   "SNEO00272"
+  ]
+ },
+ {
+  "field": 5,
+  "n_tracks": 55,
+  "n_3v": 11,
+  "n_3v_tp": 9,
+  "n_3v_fp": 2,
+  "n_2v": 44,
+  "n_2v_tp": 28,
+  "rec_obj": [
+   "SNEO00035",
+   "SNEO00100",
+   "SNEO00132",
+   "SNEO00193",
+   "SNEO00237",
+   "SNEO00241",
+   "SNEO00274",
+   "SNEO00278",
+   "SNEO00291"
+  ]
+ },
+ {
+  "field": 6,
+  "n_tracks": 38,
+  "n_3v": 11,
+  "n_3v_tp": 5,
+  "n_3v_fp": 6,
+  "n_2v": 27,
+  "n_2v_tp": 12,
+  "rec_obj": [
+   "SNEO00068",
+   "SNEO00114",
+   "SNEO00228",
+   "SNEO00279",
+   "SNEO00281"
+  ]
+ },
+ {
+  "field": 7,
+  "n_tracks": 15,
+  "n_3v": 1,
+  "n_3v_tp": 1,
+  "n_3v_fp": 0,
+  "n_2v": 14,
+  "n_2v_tp": 9,
+  "rec_obj": [
+   "SNEO00171"
+  ]
+ },
+ {
+  "field": 8,
+  "n_tracks": 12,
+  "n_3v": 1,
+  "n_3v_tp": 1,
+  "n_3v_fp": 0,
+  "n_2v": 11,
+  "n_2v_tp": 5,
+  "rec_obj": [
+   "SNEO00112"
+  ]
+ },
+ {
+  "field": 9,
+  "n_tracks": 21,
+  "n_3v": 3,
+  "n_3v_tp": 1,
+  "n_3v_fp": 2,
+  "n_2v": 18,
+  "n_2v_tp": 6,
+  "rec_obj": [
+   "SNEO00211"
+  ]
+ },
+ {
+  "field": 10,
+  "n_tracks": 11,
+  "n_3v": 0,
+  "n_3v_tp": 0,
+  "n_3v_fp": 0,
+  "n_2v": 11,
+  "n_2v_tp": 2,
+  "rec_obj": []
+ },
+ {
+  "field": 11,
+  "n_tracks": 37,
+  "n_3v": 12,
+  "n_3v_tp": 11,
+  "n_3v_fp": 1,
+  "n_2v": 25,
+  "n_2v_tp": 19,
+  "rec_obj": [
+   "SNEO00043",
+   "SNEO00048",
+   "SNEO00096",
+   "SNEO00097",
+   "SNEO00104",
+   "SNEO00126",
+   "SNEO00192",
+   "SNEO00213",
+   "SNEO00216",
+   "SNEO00256",
+   "SNEO00269"
+  ]
+ },
+ {
+  "field": 12,
+  "n_tracks": 6,
+  "n_3v": 1,
+  "n_3v_tp": 1,
+  "n_3v_fp": 0,
+  "n_2v": 5,
+  "n_2v_tp": 3,
+  "rec_obj": [
+   "SNEO00163"
+  ]
+ },
+ {
+  "field": 13,
+  "n_tracks": 19,
+  "n_3v": 6,
+  "n_3v_tp": 6,
+  "n_3v_fp": 0,
+  "n_2v": 13,
+  "n_2v_tp": 9,
+  "rec_obj": [
+   "SNEO00018",
+   "SNEO00144",
+   "SNEO00172",
+   "SNEO00178",
+   "SNEO00274",
+   "SNEO00288"
+  ]
+ },
+ {
+  "field": 14,
+  "n_tracks": 11,
+  "n_3v": 1,
+  "n_3v_tp": 1,
+  "n_3v_fp": 0,
+  "n_2v": 10,
+  "n_2v_tp": 5,
+  "rec_obj": [
+   "SNEO00015"
+  ]
+ },
+ {
+  "field": 15,
+  "n_tracks": 8,
+  "n_3v": 3,
+  "n_3v_tp": 1,
+  "n_3v_fp": 2,
+  "n_2v": 5,
+  "n_2v_tp": 4,
+  "rec_obj": [
+   "SNEO00110"
+  ]
+ },
+ {
+  "field": 16,
+  "n_tracks": 4,
+  "n_3v": 0,
+  "n_3v_tp": 0,
+  "n_3v_fp": 0,
+  "n_2v": 4,
+  "n_2v_tp": 1,
+  "rec_obj": []
+ },
+ {
+  "field": 17,
+  "n_tracks": 24,
+  "n_3v": 4,
+  "n_3v_tp": 3,
+  "n_3v_fp": 1,
+  "n_2v": 20,
+  "n_2v_tp": 16,
+  "rec_obj": [
+   "SNEO00016",
+   "SNEO00124",
+   "SNEO00259"
+  ]
+ },
+ {
+  "field": 18,
+  "n_tracks": 4,
+  "n_3v": 1,
+  "n_3v_tp": 1,
+  "n_3v_fp": 0,
+  "n_2v": 3,
+  "n_2v_tp": 3,
+  "rec_obj": [
+   "SNEO00045"
+  ]
+ },
+ {
+  "field": 19,
+  "n_tracks": 2,
+  "n_3v": 0,
+  "n_3v_tp": 0,
+  "n_3v_fp": 0,
+  "n_2v": 2,
+  "n_2v_tp": 2,
+  "rec_obj": []
+ },
+ {
+  "field": 25,
+  "n_tracks": 170,
+  "n_3v": 39,
+  "n_3v_tp": 0,
+  "n_3v_fp": 39,
+  "n_2v": 131,
+  "n_2v_tp": 2,
+  "rec_obj": []
+ },
+ {
+  "field": 28,
+  "n_tracks": 28,
+  "n_3v": 1,
+  "n_3v_tp": 1,
+  "n_3v_fp": 0,
+  "n_2v": 27,
+  "n_2v_tp": 4,
+  "rec_obj": [
+   "SNEO00062"
+  ]
+ },
+ {
+  "field": 29,
+  "n_tracks": 1,
+  "n_3v": 0,
+  "n_3v_tp": 0,
+  "n_3v_fp": 0,
+  "n_2v": 1,
+  "n_2v_tp": 0,
+  "rec_obj": []
+ }
+]

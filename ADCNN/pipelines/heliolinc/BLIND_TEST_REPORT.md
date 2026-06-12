@@ -189,18 +189,20 @@ dense-cadence chance triplets, and the measured distributions show a future dens
 point exists without touching the score axis. Recorded for the next calibration round; **not applied
 to any number in this report.**
 
-**Ecliptic (6 fields) — a runtime finding instead of a number (so far):** the three small ecliptic
-fields completed in minutes–hours, but on the three giant ones (4,100–4,900 panels, 300–900k
-detections/field-night) the frozen `op_3v_confirm` linker had consumed **≥19 h CPU per field and was
-still running** at report freeze — vs minutes per off-ecliptic field. The cause is structural, not a
-bug: the 3v-first seeding scans chord pairs in a 180-minute arc window (~4.5× the 40-min alert
-window) over 12–17-visit nights at ecliptic FP density, and each surviving pair pays a Python-level
-orbit/geometry check — the same unculled-input scalability wall measured for the multi-night chain
-(heliolinx post-proc explosion) and for S<0.8 make_tracklets. **Conclusion: the frozen 3v
-configuration does not scale to ecliptic-density same-night fields without an O(N log N) pre-cull;**
-this is recorded as a deployment constraint of the tier, alongside §6's dense-cadence false-rate
-finding. The runs were left to finish; the ecliptic 3v tp/fp numbers land in a trailing commit
-(`productC_summary.json`) with the same injected-density and real-asteroid caveats as §5.
+**Ecliptic (6 fields) — a scalability finding, with the three giant fields terminated:** the three
+small ecliptic fields completed normally (their 3v tracks: 40, of which 1 tp / 39 conservative-fp —
+real asteroids count as fp under injection labeling). On the three giant ones (4,100–4,900 panels,
+300–900k detections/field-night) the frozen `op_3v_confirm` linker was **terminated after ~19.7 h
+CPU per field with no output** — vs minutes per off-ecliptic field. py-spy localized all three to
+`extend_to_triplets`: the 3v-first seeding scans chord pairs in a 180-minute arc window (~4.5× the
+40-min alert window) over 12–17-visit nights at ecliptic FP density, producing millions of raw
+pairs, each paying a Python-level per-visit attach query — the same unculled-input scalability wall
+measured for the multi-night chain (heliolinx post-proc explosion) and for S<0.8 make_tracklets.
+**Conclusion: the frozen 3v configuration is computationally infeasible on ecliptic-density
+same-night fields without an O(N log N) pre-cull** — recorded as a deployment constraint of the
+tier, alongside the dense-cadence false-rate finding above. Completed-fields aggregate
+(`productC_summary.json`, 23 fields incl. the 3 small ecliptic): 150 3v tracks, 63 tp / 87 fp at
+injected density (off-ecliptic split: 62 tp / 48 fp as analyzed above).
 
 ## 7. Product D — multi-night discovery: honestly DEFERRED
 
