@@ -1,0 +1,116 @@
+[
+ {
+  "tag": "ALL",
+  "n_fields": 21,
+  "pairs_post_gate": 55360,
+  "pairs_at_op": 104,
+  "tp_at_op": 99,
+  "fp_at_op": 5,
+  "purity_insample_pct": 95.19,
+  "purity_band": [
+   92.93,
+   96.7
+  ],
+  "ff_recovered": 13,
+  "ff_recoverable": 991,
+  "completeness_ff_pct": 1.31,
+  "completeness_band": [
+   0.79,
+   1.76
+  ],
+  "alerts_per_fieldnight": 4.95,
+  "ranked": {
+   "top5": {
+    "tp": 70,
+    "n": 74,
+    "frac": 0.9459
+   },
+   "top10": {
+    "tp": 88,
+    "n": 92,
+    "frac": 0.9565
+   },
+   "top50": {
+    "tp": 99,
+    "n": 104,
+    "frac": 0.9519
+   }
+  }
+ },
+ {
+  "tag": "off-ecliptic (0-19)",
+  "n_fields": 21,
+  "pairs_post_gate": 55360,
+  "pairs_at_op": 104,
+  "tp_at_op": 99,
+  "fp_at_op": 5,
+  "purity_insample_pct": 95.19,
+  "purity_band": [
+   93.39,
+   97.3
+  ],
+  "ff_recovered": 13,
+  "ff_recoverable": 991,
+  "completeness_ff_pct": 1.31,
+  "completeness_band": [
+   0.88,
+   1.82
+  ],
+  "alerts_per_fieldnight": 4.95,
+  "ranked": {
+   "top5": {
+    "tp": 70,
+    "n": 74,
+    "frac": 0.9459
+   },
+   "top10": {
+    "tp": 88,
+    "n": 92,
+    "frac": 0.9565
+   },
+   "top50": {
+    "tp": 99,
+    "n": 104,
+    "frac": 0.9519
+   }
+  }
+ },
+ {
+  "tag": "ecliptic (24-29, fp conservative)",
+  "n_fields": 0,
+  "pairs_post_gate": 0,
+  "pairs_at_op": 0,
+  "tp_at_op": 0,
+  "fp_at_op": 0,
+  "purity_insample_pct": null,
+  "purity_band": [
+   NaN,
+   NaN
+  ],
+  "ff_recovered": 0,
+  "ff_recoverable": 0,
+  "completeness_ff_pct": null,
+  "completeness_band": [
+   0.0,
+   0.0
+  ],
+  "alerts_per_fieldnight": null,
+  "ranked": {
+   "top5": {
+    "tp": 0,
+    "n": 0,
+    "frac": null
+   },
+   "top10": {
+    "tp": 0,
+    "n": 0,
+    "frac": null
+   },
+   "top50": {
+    "tp": 0,
+    "n": 0,
+    "frac": null
+   }
+  }
+ }
+]
