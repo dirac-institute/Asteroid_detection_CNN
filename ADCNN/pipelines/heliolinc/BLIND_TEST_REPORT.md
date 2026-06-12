@@ -189,8 +189,18 @@ dense-cadence chance triplets, and the measured distributions show a future dens
 point exists without touching the score axis. Recorded for the next calibration round; **not applied
 to any number in this report.**
 
-<!-- PRODUCT_C_ECLIPTIC -->Ecliptic (6 fields): linkers in flight at report-draft time; numbers
-inserted from `productC_summary.json` on completion (same injected-density caveats as §5).
+**Ecliptic (6 fields) — a runtime finding instead of a number (so far):** the three small ecliptic
+fields completed in minutes–hours, but on the three giant ones (4,100–4,900 panels, 300–900k
+detections/field-night) the frozen `op_3v_confirm` linker had consumed **≥19 h CPU per field and was
+still running** at report freeze — vs minutes per off-ecliptic field. The cause is structural, not a
+bug: the 3v-first seeding scans chord pairs in a 180-minute arc window (~4.5× the 40-min alert
+window) over 12–17-visit nights at ecliptic FP density, and each surviving pair pays a Python-level
+orbit/geometry check — the same unculled-input scalability wall measured for the multi-night chain
+(heliolinx post-proc explosion) and for S<0.8 make_tracklets. **Conclusion: the frozen 3v
+configuration does not scale to ecliptic-density same-night fields without an O(N log N) pre-cull;**
+this is recorded as a deployment constraint of the tier, alongside §6's dense-cadence false-rate
+finding. The runs were left to finish; the ecliptic 3v tp/fp numbers land in a trailing commit
+(`productC_summary.json`) with the same injected-density and real-asteroid caveats as §5.
 
 ## 7. Product D — multi-night discovery: honestly DEFERRED
 
