@@ -1,0 +1,140 @@
+{
+ "overall@a80": {
+  "both": 1770,
+  "stack_only": 851,
+  "adcnn_only": 233,
+  "neither": 4086
+ },
+ "overall@a50": {
+  "both": 1930,
+  "stack_only": 691,
+  "adcnn_only": 612,
+  "neither": 3707
+ },
+ "by_snr@a80": {
+  "2-5": {
+   "both": 95,
+   "stack_only": 69,
+   "adcnn_only": 12,
+   "neither": 2037
+  },
+  "5-10": {
+   "both": 449,
+   "stack_only": 261,
+   "adcnn_only": 73,
+   "neither": 1140
+  },
+  "10-31": {
+   "both": 1226,
+   "stack_only": 521,
+   "adcnn_only": 148,
+   "neither": 909
+  }
+ },
+ "by_len@a80": {
+  "6-12px": {
+   "both": 610,
+   "stack_only": 338,
+   "adcnn_only": 5,
+   "neither": 1348
+  },
+  "12-20px": {
+   "both": 515,
+   "stack_only": 213,
+   "adcnn_only": 12,
+   "neither": 1010
+  },
+  "20-41px": {
+   "both": 596,
+   "stack_only": 283,
+   "adcnn_only": 103,
+   "neither": 1317
+  }
+ },
+ "by_band@a80": {
+  "g": {
+   "both": 549,
+   "stack_only": 320,
+   "adcnn_only": 63,
+   "neither": 412
+  },
+  "r": {
+   "both": 880,
+   "stack_only": 439,
+   "adcnn_only": 120,
+   "neither": 1131
+  },
+  "u": {
+   "both": 56,
+   "stack_only": 46,
+   "adcnn_only": 9,
+   "neither": 151
+  },
+  "y": {
+   "both": 30,
+   "stack_only": 16,
+   "adcnn_only": 8,
+   "neither": 1779
+  },
+  "z": {
+   "both": 255,
+   "stack_only": 30,
+   "adcnn_only": 33,
+   "neither": 613
+  }
+ },
+ "by_lat@a80": {
+  "off-ecl": {
+   "both": 1770,
+   "stack_only": 851,
+   "adcnn_only": 233,
+   "neither": 4086
+  },
+  "ecliptic": {
+   "both": 0,
+   "stack_only": 0,
+   "adcnn_only": 0,
+   "neither": 0
+  }
+ },
+ "stack_only_decomp": {
+  "n": 851,
+  "no_adcnn_det": 691,
+  "det_but_subthr": 160,
+  "subthr_score_median": 0.7254784999999999
+ },
+ "hi_score_dets@a80": {
+  "n_fp": 166994,
+  "n_tp": 2003,
+  "fp_len_db_med": 15.846273422241213,
+  "tp_len_db_med": 15.390251159667969,
+  "fp_mf_snr_med": 3.54669715,
+  "tp_mf_snr_med": 6.4851165,
+  "fp_art_frac_pos": 0.25239230151981507,
+  "tp_art_frac_pos": 0.05941088367448827,
+  "mask_rates_fp": {
+   "m_SPIKE": 0.011,
+   "m_SAT": 0.001,
+   "m_CR": 0.004,
+   "m_STREAK": 0.001,
+   "m_BAD": 0.023,
+   "m_SUSPECT": 0.001,
+   "m_EDGE": 0.0,
+   "m_DETECTED_NEGATIVE": 0.123,
+   "m_HIGH_VARIANCE": 0.094,
+   "m_INTRP": 0.027
+  },
+  "mask_rates_tp": {
+   "m_SPIKE": 0.003,
+   "m_SAT": 0.0,
+   "m_CR": 0.0,
+   "m_STREAK": 0.001,
+   "m_BAD": 0.001,
+   "m_SUSPECT": 0.0,
+   "m_EDGE": 0.0,
+   "m_DETECTED_NEGATIVE": 0.002,
+   "m_HIGH_VARIANCE": 0.044,
+   "m_INTRP": 0.001
+  }
+ }
+}
