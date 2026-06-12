@@ -63,6 +63,23 @@ The product metric is the ALERT metric, never segmentation F1 / pixel AUC.
 - union efficiency: added-FP-per-added-TP vs stack 5σ remains ≪ stack-4σ's 897
 A checkpoint that lifts raw recall but explodes candidate load is REJECTED (that recreates 4σ).
 
+## Phase 1/2 implementation notes (recorded as built)
+
+- **Dev set realized:** 21 off-ecliptic DM-53195 field-nights, 2 distinct nights (13× 20250723 +
+  8× 20250704; field/night split = train-night vs val-night), 22,870 panels, 300 obj/field injected
+  (seeds 5000+k), blind-tract disjointness ASSERTED (0 overlap). **Ecliptic dev pool came up empty**
+  (cadence_ecliptic tracts have no retained DM-53195 diffims outside the blind 6) → training and dev
+  eval are off-ecliptic-only; ecliptic generalization is assessed ONLY at the final one-shot blind
+  eval — a known, pre-registered limitation.
+- **Training-data path decision:** fine-tune data is built with the CANONICAL `make_datasets`
+  chain (`ADCNN/data/dataset_creation/simulate.py`: ExposureInjectTask + re-subtraction, masks via
+  `draw_one_line` cv2 PSF/2-thickness, native `stack_detection` labels that the dataloader's
+  stratified anchor sampling and variant D consume) pointed at DM-53195 visits with blind-tract
+  exclusion — NOT a new converter from the runtime `add_trails` injector. Rationale: zero
+  mask-convention risk, full injection fidelity (re-subtracted pixels), and the stack-miss
+  stratification comes for free. `run_dev/` (add_trails chain) is reserved for the ALERT-LEVEL
+  eval ladder at the frozen op, where it is self-consistent with the blind methodology.
+
 ## Explicitly NOT in this sprint
 
 Full architecture redesign; stage-2-only retraining; ch3/mask wiring (kept as a later ablation:
