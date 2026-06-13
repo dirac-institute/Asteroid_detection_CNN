@@ -49,11 +49,18 @@ def stage_catalog(a):
     rng = np.random.default_rng(a.seed)
     fields = pd.read_csv(f"{a.run}/fields.csv")
     os.makedirs(a.out, exist_ok=True)
+    excl = set()
+    if a.exclude_catalog and os.path.exists(a.exclude_catalog):
+        e = pd.read_csv(a.exclude_catalog)
+        excl = set(zip(e.visit.astype(int), e.detector.astype(int)))
+        print(f"[ft-catalog] excluding {len(excl)} panels already used (leakage-clean) from {a.exclude_catalog}")
     rows_all = []
     for split, night, n_panels in [("train", TRAIN_NIGHT, a.panels_train), ("val", VAL_NIGHT, a.panels_val)]:
         ks = fields[fields.night == night].field.astype(int).tolist()
         mans = pd.concat([pd.read_csv(f"{a.run}/manifest_{k}.csv").assign(field=k) for k in ks],
                          ignore_index=True)
+        if excl:
+            mans = mans[~mans.apply(lambda r: (int(r.visit), int(r.detector)) in excl, axis=1)]
         sel = mans.sample(n=min(n_panels, len(mans)), random_state=int(rng.integers(1 << 31)))
         for pid, r in enumerate(sel.itertuples()):
             n_tr = int(rng.integers(a.trails_min, a.trails_max + 1))
@@ -206,6 +213,8 @@ def main():
     ap.add_argument("--trails-max", type=int, default=30)
     ap.add_argument("--m5", type=float, default=24.0)
     ap.add_argument("--seed", type=int, default=7000)
+    ap.add_argument("--exclude-catalog", default=None,
+                    help="csv with visit,detector to EXCLUDE (leakage-clean stage-2 set disjoint from stage-1)")
     a = ap.parse_args()
     {"catalog": stage_catalog, "detect": stage_detect, "assemble": stage_assemble}[a.stage](a)
 
