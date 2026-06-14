@@ -4,7 +4,7 @@
 #SBATCH --qos=normal
 #SBATCH --gres=gpu:l40s:1
 #SBATCH -c 16
-#SBATCH --mem=128G
+#SBATCH --mem=256G
 #SBATCH -t 8:00:00
 #SBATCH -J v2D_s2refit
 #SBATCH -o %x_%j.log
