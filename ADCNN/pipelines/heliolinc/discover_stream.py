@@ -174,6 +174,7 @@ def run_shard(gpu_id, rows, seg_ckpt, cnn_model, thr, prefetch, out_csv, n_worke
                 obscode=OBSCODE, visit=int(r["visit"]), detector=int(r["detector"]),
                 x=xy[:, 0], y=xy[:, 1], score=cand["score"].to_numpy(),
                 length=cand["length"].to_numpy(), len_db=L_db, mf_snr=cand["mf_snr"].to_numpy(),
+                length_raw=cand.get("length_raw", pd.Series(np.nan, index=cand.index)).to_numpy(),  # RAW pre-debias (MF_LEN recalibration)
                 ra0=sky0[:, 0], dec0=sky0[:, 1], ra1=sky1[:, 0], dec1=sky1[:, 1],
                 beta=cand["beta"].to_numpy(),
                 beta_nn=cand.get("beta_nn", pd.Series(np.nan, index=cand.index)).to_numpy(),

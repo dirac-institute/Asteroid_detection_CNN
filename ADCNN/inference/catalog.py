@@ -56,6 +56,7 @@ _COLMAP = {
     "y_centroid": "y",
     "mf_beta": "beta",          # trail PA from footprint PCA (deg, 0=+x); recovers truth ~8-10deg MAD
     "mf_length": "length",      # measured trail length (px), de-biased to physical length (see MF_LEN_*)
+    "mf_length_raw": "length_raw",  # RAW pre-debias matched-filter length (px); for model-specific MF_LEN recalibration
     "mf_flux": "flux",          # integrated matched-filter flux (brightness proxy)
     "mf_snr": "mf_snr",
     "area": "area",
@@ -93,8 +94,11 @@ PROGRESS_S = 20.0  # heartbeat interval (s) for the per-shard progress print
 # The emitted `length` INVERTS this to the physical trail length (median residual ~0px vs truth),
 # so eval parameter-recovery is unbiased and HelioLinC gets the true length. Single source of
 # truth: downstream consumers read the corrected `length` directly (no re-correction).
-MF_LEN_OFFSET = 33.4
-MF_LEN_SLOPE = 0.887
+# Env-overridable so a model-specific recalibration (e.g. a domain-adapted v2 stage-1 with a different
+# ends-bloom) can supply its OWN constants without editing this file or affecting the v1 default.
+# Set ADCNN_MF_LEN_OFFSET=0 ADCNN_MF_LEN_SLOPE=1 to emit RAW length (for fitting the constants).
+MF_LEN_OFFSET = float(os.environ.get("ADCNN_MF_LEN_OFFSET", "33.4"))
+MF_LEN_SLOPE = float(os.environ.get("ADCNN_MF_LEN_SLOPE", "0.887"))
 
 
 def panel_to_catalog_rows(pid: int, prob, img, agg, rl, cnn,
@@ -119,6 +123,7 @@ def panel_to_catalog_rows(pid: int, prob, img, agg, rl, cnn,
         return None
     cand["image_id"] = int(pid)
     if "mf_length" in cand.columns:   # de-bias the ends-bloom -> physical trail length (see MF_LEN_*)
+        cand["mf_length_raw"] = cand["mf_length"]   # preserve RAW (pre-debias) for model-specific MF_LEN recalibration
         cand["mf_length"] = np.clip((cand["mf_length"] - MF_LEN_OFFSET) / MF_LEN_SLOPE, 0.0, None)
     return cand[[c for c in _COLMAP if c in cand.columns]].rename(columns=_COLMAP)
 
