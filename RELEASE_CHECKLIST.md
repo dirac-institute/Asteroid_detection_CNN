@@ -23,23 +23,27 @@ Two reproducibility levels (run from a clean checkout in the `asteroid_cnn` cond
   `TRAIN_V2_D_E2E.md`). The exposure-disjoint clean retrain is the OPTIONAL hardening variant —
   `heliolinc/CLEAN_RETRAIN_PLAN.md` (staged/gated; Stage A filters cached panels, no Butler rebuild).
 
-## Clean-checkout verification (what was run)
+## Clean-checkout verification — RUN AND PASSED (git worktree at the release commit, no 14 GB h5, no GPU)
 
-1. **Fresh checkout** — `git worktree` at the release commit (symlinks + caches only; no 14 GB h5).
-2. **Report regeneration** — `run_experiment --stage report` → CLEAN-24 `3.68 → 10.74%` (+192%).
-3. **Notebook regeneration** — `--stage evaluation-notebooks` renders both notebooks + HTML (the
-   stack-FP counts come from the committed `Evaluation/catalogs_*/stack_fp_counts.json`, so the
-   14 GB `DATA/test.h5` is NOT required on a clean checkout; the h5 is a fallback for full rebuilds).
+1. **Fresh checkout** — `git worktree --detach` at the release commit; model symlinks resolve;
+   `DATA/test.h5` (14 GB, untracked) absent — the true clean-clone condition. **PASS.**
+2. **Report regeneration** — `run_experiment --stage report` → release-check PASSED + CLEAN-24
+   `3.68 → 10.74%` (+192%). **PASS.**
+3. **Notebook regeneration** — `--stage evaluation-notebooks` rendered both notebooks + HTML with
+   **no h5**: detector recall 0.603 @ S≥0.80, union table 5σ+NN 3724, zero tracebacks. Served by the
+   committed caches (`stack_fp_counts.json` + gzipped `stack_catalog_{5,4,3}sigma.csv.gz` + truth
+   `DATA/test.csv`); the h5 is only a fallback for a full rebuild. **PASS.**
 4. **Exact numbers** — current 0.603 recall @ S≥0.80 (cross-domain detector diagnostic); CLEAN-24
-   blind 10.74% / +192%; ALL-26 10.33% / +184% (flagged not-strictly-blind).
-5. **Leakage artifacts** — `ADCNN/pipelines/heliolinc/leakage_audit/leakage_audit.json` produced;
-   contamination confined to blind fields 0,1.
+   blind 10.74% / +192%; ALL-26 10.33% / +184% (flagged not-strictly-blind). **PASS.**
+5. **Leakage artifacts** — `ADCNN/pipelines/heliolinc/leakage_audit/leakage_audit.json` committed;
+   contamination confined to blind fields 0,1; report-stage check confirms. **PASS.**
 6. **Active defaults never touch legacy** — clean-env `load_pipeline()` → `models/current/pipeline.json`;
-   no active default resolves to `legacy_v1` or old MF_LEN (only explicit selection).
-7. **Notebooks need no manual edits** — defaults resolve from the active pipeline + `catalogs_current`.
-8. **Full training command documented** — `--stages all` (Level 2) + `TRAIN_V2_D_E2E.md`.
-9. **All model/config md5s recorded** — `models/v2_D/v2_D_release.json`; verified by the report stage.
-10. **Reproducible release candidate tagged** — see the tag below.
+   no active default resolves to `legacy_v1` or old MF_LEN (only explicit selection). **PASS.**
+7. **Notebooks need no manual edits** — defaults resolve from the active pipeline + `catalogs_current`. **PASS.**
+8. **Full training command documented** — `--stages all` (Level 2) + `TRAIN_V2_D_E2E.md`. **PASS.**
+9. **All model/config md5s recorded + verified** — `models/v2_D/v2_D_release.json`; the report stage
+   re-verifies the seg/cnn md5s every run. **PASS.**
+10. **Reproducible release candidate tagged** — `adcnn-v2_D-rc3` (this commit). **PASS.**
 
 ## Frozen state (release identity)
 - Models: `models/v2_D/` (md5s in `v2_D_release.json`); `models/current/` points into it.
