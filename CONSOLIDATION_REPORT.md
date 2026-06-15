@@ -67,6 +67,31 @@ no GPU re-run, no change to blind evidence.
 `detect_v2full.slurm --cnn-thr 0.50`. **Immaterial to every reported number**: the alert op gate is
 S≥0.80 (> 0.6 > 0.50), so committed catalogs/headline are identical; only a *fresh* detect default changes.
 
+## Exposure-leakage audit (release validation) — the "rc1 leak", fully resolved
+
+Ran `leakage_guard.visit_detector_pairs` over every training/calibration input of the *exact* current
+model vs the 26 blind eval manifests (`leakage_audit/leakage_audit.json`):
+
+| stage | input | leaked (visit,detector) |
+|---|---|---|
+| 1. stage-1 fine-tune | `run_ft/train.csv` (val clean) | **8** |
+| 2. stage-2 refit | `run_ft_cnn/train.csv` (val clean) | **4** |
+| 3+4. MF_LEN + threshold | `run_dev/manifest_*.csv` dev pool | **99** (union) |
+| 5. hard-positive mining | = the stage-1 fine-tune pool | (same 8) |
+
+**Answer: yes, the current model saw blind exposures — but ALL leaked exposures fall in exactly 2 of
+the 26 blind fields (field 0: 69, field 1: 30; all share night 20250723). The other 24 fields are
+provably disjoint.** Consequences, documented and now surfaced by `run_experiment --stage report`:
+- **ALL-26 (3.64→10.33%, +184%) is NOT strictly blind** — it includes fields 0,1.
+- **CLEAN-24 (drop fields 0,1) = 3.68→10.74% (+192%), purity 86.0→88.5%, is a leakage-FREE blind
+  evaluation** (0 leaked exposures remain) and is the **defensible headline** — slightly stronger.
+- A fully-clean **all-26** number still needs the pre-registered exposure-disjoint clean retrain
+  (now enforceable: the `data` stage calls the leakage guard). **No release tag until that decision.**
+
+Release-validation checklist (all green): leakage guard run on every manifest + saved as artifact;
+`--stage report` reproduces 3.64→10.33 (+ clean-24 10.74); NY2 anchor recovered; default pipeline =
+`models/current/pipeline.json` only; no active default resolves to legacy_v1 or old MF_LEN.
+
 ## Remaining technical debt (deferred, non-blocking)
 - The `ADCNN/pipelines/heliolinc/run_*/` sprawl (h2h, band, box, lambda, night, realfp, test2)
   is evidence/scratch from the research campaign; left in place (referenced by caches/docs). A

@@ -8,7 +8,12 @@ do not conflate them.
   frozen op-point (`op_2v_alert.json`: S≥0.80, mf_snr≥5, chi2≤5, rate[1,8], top-50/night).
 - **Where:** `python -m ADCNN.pipelines.run_experiment --stage report` (→ `regen_v2_report.py`),
   over the committed per-field pair caches on the DM-53195 **blind** fields.
-- **Headline:** `3.64% → 10.33%` (+184%, clean-24 +192%), purity `86.1 → 88.6%` (held).
+- **Headline (defensible, leakage-free): CLEAN-24 = `3.68% → 10.74%` (+192%), purity `86.0 → 88.5%`.**
+  The current model's training/MF_LEN/threshold inputs share night-20250723 `(visit,detector)`
+  exposures with **only** blind fields 0 and 1 (audit: `leakage_audit/leakage_audit.json` — stage-1: 8,
+  stage-2: 4, dev pool: 99 union). So the **ALL-26 `3.64 → 10.33%` (+184%) is NOT strictly blind**;
+  dropping the 2 contaminated fields leaves a fully leakage-free 24-field blind set (the clean-24
+  number above). A fully-clean *all-26* number requires the pre-registered exposure-disjoint retrain.
 - **Baselines** (paper): Stack 5σ / Stack 4σ / ADCNN / Stack ∪ ADCNN — deduplicated union tables;
   ADCNN is a **complement** (adds stack-missed faint-fast), not a raw-recovery replacement.
 - **Threshold selection** (frozen before the blind shot): S=0.80 sits on a completeness plateau;

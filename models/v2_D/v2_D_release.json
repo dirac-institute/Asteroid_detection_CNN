@@ -32,12 +32,14 @@
   },
   "dev_gate": {"v1_C_ff": 1.42, "v2D_C_ff": 5.67, "rel_pct": 299, "fields": 20, "purity": "95.0->93.5"},
   "exposure_leakage": {
-    "_comment": "Code-review finding: training was tract-disjoint from blind but NOT exposure-disjoint. Adjacent tracts on shared night 20250723 share boundary-CCD exposures -> 12 (visit,detector) panels leaked into 2 of 26 blind fields (10 in field 0, 2 in field 1; both off-ecliptic). NON-INFLATING: clean-subset re-score is slightly STRONGER.",
-    "leaked_panels": 12, "leaked_blind_fields": [0, 1],
-    "clean_24_all":    {"v1_C_ff": 3.68, "v2D_C_ff": 10.74, "rel_pct": 192, "v2D_purity": 88.5},
+    "_comment": "Training was tract-disjoint from blind but NOT exposure-disjoint: adjacent tracts on shared night 20250723 share boundary-CCD (visit,detector) exposures. Full audit (ADCNN/pipelines/heliolinc/leakage_audit/leakage_audit.json) vs the 26 blind manifests: ALL leaked exposures fall in ONLY blind fields 0 and 1; the other 24 fields are provably disjoint. Therefore ALL-26 is NOT strictly blind; CLEAN-24 (drop fields 0,1) is a leakage-FREE blind evaluation and is the DEFENSIBLE headline.",
+    "leaked_blind_fields": [0, 1],
+    "per_stage_leaked_visit_detector": {"stage1_finetune_train": 8, "stage2_refit_train": 4, "mflen_threshold_dev_pool": 99, "stage1_val": 0, "stage2_val": 0, "note": "8+4=the 12 direct training exposures; 99 = the broader MF_LEN/threshold dev pool (run_dev). All in fields 0,1."},
+    "all_26_blind":    {"v1_C_ff": 3.64, "v2D_C_ff": 10.33, "rel_pct": 184, "v2D_purity": 88.6, "strictly_blind": false},
+    "clean_24_blind":  {"v1_C_ff": 3.68, "v2D_C_ff": 10.74, "rel_pct": 192, "v2D_purity": 88.5, "strictly_blind": true, "headline": true},
     "clean_18_offecl": {"v1_C_ff": 3.60, "v2D_C_ff": 9.44, "rel_pct": 162, "v2D_purity": 97.5},
-    "integrity_headline": "clean-24 +192% (>= all-26 +184%); result robust to removing all leaked exposures",
-    "recommendation": "for a FINAL (non-rc) tag, rebuild run_ft/run_ft_cnn excluding blind (visit,detector) pairs + re-confirm; result already shown robust"
+    "integrity_headline": "DEFENSIBLE blind number = CLEAN-24 +192% (3.68->10.74%); leakage-free by construction (0 leaked exposures in the 24 fields) and >= the all-26 +184%.",
+    "recommendation": "For a FULLY-CLEAN all-26 tag, rebuild run_ft/run_ft_cnn/run_dev excluding blind (visit,detector) pairs (the data stage now enforces this via leakage_guard) + re-confirm. Until then cite CLEAN-24, not ALL-26, as the blind result."
   },
   "scope_caveats": [
     "Trained/dev-gated on OFF-ECLIPTIC DM-53195; ecliptic blind gain is out-of-domain transfer (encouraging, conservative purity).",

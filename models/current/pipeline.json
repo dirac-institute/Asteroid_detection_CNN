@@ -15,7 +15,8 @@
   "cnn_thr_floor": 0.50,
   "alert_op_point": "ADCNN/pipelines/heliolinc/op_2v_alert.json",
   "headline": {
-    "_comment": "Reference only (frozen blind result; reproduce via ADCNN/pipelines/heliolinc/regen_v2_report.py). Not read by code.",
-    "faint_fast_2v_alert_completeness": "3.64% -> 10.33% vs prior baseline (+184%), purity 86.1->88.6%, 26 DM-53195 blind fields"
+    "_comment": "Reference only (frozen blind result; reproduce via ADCNN/pipelines/heliolinc/regen_v2_report.py). Not read by code. DEFENSIBLE blind number = CLEAN-24 (leakage-free); ALL-26 is NOT strictly blind (2 fields share training exposures). See leakage_audit/leakage_audit.json.",
+    "faint_fast_2v_alert_completeness_clean24_blind": "3.68% -> 10.74% vs prior baseline (+192%), purity 86.0->88.5%, leakage-free 24-field blind set",
+    "all_26_not_strictly_blind": "3.64% -> 10.33% (+184%) -- includes 2 contaminated fields; do not cite as fully blind"
   }
 }

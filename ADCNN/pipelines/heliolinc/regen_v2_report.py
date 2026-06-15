@@ -63,16 +63,30 @@ def tally(ks, getrows, rec):
     return tp, fp, pur, C, round((tp + fp) / len(ks), 1)
 
 
+# Exposure-leakage: training/dev inputs share night-20250723 (visit,detector) exposures with ONLY
+# blind fields 0 and 1 (see leakage_audit/leakage_audit.json). CLEAN-24 drops those two fields -> a
+# fully leakage-free blind evaluation. It is the DEFENSIBLE headline (and is slightly stronger).
+LEAKED_FIELDS = ["0", "1"]
+
+
 def main():
-    print("ADCNN v2_D blind verdict (frozen op S>=0.80, mf_snr>=5, chi2<=5, rate[1,8]):\n")
-    print(f"{'split':12s} {'model':5s} {'tp':>5s} {'fp':>4s} {'purity':>7s} {'C_ff':>7s} {'alerts/fn':>10s}")
-    for tag, ks in [("ALL", OFFECL + ECL), ("off-ecl", OFFECL), ("ecliptic", ECL)]:
+    print("ADCNN current-pipeline blind verdict (frozen op S>=0.80, mf_snr>=5, chi2<=5, rate[1,8]):\n")
+    print(f"{'split':24s} {'model':8s} {'tp':>5s} {'fp':>4s} {'purity':>7s} {'C_ff':>7s} {'alerts/fn':>10s}")
+    clean24 = [k for k in (OFFECL + ECL) if k not in LEAKED_FIELDS]
+    splits = [("ALL-26 (NOT strictly blind*)", OFFECL + ECL),
+              ("CLEAN-24 (leakage-free**)", clean24),
+              ("off-ecl", OFFECL), ("ecliptic", ECL)]
+    for tag, ks in splits:
         rec = rec_for(ks)
         a = tally(ks, v1_rows, rec)
         b = tally(ks, v2_cache, rec)
-        print(f"{tag:12s} {'v1':5s} {a[0]:>5d} {a[1]:>4d} {str(a[2])+'%':>7s} {str(a[3])+'%':>7s} {a[4]:>10}")
-        print(f"{tag:12s} {'v2_D':5s} {b[0]:>5d} {b[1]:>4d} {str(b[2])+'%':>7s} {str(b[3])+'%':>7s} {b[4]:>10}")
-    print("\n(v1 reproduces its original BLIND_TEST_REPORT numbers exactly -> harness check.)")
+        print(f"{tag:24s} {'prior':8s} {a[0]:>5d} {a[1]:>4d} {str(a[2])+'%':>7s} {str(a[3])+'%':>7s} {a[4]:>10}")
+        print(f"{tag:24s} {'current':8s} {b[0]:>5d} {b[1]:>4d} {str(b[2])+'%':>7s} {str(b[3])+'%':>7s} {b[4]:>10}")
+    print("\n* ALL-26 includes blind fields 0,1 which share night-20250723 exposures with the training/dev")
+    print("  inputs (stage-1: 8, stage-2: 4, MF_LEN/threshold dev pool: 99 union exposures). NOT fully blind.")
+    print("** CLEAN-24 drops fields 0,1 -> 0 leaked exposures remain -> the DEFENSIBLE blind headline:")
+    print("   prior 3.68% -> current 10.74% (+192%), purity 86.0->88.5%. (leakage_audit/leakage_audit.json)")
+    print("(prior baseline reproduces its original BLIND_TEST_REPORT numbers exactly -> harness check.)")
 
 
 if __name__ == "__main__":
