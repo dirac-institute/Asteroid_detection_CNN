@@ -248,11 +248,13 @@ def main():
         inject_map = load_inject_map(a.inject)
         print(f"[discover] INJECT mode: {sum(len(v) for v in inject_map.values())} synthetic trails over {len(inject_map)} panels", flush=True)
 
-    # Operating point comes from the val2 calibration persisted in the model sidecar JSON
-    # (cnn_postproc.json -> "threshold", the combined-FPP-budget op-point), NOT a hardcoded constant.
-    from ADCNN.inference.cnn_postproc import read_threshold
+    # Retention threshold priority: explicit --cnn-thr > the model sidecar's calibrated "threshold" >
+    # the active pipeline's cnn_thr_floor (current=0.50; the alert op S>=0.80 is applied later in the
+    # linker). The floor comes from the pipeline config so it is not a hardcoded generic constant.
+    from ADCNN.inference.cnn_postproc import read_threshold, CNN_DEFAULT_THR
     cnn_model = a.cnn
-    thr = a.cnn_thr if a.cnn_thr is not None else read_threshold(cnn_model)
+    _floor = _PIPE.cnn_thr_floor if _PIPE else CNN_DEFAULT_THR
+    thr = a.cnn_thr if a.cnn_thr is not None else read_threshold(cnn_model, default=_floor)
     print(f"[discover] stage-2 filter = focal-cutout CNN ({Path(cnn_model).name}) @ thr {thr} "
           f"({'override' if a.cnn_thr is not None else 'val2-calibrated sidecar'})", flush=True)
 

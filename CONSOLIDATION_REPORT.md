@@ -26,8 +26,9 @@ no GPU re-run, no change to blind evidence.
 
 ### 3. Exposure-level leakage guard (`ADCNN/pipelines/leakage_guard.py`)
 - `assert_disjoint(train, blind)` raises `LeakageError` if any `(visit,detector)` appears in both
-  training and blind/test inputs (tract-disjoint is not enough — the rc1 12-panel leak). Wired
-  into the `data` stage.
+  training and blind/test inputs (tract-disjoint is not enough — the rc1 12-panel leak). Available
+  in the `data` stage: it fires when both `--train-manifests` and `--blind-manifests` are passed
+  (the stage prints a note otherwise). Auto-discovery of manifests is deferred (GPU stage; not run here).
 
 ### 4. Notebooks
 - `Evaluation/Evaluation.ipynb` = canonical **current** pipeline (defaults → `models/current`
@@ -53,7 +54,18 @@ no GPU re-run, no change to blind evidence.
   (md5 identical pre/post); `pipeline.json` references the op, not vice versa. Golden-value test pins them.
 - `run_experiment --stage report` prints the headline identically: **3.64% → 10.33% (+184%)**,
   purity 86.1→88.6%.
+- **NY2 regression anchor PASSES:** the linker on the committed `run_night8731` masked dets with
+  `link_op_point.json` recovers exactly **2025 NY2** (`1 CONFIRMED (1 known objs)`).
 - `models/v2_D/` untouched (md5s = immutable release identity).
+- Clean-checkout safe: all `models/{current,legacy_v1}/*` are git symlinks (mode 120000); both
+  pipelines' target model files are tracked.
+
+## Detection threshold (cnn_thr_floor) — made truthful
+`models/<pipeline>/pipeline.json` records `cnn_thr_floor` (current 0.50, legacy 0.5886). Wired into
+`discover_stream` as the fallback when neither `--cnn-thr` nor a sidecar `threshold` is present
+(replacing the generic `CNN_DEFAULT_THR=0.6`). This matches `v2_D_release.json` and the actual blind
+`detect_v2full.slurm --cnn-thr 0.50`. **Immaterial to every reported number**: the alert op gate is
+S≥0.80 (> 0.6 > 0.50), so committed catalogs/headline are identical; only a *fresh* detect default changes.
 
 ## Remaining technical debt (deferred, non-blocking)
 - The `ADCNN/pipelines/heliolinc/run_*/` sprawl (h2h, band, box, lambda, night, realfp, test2)
@@ -63,6 +75,12 @@ no GPU re-run, no change to blind evidence.
   a historical-comparison tool, which is allowed to retain old labels).
 - The frozen `op_*.json` `model_version`/`data_release` strings still describe the shared
   architecture + the DM-53881 calibration release (factually correct); intentionally not rewritten.
+- SLURM `RUN_NAME=seg` defaults and `models/<RUN_NAME>_*.pt` path construction in
+  `eval_end_to_end.slurm` / `train_end_to_end.slurm` were not re-pointed to the `current`/`legacy_v1`
+  naming (they are training-output scaffolding, not active inference defaults). A future pass can
+  align them to the pipeline config.
+- `run_experiment --stages all --submit` would shell-run the `data` stage's documentation string
+  (the data stage is doc-only this pass); harmless in `--dry-run` and without `--submit`.
 - FINAL (non-rc) tag still wants an exposure-disjoint clean retrain (the leakage guard now enforces
   this at build time); ecliptic-inclusive dev set; multi-night blind window — all pre-registered,
   separate from this consolidation.
