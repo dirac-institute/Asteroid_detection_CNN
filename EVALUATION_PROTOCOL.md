@@ -13,7 +13,11 @@ do not conflate them.
   exposures with **only** blind fields 0 and 1 (audit: `leakage_audit/leakage_audit.json` — stage-1: 8,
   stage-2: 4, dev pool: 99 union). So the **ALL-26 `3.64 → 10.33%` (+184%) is NOT strictly blind**;
   dropping the 2 contaminated fields leaves a fully leakage-free 24-field blind set (the clean-24
-  number above). A fully-clean *all-26* number requires the pre-registered exposure-disjoint retrain.
+  number above). CLEAN-24 is the **shipped, paper-ready** result; a fully-clean *all-26* number is an
+  OPTIONAL hardening retrain (staged/gated, see `heliolinc/CLEAN_RETRAIN_PLAN.md`), not required.
+- **Manuscript wording for CLEAN-24:** "The final leakage-free blind evaluation uses the 24 fields with
+  no exposure overlap between training/calibration and evaluation. The two contaminated fields were
+  excluded from the headline metric and retained only in an audit table."
 - **Baselines** (paper): Stack 5σ / Stack 4σ / ADCNN / Stack ∪ ADCNN — deduplicated union tables;
   ADCNN is a **complement** (adds stack-missed faint-fast), not a raw-recovery replacement.
 - **Threshold selection** (frozen before the blind shot): S=0.80 sits on a completeness plateau;
