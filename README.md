@@ -15,29 +15,50 @@ Butler diffim → segmentation model (UNet + orientation + Hough aggregator)
               → (RA, Dec, MJD)   → HelioLinC linking → confirmed / new asteroids
 ```
 
-## Deployed models
+## Active pipeline (the default)
 
-The production checkpoints live in `models/`:
+There is **one current ADCNN pipeline**, selected through a single config
+(`ADCNN/config.py` → `models/<name>/pipeline.json`). The default is `current` — the
+domain-adapted detector (frozen `adcnn-v2_D-rc1`). A pipeline bundles, as one unit, the
+stage-1/stage-2 model files **and** the model-specific MF_LEN trail-length de-bias, so they
+always travel together (mixing a model with another model's de-bias silently corrupts
+`len_db`). Select a different pipeline with `ADCNN_PIPELINE` (a name or a path):
 
-| file | role |
-|---|---|
-| `models/segmentation_model.pt` | TorchScript segmentation model (stage 1) |
-| `models/cnn_postproc.pt`       | focal-loss cutout-CNN false-positive filter (stage 2) |
-| `models/cnn_postproc.json`     | architecture sidecar + calibrated CNN threshold |
+| pipeline | what | de-bias |
+|---|---|---|
+| `current` *(default)* | `models/current/` → the promoted detector (`adcnn-v2_D-rc1`) | 7.67 / 0.9425 |
+| `legacy_v1` | `models/legacy_v1/` → the prior v1.0 baseline (provenance / regression) | 33.4 / 0.887 |
 
-Stage 1 reaches **96.0 % object-wise recall on the simulated 5σ test set**; stage 2 cuts
-~56 % of stage-1 false positives at 95 % recall. The combined 5σ-stack + ADCNN detector is
-calibrated to **100 FP/panel** on the calibration set
-(`ADCNN.training.cnn_postproc.calibrate_combined_threshold`).
+Headline product result (current pipeline): faint-fast same-night 2-visit **alert
+completeness 3.64% → 10.33%** (+184%) at held purity, on the DM-53195 blind fields —
+reproduce with `python -m ADCNN.pipelines.run_experiment --stage report`. The frozen models
+live under `models/v2_D/` (md5s in `v2_D_release.json`); `models/current/` points into them.
 
-## Entry points (`python -m ADCNN.pipelines.<name>`)
+## Single entry point
+
+```bash
+python -m ADCNN.pipelines.run_experiment --stage report        # reproduce the headline (CPU)
+python -m ADCNN.pipelines.run_experiment --stages all --dry-run # the full ordered plan
+```
+
+One driver for every stage (`data`, `train-stage1`, `train-stage2`, `calibrate-mflen`,
+`detect`, `alert-eval`, `report`); CPU stages run in-process, GPU/Butler stages print the
+exact `sbatch` command. See **REPRODUCE.md**, **TRAINING_PROTOCOL.md**, **EVALUATION_PROTOCOL.md**.
+
+### Underlying stage modules (`python -m ADCNN.pipelines.<name>`)
 
 | command | purpose |
 |---|---|
+| `run_experiment`     | **the single canonical driver** wrapping all stages below |
 | `make_sim_data`      | build the simulated injected-trail train / val / test datasets from the Butler |
 | `make_real_data`     | build the real-asteroid test diffim dataset from the Butler |
 | `train_end_to_end`   | train the segmentation model, then the focal cutout CNN, and persist both with a sidecar JSON |
-| `make_eval_catalogs` | score the test sets with the deployed models, emit detection catalogs and metrics |
+| `make_eval_catalogs` | score the test sets with the active pipeline, emit detection catalogs and metrics |
+
+Detector defaults (`--seg-model` / `--cnn` and the MF_LEN de-bias) resolve from the active
+pipeline; no per-run env combos are needed. Stage 1 reaches **96.0 % object-wise recall on the
+simulated 5σ test set** (v1.0 baseline); the combined 5σ-stack + ADCNN detector is calibrated
+to **100 FP/panel** (`ADCNN.training.cnn_postproc.calibrate_combined_threshold`).
 
 Single-h5 inference:
 
@@ -106,7 +127,10 @@ ADCNN/
 │   ├── geometry.py        mask + component primitives
 │   ├── plots.py           notebook visualisations
 │   └── architecture.py    paper architecture figures
-└── pipelines/            CLI entry points + SLURM submission wrappers
+├── config.py            active-pipeline resolver (models/<name>/pipeline.json; ADCNN_PIPELINE)
+└── pipelines/           CLI entry points + SLURM submission wrappers
+    ├── run_experiment.py the single canonical workflow driver (all stages)
+    ├── leakage_guard.py  fail-loud (visit,detector) blind/test leakage check
     ├── make_sim_data.py
     ├── make_real_data.py
     ├── train_end_to_end.py
@@ -114,13 +138,19 @@ ADCNN/
     ├── slurm/             SLURM scripts (data build, train, eval)
     └── heliolinc/         downstream linking pipeline (HelioLinC bridge + NEO discovery DAG)
 
-models/                  deployed weights + sidecar
-Evaluation/              Evaluation.ipynb (simulated) + Evaluation_Real.ipynb (real)
+models/                  current/ + legacy_v1/ (pipeline.json + pointers) over the frozen v2_D/ release
+Evaluation/              Evaluation.ipynb (current) + Evaluation_legacy_v1.ipynb + Evaluation_Real.ipynb
 DATA/                    inputs (Butler manifests + real-asteroid truth + forced-photometry CSVs)
 DATA_DIFFIM/             built diffim h5/csv datasets (not tracked)
 ```
 
-## Reproducing v1.0
+## Reproducing the result
+
+For the **current** pipeline (the headline), see **REPRODUCE.md** (one-command verdict +
+the full GPU chain) and **TRAINING_PROTOCOL.md** / **EVALUATION_PROTOCOL.md**. The legacy
+v1.0 recipe below is kept for provenance.
+
+### Legacy v1.0
 
 ```bash
 # Stage A — build the simulated dataset family + the real-data test set

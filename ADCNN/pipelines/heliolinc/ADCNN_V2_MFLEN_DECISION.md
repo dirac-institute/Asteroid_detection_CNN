@@ -1,3 +1,5 @@
+> **Provenance / historical record.** `v2_D` is the development name of what is now the **current** default pipeline (`models/current/`, frozen `adcnn-v2_D-rc1`). For the active workflow use the repo-root `REPRODUCE.md` / `TRAINING_PROTOCOL.md` / `EVALUATION_PROTOCOL.md` and `python -m ADCNN.pipelines.run_experiment`. This doc is kept for the development record.
+
 # ADCNN v2_D — decision report: the trail-length de-bias recalibration (MF_LEN)
 
 **Date:** 2026-06-14 · **Phase:** v2 Phase 3 (dev alert gate) · **Status:** BLOCKED on a user decision,

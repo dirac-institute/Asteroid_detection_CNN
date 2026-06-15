@@ -1,3 +1,5 @@
+> **Provenance / historical record.** `v2_D` is the development name of what is now the **current** default pipeline (`models/current/`, frozen `adcnn-v2_D-rc1`). For the active workflow use the repo-root `REPRODUCE.md` / `TRAINING_PROTOCOL.md` / `EVALUATION_PROTOCOL.md` and `python -m ADCNN.pipelines.run_experiment`. This doc is kept for the development record.
+
 # ADCNN v2_D — end-to-end training that recreates the headline
 
 This is the full chain from the v1 detector to the v2_D blind headline

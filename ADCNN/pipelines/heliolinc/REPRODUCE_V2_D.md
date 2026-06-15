@@ -1,3 +1,5 @@
+> **Provenance / historical record.** `v2_D` is the development name of what is now the **current** default pipeline (`models/current/`, frozen `adcnn-v2_D-rc1`). For the active workflow use the repo-root `REPRODUCE.md` / `TRAINING_PROTOCOL.md` / `EVALUATION_PROTOCOL.md` and `python -m ADCNN.pipelines.run_experiment`. This doc is kept for the development record.
+
 # Reproducing the ADCNN v2_D release-candidate result
 
 Frozen artifacts (md5 in `models/v2_D/v2_D_release.json`):
