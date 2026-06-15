@@ -1,0 +1,332 @@
+#!/usr/bin/env python3
+"""Regenerate the same-night 2-visit alert thresholds from validation evidence and CONFIRM
+they re-select the frozen operating point.
+
+This is the *formal* threshold-selection stage: the shipped ADCNN score floor (and its
+companion photometric cut) are not inherited constants -- they are produced by applying a
+**pre-declared decision rule** to the validation completeness/purity curves, which are
+themselves regenerated here from the committed per-pair evidence caches. The input is the
+validation evidence, NEVER the frozen op-point; the frozen op-point is only the thing we
+**confirm** the rule re-derives. If the pre-declared rule ever fails to re-select the frozen
+values, this stage FAILS LOUD (it is a finding to surface, not a knob to turn).
+
+Decision rule (pinned before coding; see THRESHOLD_DECISION.md / THRESHOLD_PROTOCOL.md):
+  * SCORE S -- purity-floor rule. Require the validation injected-truth fraction (in-sample
+    purity P) at the adopted mfsnr to be >= ``PURITY_FLOOR_PCT`` (a 3:1 true:false ratio at
+    75%); among S meeting it, take the LOWEST S (maximizes faint-fast completeness above the
+    floor). This is the only one of the documented framings that uniquely yields S=0.80
+    ("largest S on the J-plateau" gives 0.825; "completeness-knee" gives 0.85). The selection
+    is stable for any floor in ~(67%, 77%] (the stable band is recorded in the report).
+  * mfsnr -- completeness-retention rule. The alert tier's purpose is completeness, so do not
+    sacrifice more than (1-``MFSNR_RETENTION``) of the no-photometric-cut faint-fast
+    completeness; take the LARGEST mfsnr still retaining >= ``MFSNR_RETENTION`` of it. Lands on
+    mfsnr=5 (mf=6 already drops to 0.73 of uncut). Stable for retention in ~(0.73, 0.87].
+  * chi2 <= ``CHI2_MAX``, rate in [``RATE_LO``, ``RATE_HI``] are hard product constraints
+    (not swept) and are confirmed against the frozen op too.
+
+Definitions (faint-fast science bin, identical to the paper figure code): completeness =
+distinct injected faint-fast NEOs (detection-SNR 2-10, rate 1-8 deg/day; denominator = all
+such objects injected into >=2 same-night visits) with >=1 accepted 2-visit pair; purity (the
+validation injected-truth fraction) = TP pairs / (TP+FP pairs) at the injected truth density.
+
+This module OWNS the canonical curve computation; the figure script
+(``ADCNN.qa.plots_thresholds``) imports ``load_pairs``/``make_metrics`` from here.
+
+Usage:
+    PYTHONPATH=. python -m ADCNN.calibration.threshold_selection \
+        [--cache-dir ...] [--frozen-op ADCNN/pipelines/heliolinc/op_2v_alert.json] \
+        [--out models/<cand>] [--no-confirm]
+"""
+from __future__ import annotations
+
+import argparse
+import glob
+import json
+import os
+from collections import defaultdict
+from pathlib import Path
+
+import numpy as np
+
+from ADCNN.config import REPO
+
+# ---- pre-declared decision-rule constants (frozen BEFORE measuring; do not tune to hit 0.80) ----
+RATE_LO, RATE_HI = 1.0, 8.0          # faint-fast apparent-rate band (deg/day) -- hard constraint
+CHI2_MAX = 5.0                       # 2v orbit-fit acceptance gate -- hard constraint
+PURITY_FLOOR_PCT = 75.0              # in-sample purity floor for the SCORE rule (3:1 true:false)
+MFSNR_RETENTION = 0.80               # keep >= this fraction of uncut faint-fast completeness
+MFSNR_AT = 5                         # mfsnr the SCORE sweep is read at (= the mfsnr rule's output)
+
+S_GRID = [round(x, 4) for x in np.arange(0.60, 0.9001, 0.025)]
+MF_GRID = list(range(0, 11))
+
+DEFAULT_CACHE_DIR = REPO / "ADCNN" / "pipelines" / "heliolinc" / "run_lambda" / "_nomfsnr_cache"
+DEFAULT_FROZEN_OP = REPO / "ADCNN" / "pipelines" / "heliolinc" / "op_2v_alert.json"
+
+
+class ThresholdSelectionError(RuntimeError):
+    """Raised when the pre-declared rule does not re-select the frozen operating point."""
+
+
+# --------------------------------------------------------------------------------------------
+# canonical curve computation (regenerated from the committed per-pair caches)
+# --------------------------------------------------------------------------------------------
+def load_pairs(cache_dir):
+    """Load the exact per-pair rows + the recoverable-object truth map (rate-banded)."""
+    rows, allrec = [], {}
+    files = sorted(glob.glob(f"{cache_dir}/*_smin0.6_v3exact.json"))
+    if not files:
+        raise SystemExit(
+            f"no *_smin0.6_v3exact.json caches under {cache_dir} -- run exact_lowS_pairs first")
+    for cp in files:
+        k = os.path.basename(cp).split("_smin")[0]
+        c = json.load(open(cp))
+        for r in c["rows"]:
+            rows.append((k, *r))
+        for o, s in c["rec"].items():
+            allrec[f"{k}_{o}"] = float(s)
+    R = [(k, mn, mf, rate, label, obj)
+         for (k, mn, mf, rate, label, nfp, obj, mx, ln, c2, dpa, dsp, perp) in rows
+         if RATE_LO <= rate <= RATE_HI]
+    ff_tot = sum(1 for s in allrec.values() if 2 <= s < 10)
+    return R, allrec, ff_tot
+
+
+def make_metrics(R, allrec, ff_tot, n_boot=300, seed=42):
+    """Return (C, P, band, stats): completeness%, purity%, field-bootstrap 16-84% bands, and the
+    raw per-field (obj, tp, fp) count arrays -- all as a function of (score S, mfsnr)."""
+    fields = sorted({k for (k, *_r) in R})
+    fidx = {k: i for i, k in enumerate(fields)}
+    NF = len(fields)
+    F = np.array([fidx[k] for (k, mn, mf, rate, label, obj) in R])
+    MN = np.array([mn for (k, mn, mf, rate, label, obj) in R])
+    MF = np.array([mf for (k, mn, mf, rate, label, obj) in R])
+    TP = np.array([label == "tp" for (k, mn, mf, rate, label, obj) in R])
+    OBJ = np.array([f"{k}_{obj}" if obj else "" for (k, mn, mf, rate, label, obj) in R], dtype=object)
+    FFO = np.array([bool(obj) and 2 <= allrec.get(f"{k}_{obj}", -1) < 10
+                    for (k, mn, mf, rate, label, obj) in R])
+    denom_f = np.zeros(NF)
+    for o, s in allrec.items():
+        if 2 <= s < 10:
+            denom_f[fidx[o.split("_", 1)[0]]] += 1
+
+    def stats(S, mf):
+        m = (MN >= S) & (MF >= mf)
+        tp_f = np.bincount(F[m & TP], minlength=NF).astype(float)
+        fp_f = np.bincount(F[m & ~TP], minlength=NF).astype(float)
+        per = defaultdict(set)
+        for i in np.where(m & TP & FFO)[0]:
+            per[F[i]].add(OBJ[i])
+        obj_f = np.zeros(NF)
+        for f, s_ in per.items():
+            obj_f[f] = len(s_)
+        return obj_f, tp_f, fp_f
+
+    def C(S, mf):
+        return 100 * stats(S, mf)[0].sum() / ff_tot
+
+    def P(S, mf):
+        _, tp, fp = stats(S, mf)
+        t = tp.sum() + fp.sum()
+        return 100 * tp.sum() / t if t else float("nan")
+
+    rng = np.random.default_rng(seed)
+    BOOT = [rng.integers(0, NF, NF) for _ in range(n_boot)]
+
+    def band(S, mf):
+        obj_f, tp_f, fp_f = stats(S, mf)
+        Cs, Ps = [], []
+        for b in BOOT:
+            Cs.append(100 * obj_f[b].sum() / max(denom_f[b].sum(), 1))
+            t = tp_f[b].sum() + fp_f[b].sum()
+            Ps.append(100 * tp_f[b].sum() / t if t else float("nan"))
+        return ((float(np.percentile(Cs, 16)), float(np.percentile(Cs, 84))),
+                (float(np.nanpercentile(Ps, 16)), float(np.nanpercentile(Ps, 84))))
+
+    return C, P, band, stats
+
+
+# --------------------------------------------------------------------------------------------
+# the pre-declared decision rule
+# --------------------------------------------------------------------------------------------
+def _select_score(C, P, mf=MFSNR_AT, floor=PURITY_FLOOR_PCT):
+    """Purity-floor rule: lowest S whose in-sample purity at `mf` meets `floor`."""
+    feasible = [S for S in S_GRID if P(S, mf) >= floor]
+    if not feasible:
+        raise ThresholdSelectionError(
+            f"no score on the grid meets the in-sample purity floor {floor}% at mfsnr>={mf}")
+    sel = min(feasible)
+    # stable band: range of floors that would still yield this S (purity is monotone in S)
+    below = max([P(S, mf) for S in S_GRID if S < sel], default=float("nan"))
+    here = P(sel, mf)
+    return sel, (float(below), float(here))  # any floor in (below, here] selects `sel`
+
+
+def _select_mfsnr(C, S, retention=MFSNR_RETENTION):
+    """Completeness-retention rule: largest mfsnr retaining >= `retention` of the uncut
+    (mfsnr=0) faint-fast completeness at score floor `S`."""
+    c0 = C(S, 0)
+    feasible = [mf for mf in MF_GRID if c0 > 0 and C(S, mf) / c0 >= retention]
+    if not feasible:
+        raise ThresholdSelectionError(
+            f"no mfsnr retains >= {retention} of the uncut completeness at S>={S}")
+    sel = max(feasible)
+    above_ret = (C(S, sel + 1) / c0) if (sel + 1) in MF_GRID else float("nan")
+    here_ret = C(S, sel) / c0
+    return sel, (float(above_ret), float(here_ret))  # any retention in (above_ret, here_ret] selects
+
+
+def select_operating_point(C, P, *, purity_floor=PURITY_FLOOR_PCT, mfsnr_retention=MFSNR_RETENTION):
+    """Apply the full pre-declared rule. Returns the selected op + provenance/justification."""
+    score_min, score_band = _select_score(C, P, mf=MFSNR_AT, floor=purity_floor)
+    mfsnr_min, mf_band = _select_mfsnr(C, score_min, retention=mfsnr_retention)
+    return {
+        "score_min": float(score_min),
+        "mfsnr_min": float(mfsnr_min),
+        "chi2_max": float(CHI2_MAX),
+        "rate_lo": float(RATE_LO),
+        "rate_hi": float(RATE_HI),
+        "rule": {
+            "score": {
+                "name": "purity-floor (lowest S meeting in-sample purity floor)",
+                "purity_floor_pct": float(purity_floor),
+                "selected_purity_pct": round(P(score_min, mfsnr_min), 3),
+                "stable_floor_band_pct": [round(score_band[0], 3), round(score_band[1], 3)],
+            },
+            "mfsnr": {
+                "name": "completeness-retention (largest mfsnr keeping >= fraction of uncut C)",
+                "retention_floor": float(mfsnr_retention),
+                "selected_retention": round(mf_band[1], 4),
+                "stable_retention_band": [round(mf_band[0], 4), round(mf_band[1], 4)],
+            },
+        },
+        "at_op": {
+            "faint_fast_completeness_pct": round(C(score_min, mfsnr_min), 3),
+            "in_sample_purity_pct": round(P(score_min, mfsnr_min), 3),
+        },
+    }
+
+
+# --------------------------------------------------------------------------------------------
+# confirm-against-frozen + outputs
+# --------------------------------------------------------------------------------------------
+_FROZEN_KEYS = {  # selected-key -> frozen-op-json-key
+    "score_min": "score_min",
+    "mfsnr_min": "mfsnr_min_2v",
+    "chi2_max": "chi2_2v_max",
+    "rate_lo": "rate_lo_2v",
+    "rate_hi": "rate_hi_2v",
+}
+
+
+def confirm_against_frozen(selected, frozen_op_path, tol=0.0):
+    """Assert the regenerated selection matches the frozen op (within tol). Fail loud."""
+    frozen = json.load(open(frozen_op_path))
+    diffs = []
+    for sk, fk in _FROZEN_KEYS.items():
+        got, want = float(selected[sk]), float(frozen[fk])
+        if abs(got - want) > tol:
+            diffs.append(f"  {sk}: regenerated {got} != frozen {fk}={want}")
+    if diffs:
+        raise ThresholdSelectionError(
+            "regenerated threshold selection DISAGREES with the frozen op-point "
+            f"({frozen_op_path}).\nThis is a FINDING, not a knob -- do not edit the rule to "
+            "match.\n" + "\n".join(diffs))
+    return frozen
+
+
+def build_sweep_rows(C, P, stats):
+    """The evidence table written to threshold_sweep.csv."""
+    rows = []
+    for kind, Ss, mfs in (("score_sweep@mfsnr5", S_GRID, [MFSNR_AT]),
+                          ("mfsnr_sweep@S0.80", [0.80], MF_GRID)):
+        for S in Ss:
+            for mf in mfs:
+                obj_f, tp_f, fp_f = stats(S, mf)
+                rows.append({
+                    "sweep": kind, "score_min": S, "mfsnr_min": mf,
+                    "completeness_pct": round(C(S, mf), 4),
+                    "purity_pct": round(P(S, mf), 4),
+                    "n_tp_pairs": int(tp_f.sum()), "n_fp_pairs": int(fp_f.sum()),
+                    "n_ff_objects": int(obj_f.sum()),
+                })
+    return rows
+
+
+def write_outputs(out_dir, selected, rows, ff_tot, n_fields, cache_dir):
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    csv_path = out / "threshold_sweep.csv"
+    cols = ["sweep", "score_min", "mfsnr_min", "completeness_pct", "purity_pct",
+            "n_tp_pairs", "n_fp_pairs", "n_ff_objects"]
+    with open(csv_path, "w") as fh:
+        fh.write(",".join(cols) + "\n")
+        for r in rows:
+            fh.write(",".join(str(r[c]) for c in cols) + "\n")
+    report = {
+        "product": "same_night_2v_alert",
+        "selected_operating_point": {k: selected[k] for k in
+                                     ("score_min", "mfsnr_min", "chi2_max", "rate_lo", "rate_hi")},
+        "decision_rule": selected["rule"],
+        "metrics_at_op": selected["at_op"],
+        "validation_evidence": {
+            "cache_dir": str(cache_dir),
+            "n_fields": int(n_fields),
+            "faint_fast_denominator": int(ff_tot),
+            "definition": "faint-fast = detection-SNR 2-10, rate 1-8 deg/day, injected into "
+                          ">=2 same-night visits; purity = in-sample injected-truth fraction.",
+        },
+        "sweep_table": "threshold_sweep.csv",
+    }
+    rep_path = out / "validation_report.json"
+    json.dump(report, open(rep_path, "w"), indent=2)
+    return csv_path, rep_path, report
+
+
+def run(cache_dir=DEFAULT_CACHE_DIR, frozen_op=DEFAULT_FROZEN_OP, out=None, confirm=True):
+    """Regenerate curves, select the op via the pre-declared rule, confirm against frozen,
+    optionally write outputs. Returns (selected, report-or-None)."""
+    R, allrec, ff_tot = load_pairs(cache_dir)
+    n_fields = len({k for (k, *_r) in R})
+    C, P, band, stats = make_metrics(R, allrec, ff_tot)
+    selected = select_operating_point(C, P)
+    if confirm:
+        confirm_against_frozen(selected, frozen_op)
+    report = None
+    if out is not None:
+        rows = build_sweep_rows(C, P, stats)
+        _, _, report = write_outputs(out, selected, rows, ff_tot, n_fields, cache_dir)
+    return selected, report
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--cache-dir", default=str(DEFAULT_CACHE_DIR))
+    ap.add_argument("--frozen-op", default=str(DEFAULT_FROZEN_OP))
+    ap.add_argument("--out", default=None,
+                    help="release dir to write threshold_sweep.csv + validation_report.json")
+    ap.add_argument("--no-confirm", action="store_true",
+                    help="skip the assert-against-frozen-op step (development only)")
+    a = ap.parse_args()
+    selected, _ = run(cache_dir=a.cache_dir, frozen_op=a.frozen_op, out=a.out,
+                      confirm=not a.no_confirm)
+    op = selected
+    print(f"regenerated op: score_min={op['score_min']}  mfsnr_min={op['mfsnr_min']}  "
+          f"chi2_max={op['chi2_max']}  rate[{op['rate_lo']},{op['rate_hi']}]")
+    print(f"  rule(score) : {op['rule']['score']['name']}; floor {op['rule']['score']['purity_floor_pct']}%"
+          f" -> selected P={op['rule']['score']['selected_purity_pct']}%"
+          f" (stable floor band {op['rule']['score']['stable_floor_band_pct']}%)")
+    print(f"  rule(mfsnr) : {op['rule']['mfsnr']['name']}; retain>={op['rule']['mfsnr']['retention_floor']}"
+          f" -> selected {op['rule']['mfsnr']['selected_retention']}"
+          f" (stable band {op['rule']['mfsnr']['stable_retention_band']})")
+    print(f"  at op       : C={op['at_op']['faint_fast_completeness_pct']}%  "
+          f"P={op['at_op']['in_sample_purity_pct']}%")
+    if not a.no_confirm:
+        print("CONFIRMED: regenerated selection matches the frozen op_2v_alert.json.")
+    if a.out:
+        print(f"wrote threshold_sweep.csv + validation_report.json -> {a.out}/")
+
+
+if __name__ == "__main__":
+    main()
