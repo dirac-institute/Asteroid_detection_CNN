@@ -1,0 +1,34 @@
+{
+  "release": "adcnn-v2_D-rc1",
+  "pipeline": "current",
+  "provenance": "adcnn-v2_D-rc1",
+  "defensible_headline_clean24_blind": {
+    "v1_C_ff": 3.68,
+    "v2D_C_ff": 10.74,
+    "rel_pct": 192,
+    "v2D_purity": 88.5,
+    "strictly_blind": true,
+    "headline": true
+  },
+  "all_26_not_strictly_blind": {
+    "v1_C_ff": 3.64,
+    "v2D_C_ff": 10.33,
+    "rel_pct": 184,
+    "v2D_purity": 88.6,
+    "strictly_blind": false
+  },
+  "frozen_alert_op": {
+    "score_min": 0.8,
+    "chi2_2v_max": 5.0,
+    "mfsnr_min_2v": 5.0,
+    "rate_lo_2v": 1.0,
+    "rate_hi_2v": 8.0,
+    "alerts_top_n": 50
+  },
+  "mf_len_debias": {
+    "offset": 7.67,
+    "slope": 0.9425
+  },
+  "integrity_check_passed": true,
+  "leakage_audit_artifact": "ADCNN/pipelines/heliolinc/leakage_audit/leakage_audit.json"
+}

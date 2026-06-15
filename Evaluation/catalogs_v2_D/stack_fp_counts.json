@@ -1,0 +1,9 @@
+{
+ "_comment": "Precomputed stack-FP counts (sum of per-panel max of real_labels_<sigma>) for test.h5; lets Evaluation.ipynb regenerate without the 14GB DATA/test.h5 on a clean checkout.",
+ "test": {
+  "real_labels": 16010,
+  "real_labels_3sigma": 1049116,
+  "real_labels_4sigma": 75040,
+  "real_labels_5sigma": 16010
+ }
+}
