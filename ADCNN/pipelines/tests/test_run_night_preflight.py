@@ -52,6 +52,27 @@ def test_discovery_op_rejected_under_alert_product():
     assert raised, "discovery op must fail the alert-product preflight (different mfsnr floor)"
 
 
+def test_freeze_release_loads_and_preflights(tmp_path):
+    # the two pipelines must COMPOSE: a release frozen by train_and_validate must be loadable by
+    # load_pipeline and pass run_night's preflight (guards the bare-pointer regression).
+    from ADCNN.pipelines import train_and_validate as TV
+    import argparse
+    out = tmp_path / "cand"
+    a = argparse.Namespace(config=None, out=str(out), cache_dir=None, frozen_op=str(ALERT_OP),
+                           mflen_fit_csv=None)
+    if a.cache_dir is None:
+        from ADCNN.calibration import threshold_selection as TS
+        a.cache_dir = str(TS.DEFAULT_CACHE_DIR)
+        if not Path(a.cache_dir).exists():
+            return  # skip: validation caches absent from checkout
+    TV.stage_freeze(a, load_pipeline("current"), dry=False, submit=False)
+    pipe = load_pipeline(str(out / "pipeline.json"))
+    assert pipe.seg_model.exists() and pipe.cnn_model.exists(), \
+        "freeze-produced release model pointers must resolve to existing files"
+    # preflight reads the release's md5s.json + thresholds.json; the op-point is the resolved alert op
+    RN.preflight(pipe, str(pipe.alert_op_point), discovery=False)  # must not raise
+
+
 if __name__ == "__main__":
     import tempfile
     for name, fn in sorted(globals().items()):

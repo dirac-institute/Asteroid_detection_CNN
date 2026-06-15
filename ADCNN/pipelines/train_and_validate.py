@@ -157,8 +157,13 @@ def stage_freeze(a, pipe, dry, submit):
                     "FORMAL output of threshold_selection (regenerated + confirmed against the frozen op).",
         "name": out.name,
         "provenance": pipe.provenance,
-        "models": {"segmentation": "stage1.pt", "cnn_postproc": "stage2.pt",
-                   "cnn_sidecar": "stage2.json" if pipe.cnn_sidecar else None},
+        # Pointers are REPO-relative paths to THIS release dir's own symlinks: ADCNN.config._resolve()
+        # resolves non-absolute model paths against REPO, so a bare "stage1.pt" would (wrongly) point at
+        # REPO/stage1.pt. REPO-relative keeps the release self-contained AND loadable by run_night.
+        "models": {"segmentation": os.path.relpath(out / "stage1.pt", REPO),
+                   "cnn_postproc": os.path.relpath(out / "stage2.pt", REPO),
+                   "cnn_sidecar": (os.path.relpath(out / "stage2.json", REPO)
+                                   if pipe.cnn_sidecar else None)},
         "mf_len_debias": {"offset": mflen_rec["offset"], "slope": mflen_rec["slope"],
                           "_comment": "re-fit + confirmed; see mflen.json"},
         "cnn_thr_floor": pipe.cnn_thr_floor,
