@@ -1,0 +1,15 @@
+{
+  "width": 40,
+  "depth": 4,
+  "in_ch": 3,
+  "k": 96,
+  "epochs": 60,
+  "n_train": 302898,
+  "n_pos_train": 10014,
+  "n_holdout": 90141,
+  "holdout_src": "external",
+  "best_val_auc": 0.8606,
+  "augment": true,
+  "cosine_lr": true,
+  "gpus": 1
+}

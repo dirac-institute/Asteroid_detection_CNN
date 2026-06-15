@@ -60,15 +60,20 @@ def main():
         hdx = 0.5 * len_db * np.cos(br); hdy = 0.5 * len_db * np.sin(br)
         ra0 = np.full(len(d), np.nan); dec0 = ra0.copy(); ra1 = ra0.copy(); dec1 = ra0.copy()
         x = d.x.to_numpy(np.float64); y = d.y.to_numpy(np.float64)
+        n_nowcs = 0
         for key, idx in d.groupby(["visit", "detector"]).groups.items():
             w = wmap.get((int(key[0]), int(key[1])))
             if w is None:
+                n_nowcs += len(idx)
                 continue
             ii = np.array(list(idx))
             p0 = w.all_pix2world(np.stack([x[ii] - hdx[ii], y[ii] - hdy[ii]], 1), 0)
             p1 = w.all_pix2world(np.stack([x[ii] + hdx[ii], y[ii] + hdy[ii]], 1), 0)
             ra0[ii], dec0[ii] = p0[:, 0], p0[:, 1]; ra1[ii], dec1[ii] = p1[:, 0], p1[:, 1]
         d["ra0"], d["dec0"], d["ra1"], d["dec1"] = ra0, dec0, ra1, dec1
+        if n_nowcs:
+            print(f"[recompute] WARNING field {k}: {n_nowcs} dets had NO panel WCS -> NaN endpoints "
+                  f"(linker will drop them; check manifest wcs_json)", flush=True)
         d.to_csv(f"{a.out}/adcnn_dets_masked_{k}.csv", index=False)
         print(f"[recompute] field {k}: {len(d)} dets, len_db median {np.median(len_db):.1f} "
               f">=6px {100*(len_db>=6).mean():.0f}% -> {a.out}", flush=True)

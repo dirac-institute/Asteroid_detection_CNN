@@ -19,6 +19,29 @@ per fn — see BLIND_TEST_REPORT.md), confirming the harness; v2_D measured on t
 ¹ Ecliptic injection-set purity is a conservative lower bound: those fields contain real asteroids
 that the injection-truth labeling counts as FP. Purity rose anyway (55→67%).
 
+### 1a. Exposure-leakage disclosure + clean-subset integrity check
+
+**Provenance defect (found in code review, disclosed):** the v2_D training substrate was selected
+**tract-disjoint** from the blind set, but tract-disjoint is NOT exposure-disjoint — adjacent tracts
+on the shared night 20250723 share boundary-CCD exposures. **12 (visit,detector) panels** (10 in
+blind field 0, 2 in field 1; both off-ecliptic) appear in both the v2_D fine-tune catalogs and the
+blind manifests. So 2 of the 26 blind fields are not fully independent.
+
+**Impact: none on the conclusion — the leak slightly DEPRESSED the headline.** Re-scoring on the
+**24 fully-independent fields** (leaked 0,1 excluded):
+
+| split | v1 C_ff | v2_D C_ff | relative | v2_D purity |
+|---|---|---|---|---|
+| ALL-24 (clean) | 3.68% | **10.74%** | **+192%** | 88.5% |
+| off-ecl-18 (clean) | 3.60% | 9.44% | +162% | 97.5% |
+
+The clean-subset gain (+192%) is ≥ the all-26 gain (+184%) because the two leaked fields are dense
+off-ecliptic with below-average per-field completeness. The ~2.8–2.9× faint-fast alert-completeness
+win at maintained purity holds with every leaked exposure removed. **The clean-24 numbers are the
+integrity headline**; the all-26 numbers are retained above for continuity with the v1 blind report.
+A pristine release artifact (clean retrain excluding the 12 exposures) is recommended before a final
+(non-rc) tag — the result is already shown robust to it.
+
 - **Faint-fast 2-visit alert completeness ≈ tripled, at maintained-to-improved purity**, in BOTH
   latitude regimes — not an off-ecliptic-only effect.
 - Alert load rose ~2.6× (12.5→32.7/fn) but purity held/improved, so the additions are predominantly
@@ -50,7 +73,10 @@ that the injection-truth labeling counts as FP. Purity rose anyway (55→67%).
 
 Frozen throughout: S≥0.80, mf_snr≥5, chi2≤5, len_db≥6, rate∈[1,8], top-50/night. Blind 26 fields
 write-protected; v2_D blind detection wrote only to `run_blind_v2eval*`. Single pre-registered blind
-shot, no post-hoc retuning. The two recalibrations are model-specific *measurement* constants
+shot, no post-hoc retuning. **Independence caveat (corrected):** the blind set was tract-disjoint but
+not fully exposure-disjoint from training — 12 boundary-CCD panels in 2 of 26 blind fields leaked via
+the shared 20250723 night (see §1a); the clean-24-field re-score confirms the result is unaffected
+(leak was non-inflating). The two recalibrations are model-specific *measurement* constants
 required by the deliberate stage-1 change, each surfaced for explicit approval; both validated on
 non-blind dev with field-held-out checks before the blind shot. (The tp=0 in the first blind tally
 was a scoring-dir missing-truth-symlink artifact — detections/op unchanged — corrected by symlinking

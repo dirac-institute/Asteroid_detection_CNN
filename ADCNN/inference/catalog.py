@@ -99,6 +99,10 @@ PROGRESS_S = 20.0  # heartbeat interval (s) for the per-shard progress print
 # Set ADCNN_MF_LEN_OFFSET=0 ADCNN_MF_LEN_SLOPE=1 to emit RAW length (for fitting the constants).
 MF_LEN_OFFSET = float(os.environ.get("ADCNN_MF_LEN_OFFSET", "33.4"))
 MF_LEN_SLOPE = float(os.environ.get("ADCNN_MF_LEN_SLOPE", "0.887"))
+if (MF_LEN_OFFSET, MF_LEN_SLOPE) != (33.4, 0.887):   # provenance: a non-v1 de-bias is in effect
+    import sys as _sys
+    print(f"[catalog] MF_LEN de-bias OVERRIDDEN via env: offset={MF_LEN_OFFSET} slope={MF_LEN_SLOPE} "
+          f"(v1 default 33.4/0.887)", file=_sys.stderr, flush=True)
 
 
 def panel_to_catalog_rows(pid: int, prob, img, agg, rl, cnn,

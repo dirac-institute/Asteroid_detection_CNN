@@ -1,0 +1,47 @@
+{
+  "_comment": "ADCNN v2_D RELEASE CANDIDATE (rc1). Frozen detector for the same-night faint-fast 2-visit ALERT product. Blind-confirmed STRONG WIN over v1: faint-fast 2v alert completeness 3.64%->10.33% (+184%, 2.8x) at held purity (86.1->88.6%) on the 26 frozen DM-53195 blind fields. See ADCNN_V2_RESULT.md. v1 remains the prior baseline (tag adcnn-v1-blind-baseline).",
+  "release": "adcnn-v2_D-rc1",
+  "promoted_from_git": "649f6f1351ade8ddd8dbe692b110d187816119c5",
+  "supersedes": "v1 (adcnn-v1-blind-baseline) for the faint-fast alert product",
+  "models": {
+    "stage1_segmentation_scripted": "models/v2_D/segmentation_scripted.pt",
+    "stage1_segmentation_scripted_md5": "e73323a0fd3c0852002cd3c2b98d6d96",
+    "stage1_trainable_ckpt": "models/v2_D/stage1_best_trainable.pt",
+    "stage2_cnn_postproc": "models/v2_D/cnn_postproc.pt",
+    "stage2_cnn_postproc_md5": "c93c7f1e529c1d199c5819ba96d0c521",
+    "stage1_arch": "UNetResSEOrientHough widths[24,48,96,192,384] kernel_lens[11,21,41] n_angles12",
+    "stage1_init_from": "models/seg_v1_trainable_init.pt (v1 reconstructed from TorchScript)"
+  },
+  "mf_len_debias": {
+    "_comment": "Model-specific trail-length de-bias re-derived for v2_D's tighter ends-bloom (v1 was 33.4/0.887). Apply via env ADCNN_MF_LEN_OFFSET / ADCNN_MF_LEN_SLOPE at detection, OR post-hoc recompute_lendb.py. len_db = clip((raw_mf_length - offset)/slope, 0).",
+    "offset": 7.67,
+    "slope": 0.9425,
+    "fit": "field-held-out on non-blind DM-53195 dev injections, residual ~1px over 6-60px"
+  },
+  "detection": {
+    "cnn_thr_floor": 0.50,
+    "_comment_thr": "Detect at the 0.50 retention floor; the alert op S>=0.80 is applied in the linker pair stage. The FP-budget calibrated threshold in cnn_postproc.train.json is NULL (calibration step OOM/pool-crashed, NOT needed for this op)."
+  },
+  "frozen_alert_op": "ADCNN/pipelines/heliolinc/op_2v_alert.json (UNCHANGED from v1: S>=0.80, mfsnr>=5, chi2<=5, len_db>=6, rate[1,8], top-50/night)",
+  "blind_result": {
+    "fields": "26 DM-53195 tract-disjoint (20 off-ecl + 6 ecliptic)",
+    "all":      {"v1_C_ff": 3.64, "v2D_C_ff": 10.33, "rel_pct": 184, "v1_purity": 86.1, "v2D_purity": 88.6, "v1_alerts_fn": 12.5, "v2D_alerts_fn": 32.7},
+    "off_ecl":  {"v1_C_ff": 3.55, "v2D_C_ff": 9.04, "v1_purity": 99.1, "v2D_purity": 97.5},
+    "ecliptic": {"v1_C_ff": 4.19, "v2D_C_ff": 18.32, "v1_purity": 55.2, "v2D_purity": 66.8, "_note": "ecliptic purity conservative (real asteroids labeled fp)"},
+    "harness_check": "v1 reproduced its original blind numbers exactly -> harness validated"
+  },
+  "dev_gate": {"v1_C_ff": 1.42, "v2D_C_ff": 5.67, "rel_pct": 299, "fields": 20, "purity": "95.0->93.5"},
+  "exposure_leakage": {
+    "_comment": "Code-review finding: training was tract-disjoint from blind but NOT exposure-disjoint. Adjacent tracts on shared night 20250723 share boundary-CCD exposures -> 12 (visit,detector) panels leaked into 2 of 26 blind fields (10 in field 0, 2 in field 1; both off-ecliptic). NON-INFLATING: clean-subset re-score is slightly STRONGER.",
+    "leaked_panels": 12, "leaked_blind_fields": [0, 1],
+    "clean_24_all":    {"v1_C_ff": 3.68, "v2D_C_ff": 10.74, "rel_pct": 192, "v2D_purity": 88.5},
+    "clean_18_offecl": {"v1_C_ff": 3.60, "v2D_C_ff": 9.44, "rel_pct": 162, "v2D_purity": 97.5},
+    "integrity_headline": "clean-24 +192% (>= all-26 +184%); result robust to removing all leaked exposures",
+    "recommendation": "for a FINAL (non-rc) tag, rebuild run_ft/run_ft_cnn excluding blind (visit,detector) pairs + re-confirm; result already shown robust"
+  },
+  "scope_caveats": [
+    "Trained/dev-gated on OFF-ECLIPTIC DM-53195; ecliptic blind gain is out-of-domain transfer (encouraging, conservative purity).",
+    "Alert load ~2.6x v1 (ranked + top-50 capped; mfsnr_min knob if follow-up saturates).",
+    "Real-sky base-rate-corrected purity remains low -> alert stream, not standalone discovery (unchanged from v1)."
+  ]
+}
