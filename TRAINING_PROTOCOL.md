@@ -35,9 +35,25 @@ current model: `ADCNN/pipelines/heliolinc/TRAIN_V2_D_E2E.md`.
   `len_db = clip((raw_mf_length − offset)/slope, 0)` must be **re-fit** (field-held-out, on
   non-blind dev injections). It is **model-specific** and lives in the pipeline config so it
   travels with the model (mixing models and de-biases silently corrupts `len_db`).
-- Fit by emitting raw length (`ADCNN_MF_LEN_OFFSET=0 ADCNN_MF_LEN_SLOPE=1`) and regressing raw vs
-  truth length; write the result into `models/<pipeline>/pipeline.json`. Apply to a detection run
-  with `run_experiment --stage calibrate-mflen` (uses the active pipeline's constants).
+- The fit IS code: `ADCNN/calibration/calibrate_mflen.py` matches injected sightings to detections
+  (score≥0.80, 10 px) and OLS-fits `length_raw ~ slope·trail_length + offset`, then **confirms** the
+  re-fit reproduces the frozen pipeline values (fail-loud on drift). Level-1 reads the committed
+  `ADCNN/calibration/mflen_fit_pairs.csv`; Level-2 extracts it from the on-disk dev dirs
+  (`--src/--inj/--out-csv`). Run as a `train_and_validate` stage (`--stage calibrate-mflen`); the
+  apply step (recompute len_db on a detection run) stays `run_experiment --stage calibrate-mflen`.
+
+## Threshold selection — the operating point is a FORMAL output, not a constant
+- `ADCNN/calibration/threshold_selection.py` regenerates the validation completeness/purity curves
+  from the committed 82-field per-pair caches and applies a **pre-declared decision rule**:
+  - **score S — purity-floor:** lowest S whose in-sample purity at mfsnr≥5 is ≥ 75% → **S=0.80**
+    (stable for any floor in ~(67%, 77%]). Documented-but-rejected framings: "largest S on the
+    J-plateau" → 0.825, "completeness-knee" → 0.85 — neither yields 0.80; only purity-floor does.
+  - **mfsnr — completeness-retention:** largest mfsnr retaining ≥80% of the uncut faint-fast
+    completeness → **mfsnr=5** (stable for retention ~(0.73, 0.87]).
+- It then **asserts** the selection equals the frozen `op_2v_alert.json` (tol 0). A disagreement is
+  a FINDING surfaced to the user, never a knob to retune. Run as a `train_and_validate` stage
+  (`--stage threshold-select`); `freeze` writes `thresholds.json` / `validation_report.json` /
+  `threshold_sweep.csv` / `threshold_plots/` into the release dir.
 
 ## Validation vs blind
 - **Validation** is where threshold selection, model selection, stage-2 calibration, MF_LEN fit,

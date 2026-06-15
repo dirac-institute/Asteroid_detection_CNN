@@ -4,14 +4,43 @@ The **current** pipeline (default, frozen `adcnn-v2_D-rc1`) is the promoted dete
 scientific headline is the faint-fast same-night 2-visit **alert completeness 3.64% → 10.33%**
 (+184%, clean-24 +192%) at held purity, on the DM-53195 **blind** fields.
 
-Everything routes through one driver:
+The active pipeline (models + MF_LEN de-bias) is resolved by `ADCNN/config.py`
+(`ADCNN_PIPELINE` selects; default `current`). Env: `asteroid_cnn` conda for torch/CPU stages;
+the LSST stack (`loadLSST.sh` + `setup lsst_distrib`) only for the Butler data/detect stages.
+
+## 0. Two top-level pipelines: decide the operating point, then apply it
+
+The science loop is split so the **operating point is a formal output of the validation protocol**,
+not an inherited constant:
+
+```bash
+# (A) TRAIN + VALIDATE -> decide the op-point + freeze a self-contained release dir
+python -m ADCNN.pipelines.train_and_validate --config models/current/pipeline.json \
+    --out models/current_candidate --stages calibrate-mflen,threshold-select,freeze   # CPU, clean-checkout
+python -m ADCNN.pipelines.train_and_validate --stages all --dry-run                   # full plan (GPU -> sbatch)
+
+# (B) RUN NIGHT -> apply the FROZEN release to one night of real data (alert product)
+python -m ADCNN.pipelines.run_night --pipeline models/current/pipeline.json \
+    --collection LSSTCam/runs/.../DM-XXXXX --night 20250718 --tracts 8489 --out run_night_20250718 --dry-run
+```
+
+- **Threshold = regenerate-and-confirm.** `ADCNN/calibration/threshold_selection.py` regenerates the
+  validation completeness/purity curves from the committed 82-field per-pair caches, applies the
+  pre-declared **purity-floor** rule (lowest score S whose in-sample purity ≥ 75% → **S=0.80**;
+  largest mfsnr retaining ≥80% of uncut completeness → **mfsnr=5**), and **asserts** the selection
+  equals the frozen `op_2v_alert.json` (fail-loud on drift; a disagreement is a finding, not a knob).
+  `ADCNN/calibration/calibrate_mflen.py` likewise re-fits + confirms the MF_LEN de-bias (7.67/0.9425).
+  Both are stages of `train_and_validate`; the freeze step writes them into the release dir
+  (`thresholds.json`, `validation_report.json`, `threshold_sweep.csv`, `threshold_plots/`).
+- **run_night** verifies the release md5s + frozen cuts before any compute (fail-loud preflight),
+  defaults the linker to the alert op-point (`op_2v_alert.json`, mfsnr≥5; `--discovery` for the
+  mfsnr≥10 discovery op), and writes `runtime_report.json` (per-visit / per-detector / per-night).
+
+`run_experiment` remains the lower-level stage runner used for the headline report below:
 ```bash
 python -m ADCNN.pipelines.run_experiment --stage <stage>     # one stage
 python -m ADCNN.pipelines.run_experiment --stages all --dry-run   # the full ordered plan
 ```
-The active pipeline (models + MF_LEN de-bias) is resolved by `ADCNN/config.py`
-(`ADCNN_PIPELINE` selects; default `current`). Env: `asteroid_cnn` conda for torch/CPU stages;
-the LSST stack (`loadLSST.sh` + `setup lsst_distrib`) only for the Butler data/detect stages.
 
 ## 1. One-command verdict (CPU, instant) — the headline
 ```bash

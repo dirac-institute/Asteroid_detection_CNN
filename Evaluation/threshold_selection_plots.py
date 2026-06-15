@@ -23,84 +23,30 @@ Usage (from the repo root):
     PYTHONPATH=. python Evaluation/threshold_selection_plots.py \
         [--cache-dir ADCNN/pipelines/heliolinc/run_lambda/_nomfsnr_cache] [--out Evaluation/figures]
 """
-import argparse, glob, json, os
+import argparse, json
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+# The canonical curve computation + the decision rule live in ONE place (the selection stage); this
+# figure script imports them so the plotted operating point is the REGENERATED selection, never a
+# hardcoded constant (acceptance D). Run as a module (PYTHONPATH=. python -m ADCNN.qa.plots_thresholds
+# after the reorg, or via the repo-root path before it).
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from ADCNN.calibration.threshold_selection import (
+    load_pairs, make_metrics as _make_metrics, select_operating_point, DEFAULT_CACHE_DIR)
+
 CB, CR = "#1f77b4", "#c0392b"          # completeness blue / purity red
-OP_S, OP_MF = 0.80, 5                   # the frozen operating point (THRESHOLD_PROTOCOL.md)
-RATE_LO, RATE_HI = 1.0, 8.0             # faint-fast rate band (deg/day)
-
-
-def load_pairs(cache_dir):
-    """Load the exact per-pair rows + the recoverable-object truth map."""
-    rows, allrec = [], {}
-    files = sorted(glob.glob(f"{cache_dir}/*_smin0.6_v3exact.json"))
-    if not files:
-        raise SystemExit(f"no *_smin0.6_v3exact.json caches under {cache_dir} -- run exact_lowS_pairs first")
-    for cp in files:
-        k = os.path.basename(cp).split("_smin")[0]
-        c = json.load(open(cp))
-        for r in c["rows"]:
-            rows.append((k, *r))
-        for o, s in c["rec"].items():
-            allrec[f"{k}_{o}"] = float(s)
-    R = [(k, mn, mf, rate, label, obj)
-         for (k, mn, mf, rate, label, nfp, obj, mx, ln, c2, dpa, dsp, perp) in rows
-         if RATE_LO <= rate <= RATE_HI]
-    ff_tot = sum(1 for s in allrec.values() if 2 <= s < 10)
-    return R, allrec, ff_tot
+RATE_LO, RATE_HI = 1.0, 8.0            # faint-fast rate band (deg/day)
+OP_S, OP_MF = None, None               # set in main() from the REGENERATED selection (not hardcoded)
 
 
 def make_metrics(R, allrec, ff_tot, n_boot=300, seed=42):
-    """Point estimates + field-bootstrap 16-84% bands (fields are the independent unit)."""
-    from collections import defaultdict
-    fields = sorted({k for (k, *_r) in R}); fidx = {k: i for i, k in enumerate(fields)}; NF = len(fields)
-    F = np.array([fidx[k] for (k, mn, mf, rate, label, obj) in R])
-    MN = np.array([mn for (k, mn, mf, rate, label, obj) in R])
-    MF = np.array([mf for (k, mn, mf, rate, label, obj) in R])
-    TP = np.array([label == "tp" for (k, mn, mf, rate, label, obj) in R])
-    OBJ = np.array([f"{k}_{obj}" if obj else "" for (k, mn, mf, rate, label, obj) in R], dtype=object)
-    FFO = np.array([bool(obj) and 2 <= allrec.get(f"{k}_{obj}", -1) < 10
-                    for (k, mn, mf, rate, label, obj) in R])
-    denom_f = np.zeros(NF)
-    for o, s in allrec.items():
-        if 2 <= s < 10:
-            denom_f[fidx[o.split("_", 1)[0]]] += 1
-
-    def stats(S, mf):
-        m = (MN >= S) & (MF >= mf)
-        tp_f = np.bincount(F[m & TP], minlength=NF).astype(float)
-        fp_f = np.bincount(F[m & ~TP], minlength=NF).astype(float)
-        per = defaultdict(set)
-        for i in np.where(m & TP & FFO)[0]:
-            per[F[i]].add(OBJ[i])
-        obj_f = np.zeros(NF)
-        for f, s_ in per.items():
-            obj_f[f] = len(s_)
-        return obj_f, tp_f, fp_f
-
-    def C(S, mf):
-        return 100 * stats(S, mf)[0].sum() / ff_tot
-
-    def P(S, mf):
-        _, tp, fp = stats(S, mf); t = tp.sum() + fp.sum()
-        return 100 * tp.sum() / t if t else np.nan
-
-    rng = np.random.default_rng(seed)
-    BOOT = [rng.integers(0, NF, NF) for _ in range(n_boot)]
-
-    def band(S, mf):
-        obj_f, tp_f, fp_f = stats(S, mf)
-        Cs, Ps = [], []
-        for b in BOOT:
-            Cs.append(100 * obj_f[b].sum() / max(denom_f[b].sum(), 1))
-            t = tp_f[b].sum() + fp_f[b].sum()
-            Ps.append(100 * tp_f[b].sum() / t if t else np.nan)
-        return ((np.percentile(Cs, 16), np.percentile(Cs, 84)),
-                (np.nanpercentile(Ps, 16), np.nanpercentile(Ps, 84)))
+    """Thin adapter: the selection stage returns (C, P, band, stats); the figures use (C, P, band)."""
+    C, P, band, _stats = _make_metrics(R, allrec, ff_tot, n_boot=n_boot, seed=seed)
     return C, P, band
 
 
@@ -168,19 +114,26 @@ def fig_singles(C, P, band, out):
 
 
 def main():
+    global OP_S, OP_MF
+    import os
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--cache-dir", default="ADCNN/pipelines/heliolinc/run_lambda/_nomfsnr_cache")
+    ap.add_argument("--cache-dir", default=str(DEFAULT_CACHE_DIR))
     ap.add_argument("--out", default="Evaluation/figures")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     R, allrec, ff_tot = load_pairs(a.cache_dir)
     C, P, band = make_metrics(R, allrec, ff_tot)
+    # the marked operating point is the REGENERATED selection (purity-floor + retention rule),
+    # not a hardcoded literal -- so the figure always reflects what the decision rule produces.
+    sel = select_operating_point(C, P)
+    OP_S, OP_MF = sel["score_min"], int(sel["mfsnr_min"])
     print(f"loaded {len(R)} rate-banded exact pairs; faint-fast denominator {ff_tot}")
+    print(f"regenerated operating point: S>={OP_S}, mfsnr>={OP_MF} "
+          f"(C={sel['at_op']['faint_fast_completeness_pct']}%, "
+          f"P={sel['at_op']['in_sample_purity_pct']}%)")
     fig_2x2(C, P, band, a.out)
     fig_singles(C, P, band, a.out)
-    (cb, _), (pb, _) = band(OP_S, OP_MF)[0], band(OP_S, OP_MF)[1]
-    print(f"adopted op: C={C(OP_S, OP_MF):.2f}%  injected-truth fraction={P(OP_S, OP_MF):.1f}%  "
-          f"-> figures in {a.out}/")
+    print(f"  -> figures in {a.out}/")
 
 
 if __name__ == "__main__":
