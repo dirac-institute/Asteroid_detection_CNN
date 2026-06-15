@@ -14,8 +14,18 @@
   },
   "cnn_thr_floor": 0.50,
   "alert_op_point": "ADCNN/pipelines/heliolinc/op_2v_alert.json",
+  "thresholds": {
+    "_comment": "The FORMAL same-night 2v alert operating point. Regenerated + CONFIRMED against op_2v_alert.json by ADCNN.calibration.threshold_selection (purity-floor>=75% -> S=0.80; completeness-retention>=80% -> mfsnr=5). Re-derive: python -m ADCNN.calibration.threshold_selection. Inlined so the shipped pipeline records the decision, not just the op-point pointer.",
+    "score_min": 0.80,
+    "mfsnr_min": 5.0,
+    "chi2_max": 5.0,
+    "rate_lo": 1.0,
+    "rate_hi": 8.0,
+    "budget_top_n": 50,
+    "ranking": "priorityScore = weakest-member ADCNN score (ADCNN.linking.rank_alerts.priority_score)"
+  },
   "headline": {
-    "_comment": "Reference only (frozen blind result; reproduce via ADCNN/pipelines/heliolinc/regen_v2_report.py). Not read by code. DEFENSIBLE blind number = CLEAN-24 (leakage-free); ALL-26 is NOT strictly blind (2 fields share training exposures). See leakage_audit/leakage_audit.json.",
+    "_comment": "Reference only (frozen blind result; reproduce via python -m ADCNN.evaluation.summarize_results). Not read by code. DEFENSIBLE blind number = CLEAN-24 (leakage-free); ALL-26 is NOT strictly blind (2 fields share training exposures). See leakage_audit/leakage_audit.json.",
     "faint_fast_2v_alert_completeness_clean24_blind": "3.68% -> 10.74% vs prior baseline (+192%), purity 86.0->88.5%, leakage-free 24-field blind set",
     "all_26_not_strictly_blind": "3.64% -> 10.33% (+184%) -- includes 2 contaminated fields; do not cite as fully blind"
   }
