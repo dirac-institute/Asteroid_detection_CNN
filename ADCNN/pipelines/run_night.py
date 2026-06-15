@@ -217,7 +217,7 @@ def run(a):
         _bash(cmd, a.dry_run)
 
     def s_link():
-        cmd = (f"python -m ADCNN.pipelines.heliolinc.trail_state_link --dets {out}/adcnn_dets_masked.csv "
+        cmd = (f"python -m ADCNN.linking.link_2visit --dets {out}/adcnn_dets_masked.csv "
                f"--known {out}/known.csv --out {out}/tracks.csv --op-point {op_point} "
                f"--npt 2 --min-epochs 2 --seed-2v chord --alerts-out {out}/alerts.jsonl")
         _bash(cmd, a.dry_run)

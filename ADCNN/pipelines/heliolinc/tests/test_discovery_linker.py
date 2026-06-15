@@ -15,12 +15,12 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
-from ADCNN.pipelines.heliolinc.trail_state_link import (
+from ADCNN.linking.link_2visit import (
     radec_to_unit, _chord_radius, trail_velocity, pair_chi2, physical_check,
     chord_seed_pairs, crossmatch, build_known_index, extend_to_triplets,
 )
 from ADCNN.pipelines.heliolinc.orbit_check import orbit_ok
-from ADCNN.pipelines.heliolinc.alert_stream import build_alert, write_alerts
+from ADCNN.linking.rank_alerts import build_alert, write_alerts
 
 SOLARDAY = 86400.0
 EXPT = 30.0
@@ -232,7 +232,7 @@ def test_seed_3v_first_wide_arc():
 
 # ---------------------------------------------------------------- vectorized 2v pre-filter exactness
 def test_prefilter_2v_exactness():
-    from ADCNN.pipelines.heliolinc.trail_state_link import prefilter_2v_pairs
+    from ADCNN.linking.link_2visit import prefilter_2v_pairs
     # mover + random scatter -> chord pairs; the pre-filter must change NOTHING about which pairs pass
     # physical_check (it may only remove pairs that physical_check would reject anyway).
     rng = np.random.default_rng(11)

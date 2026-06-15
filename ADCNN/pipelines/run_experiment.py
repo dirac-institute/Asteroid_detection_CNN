@@ -125,7 +125,7 @@ def stage_alert_eval(a, pipe, dry, submit):
 def stage_report(a, pipe, dry, submit):
     if dry:
         print("  [dry-run] release-check (md5s / MF_LEN / thresholds / leakage / active pipeline) + write")
-        print(f"  [dry-run] would run: PYTHONPATH={REPO} python {HL/'regen_v2_report.py'}  (-> blind headline)")
+        print(f"  [dry-run] would run: PYTHONPATH={REPO} python -m ADCNN.evaluation.summarize_results  (-> blind headline)")
         return
     release_check(pipe)        # items 1-5 + 8: verify integrity + write the final result table
     _report()                  # item 6: regenerate the CLEAN-24 / all-26 blind verdict
@@ -153,7 +153,7 @@ def stage_evaluation_notebooks(a, pipe, dry, submit):
 
 
 def _report():
-    _run([sys.executable, str(HL / "regen_v2_report.py")], cwd=HL)
+    _run([sys.executable, "-m", "ADCNN.evaluation.summarize_results"])
 
 
 def release_check(pipe):

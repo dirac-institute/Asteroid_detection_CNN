@@ -8,12 +8,13 @@ v2_D caches via eval_field_exact (smin 0.80) so subsequent runs are instant from
 re-detection, no re-pairing. This is the durable evidence: detections can be regenerated from the
 frozen models (see REPRODUCE_V2_D.md) but the verdict reads from these caches.
 
-Usage:  PYTHONPATH=<repo> python regen_v2_report.py        # prints the v1-vs-v2_D blind table
+Usage:  PYTHONPATH=<repo> python -m ADCNN.evaluation.summarize_results        # prints the v1-vs-v2_D blind table
 """
 import json, os, glob
-import exact_lowS_pairs as ex
+from pathlib import Path
+from ADCNN.pipelines.heliolinc import exact_lowS_pairs as ex
 
-HL = os.path.dirname(os.path.abspath(__file__))
+HL = str(Path(__file__).resolve().parents[2] / "ADCNN/pipelines/heliolinc")
 V1 = f"{HL}/run_blind"
 V2 = f"{HL}/run_blind_v2eval_cal"
 OFFECL = [str(k) for k in range(20)]

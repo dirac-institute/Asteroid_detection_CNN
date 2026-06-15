@@ -27,6 +27,6 @@ source "$HERE/pipeline_config.sh"
 : "${RUN:?set RUN=<dir with manifest.csv>}"
 adcnn_activate || exit 1
 cd "$ADCNN_REPO"
-python ADCNN/pipelines/heliolinc/discover_stream.py --n-gpus "${DETECT_N_GPUS:-4}" \
+python ADCNN/inference/detect_night.py --n-gpus "${DETECT_N_GPUS:-4}" \
   --manifest "$RUN/manifest.csv" --out "$RUN/adcnn_dets.csv"
 echo "SN_DETECT DONE"

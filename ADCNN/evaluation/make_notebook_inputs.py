@@ -12,8 +12,8 @@ panels, ~1.4 s/panel on the candidate-dense real set — i.e. a full ~189-detect
 in ~3–4 min, images→catalog (NN + features + CNN all included, postprocessing hidden behind
 the GPU forward).
 
-    python -m ADCNN.pipelines.make_eval_catalogs                 # the simulated `test` set
-    python -m ADCNN.pipelines.make_eval_catalogs --sets test test_real
+    python -m ADCNN.evaluation.make_notebook_inputs                 # the simulated `test` set
+    python -m ADCNN.evaluation.make_notebook_inputs --sets test test_real
 """
 from __future__ import annotations
 import argparse

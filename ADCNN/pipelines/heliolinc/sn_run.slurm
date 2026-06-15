@@ -103,7 +103,7 @@ python -m ADCNN.pipelines.heliolinc.mask_flags --dets "$RUN/adcnn_dets.csv" \
 # The calibrated 2v/3v op-point (score floor, chi2<=5, mfsnr>=10, rate band, tolerances) lives in
 # link_op_point.json (versioned config, $LINK_OP_POINT) -- NOT magic numbers here. SCORE_MIN env overrides
 # the score floor for a given run; any individual param can also be overridden by adding its --flag below.
-python -m ADCNN.pipelines.heliolinc.trail_state_link --dets "$RUN/adcnn_dets_masked.csv" \
+python -m ADCNN.linking.link_2visit --dets "$RUN/adcnn_dets_masked.csv" \
   --known "$RUN/known.csv" --out "$RUN/tracks.csv" --op-point "$LINK_OP_POINT" \
   --npt 2 --min-epochs 2 --seed-2v chord ${SCORE_MIN:+--score-min "$SCORE_MIN"}
 [ -f "$RUN/tracks.csv" ] || { echo "[sn_run] ERROR: linker did not write tracks.csv"; exit 1; }

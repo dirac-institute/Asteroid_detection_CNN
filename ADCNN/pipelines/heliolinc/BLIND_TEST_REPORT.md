@@ -53,7 +53,7 @@ Object-level pair completeness (§2) is a fifth, distinct quantity: distinct inj
 
 Frozen op: `S≥0.80 ∧ mf_snr≥5 ∧ pair_chi2≤5 (gate) ∧ rate∈[1,8]°/day`, priorityScore = base +
 0.95·weakest-member score, top-50/night cap. Reducer identical to validation
-(`Evaluation/threshold_selection_plots.py` conventions; field-bootstrap 16–84% bands).
+(`ADCNN/qa/plots_thresholds.py` conventions; field-bootstrap 16–84% bands).
 
 | split | pairs@op | TP | FP | injection-set pair purity (T2)¹ | faint-fast object completeness | alerts/field-night | top-5 truth (T4) | top-50 truth (T4) |
 |---|---|---|---|---|---|---|---|---|

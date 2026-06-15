@@ -20,7 +20,7 @@ k=$SLURM_ARRAY_TASK_ID
 M=$RUN/manifest_$k.csv
 [ -f "$M" ] || { echo "no manifest $M -- skip"; exit 0; }
 [ -f "$RUN/adcnn_dets_masked_$k.csv" ] && { echo "masked_$k exists -- skip"; exit 0; }
-python ADCNN/pipelines/heliolinc/discover_stream.py --n-gpus 4 \
+python ADCNN/inference/detect_night.py --n-gpus 4 \
   --manifest "$M" --out "$RUN/adcnn_dets_$k.csv" --inject "$RUN/inject_$k.csv"
 python ADCNN/pipelines/heliolinc/mask_flags.py \
   --dets "$RUN/adcnn_dets_$k.csv" --manifest "$M" --out "$RUN/adcnn_dets_masked_$k.csv" --workers 32

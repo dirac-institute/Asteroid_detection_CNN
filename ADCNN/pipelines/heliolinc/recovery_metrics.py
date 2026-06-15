@@ -14,7 +14,7 @@ import numpy as np, pandas as pd, sys
 from scipy.spatial import cKDTree
 from collections import Counter
 sys.path.insert(0, "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
-from ADCNN.pipelines.heliolinc.trail_state_link import link, physical_check
+from ADCNN.linking.link_2visit import link, physical_check
 
 TOL_ARCSEC = 5.0
 

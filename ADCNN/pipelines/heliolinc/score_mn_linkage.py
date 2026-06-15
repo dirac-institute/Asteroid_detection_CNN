@@ -12,7 +12,7 @@ false-link count, purity, and runtime context.
 import sys, argparse
 import pandas as pd, numpy as np
 from scipy.spatial import cKDTree
-from ADCNN.pipelines.heliolinc.trail_state_link import radec_to_unit, _chord_radius
+from ADCNN.linking.link_2visit import radec_to_unit, _chord_radius
 
 
 def _nearest_vk(mjd, kvks, tol_day=35.0 / 86400.0):

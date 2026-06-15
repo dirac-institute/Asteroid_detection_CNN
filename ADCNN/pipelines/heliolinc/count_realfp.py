@@ -9,7 +9,7 @@ import argparse, glob
 from pathlib import Path
 import numpy as np, pandas as pd, sys
 sys.path.insert(0, "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
-from ADCNN.pipelines.heliolinc.trail_state_link import link, physical_check, chord_seed_pairs
+from ADCNN.linking.link_2visit import link, physical_check, chord_seed_pairs
 from ADCNN.pipelines.heliolinc.recurrence import add_recurrence
 
 PC = dict(pa_tol_deg=20.0, lin_rms_arcsec=1.0, min_epochs=2, pa_tol_2v_deg=10.0, orbit_check_2v=True,

@@ -65,7 +65,7 @@ PY
 echo "operating threshold: $THR (from sidecar)"
 
 echo "=== [1/2] inference: build detection catalog on ${PRESENT[*]} ==="
-python3 -u -m ADCNN.pipelines.make_eval_catalogs --sets "${PRESENT[@]}" \
+python3 -u -m ADCNN.evaluation.make_notebook_inputs --sets "${PRESENT[@]}" \
   --data-root "$DATA_ROOT" --seg-model "$SEG" --cnn "$CNN" --cnn-thr "$THR" --out "$CAT"
 
 echo "=== [2/2] render evaluation notebook per set -> HTML ==="

@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np, pandas as pd
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from ADCNN.pipelines.heliolinc.trail_state_link import chord_seed_pairs, pair_chi2
+from ADCNN.linking.link_2visit import chord_seed_pairs, pair_chi2
 from ADCNN.pipelines.heliolinc.sweep_S import _load_field, PC
 
 

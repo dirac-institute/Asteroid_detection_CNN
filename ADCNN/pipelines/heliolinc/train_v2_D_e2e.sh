@@ -33,6 +33,6 @@ After job $J3 completes, finish on the login node (fast, CPU):
     --fields 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 24 25 26 27 28 29
   ( cd $HL/run_blind_v2eval_cal && for k in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 24 25 26 27 28 29; do
       for p in inject truth retime manifest; do ln -sf ../run_blind/\${p}_\$k.csv \${p}_\$k.csv; done; done )
-  PYTHONPATH=$REPO python $HL/regen_v2_report.py     # -> the +184% headline table
+  PYTHONPATH=$REPO python -m ADCNN.evaluation.summarize_results     # -> the +184% headline table
 EOF
 echo "E2E_CHAIN_SUBMITTED J1=$J1 J2=$J2 J3=$J3"

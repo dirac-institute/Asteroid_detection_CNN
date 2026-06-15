@@ -10,7 +10,7 @@ import argparse, sys
 import numpy as np, pandas as pd
 from scipy.spatial import cKDTree
 sys.path.insert(0, "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
-from ADCNN.pipelines.heliolinc.trail_state_link import pair_chi2
+from ADCNN.linking.link_2visit import pair_chi2
 
 PIXSCALE = 0.2
 

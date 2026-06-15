@@ -16,7 +16,7 @@ Env: `source /sdf/group/rubin/sw/loadLSST.sh && setup lsst_distrib` for the stac
 
 ## 0. One-command verdict regeneration (instant, from saved caches)
 ```
-PYTHONPATH=$REPO python $HL/regen_v2_report.py
+PYTHONPATH=$REPO python -m ADCNN.evaluation.summarize_results
 ```
 Prints the frozen-op v1-vs-v2_D table (ALL / off-ecl / ecliptic). Reads only the small pair caches;
 no GPU, no re-detection. First run regenerates any missing v2_D cache via `eval_field_exact` (smin 0.80).
@@ -41,7 +41,7 @@ cd $HL/run_blind_v2eval_cal && for k in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16
   for p in inject truth retime manifest; do ln -sf ../run_blind/${p}_$k.csv ${p}_$k.csv; done; done
 
 # (d) verdict
-PYTHONPATH=$REPO python $HL/regen_v2_report.py
+PYTHONPATH=$REPO python -m ADCNN.evaluation.summarize_results
 ```
 
 ## 2. Expected blind verdict (release reference)

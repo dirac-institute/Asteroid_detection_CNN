@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Blind-test FINAL reduction at the frozen operating points (EVALUATION_CONTRACT.md). NO TUNING.
 
-Conventions are IDENTICAL to the validation reducer (Evaluation/threshold_selection_plots.py):
+Conventions are IDENTICAL to the validation reducer (ADCNN/qa/plots_thresholds.py):
   - rows are post-physical_check pairs (chi2<=5 / PA / arc gates already enforced in PCHECK);
   - frozen 2v alert op = min_score>=0.80 AND min_mfsnr>=5 AND rate in [1,8];
   - faint-fast completeness = distinct injected objects (2<=snr_target<10) with >=1 accepted pair,

@@ -33,7 +33,7 @@ import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
 
-REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
+REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[2])
 HL = REPO / "ADCNN/pipelines/heliolinc"
 SOLARDAY = 86400.0
 
@@ -627,7 +627,7 @@ def main():
     alerts = []
     emit_alerts = not a.no_alerts
     if emit_alerts:
-        from ADCNN.pipelines.heliolinc.alert_stream import build_alert, write_alerts
+        from ADCNN.linking.rank_alerts import build_alert, write_alerts
     for night, dn in d.groupby("night"):
         dn = dn.reset_index(drop=True)
         if a.recur_max is not None:

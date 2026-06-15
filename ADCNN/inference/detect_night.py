@@ -32,9 +32,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# Repo root: $ADCNN_REPO if set, else inferred from this file's location (ADCNN/pipelines/heliolinc/ -> root).
+# Repo root: $ADCNN_REPO if set, else inferred from this file's location (ADCNN/inference/ -> root).
 # Portable across deployments; only override ADCNN_REPO for a relocated checkout.
-REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
+REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[2])
 sys.path.insert(0, str(REPO))  # so spawned workers can import ADCNN regardless of cwd
 OBSCODE = os.environ.get("OBSCODE", "I11")  # Rubin Observatory / LSST (override via OBSCODE env or --obscode)
 COLFORMAT = "IDCOL 1\nMJDCOL 2\nRACOL 3\nDECCOL 4\nMAGCOL 5\nBANDCOL 6\nOBSCODECOL 7\n"

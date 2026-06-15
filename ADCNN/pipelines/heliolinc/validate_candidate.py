@@ -15,7 +15,7 @@ import argparse
 import sys
 import numpy as np, pandas as pd
 sys.path.insert(0, "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
-from ADCNN.pipelines.heliolinc.trail_state_link import link, physical_check, fit_residual, crossmatch
+from ADCNN.linking.link_2visit import link, physical_check, fit_residual, crossmatch
 
 HL = "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/ADCNN/pipelines/heliolinc"
 

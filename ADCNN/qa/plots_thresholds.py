@@ -20,7 +20,7 @@ visits) with >=1 accepted 2-visit pair; purity = TP pairs / (TP+FP pairs) at the
 density (the real-sky base-rate-corrected purity is quoted separately in THRESHOLD_PROTOCOL.md).
 
 Usage (from the repo root):
-    PYTHONPATH=. python Evaluation/threshold_selection_plots.py \
+    PYTHONPATH=. python -m ADCNN.qa.plots_thresholds \
         [--cache-dir ADCNN/pipelines/heliolinc/run_lambda/_nomfsnr_cache] [--out Evaluation/figures]
 """
 import argparse, json
@@ -31,11 +31,10 @@ import matplotlib.pyplot as plt
 
 # The canonical curve computation + the decision rule live in ONE place (the selection stage); this
 # figure script imports them so the plotted operating point is the REGENERATED selection, never a
-# hardcoded constant (acceptance D). Run as a module (PYTHONPATH=. python -m ADCNN.qa.plots_thresholds
-# after the reorg, or via the repo-root path before it).
+# hardcoded constant (acceptance D). Run as a module: PYTHONPATH=. python -m ADCNN.qa.plots_thresholds
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root (ADCNN/qa/ -> root)
 from ADCNN.calibration.threshold_selection import (
     load_pairs, make_metrics as _make_metrics, select_operating_point, DEFAULT_CACHE_DIR)
 

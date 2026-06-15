@@ -21,7 +21,7 @@ do not conflate them.
 - **Baselines** (paper): Stack 5σ / Stack 4σ / ADCNN / Stack ∪ ADCNN — deduplicated union tables;
   ADCNN is a **complement** (adds stack-missed faint-fast), not a raw-recovery replacement.
 - **Threshold selection** (frozen before the blind shot): S=0.80 sits on a completeness plateau;
-  mfsnr=5 is set by the night-level top-50 alert budget — `Evaluation/threshold_selection_plots.py`,
+  mfsnr=5 is set by the night-level top-50 alert budget — `ADCNN/qa/plots_thresholds.py`,
   `ADCNN/pipelines/heliolinc/THRESHOLD_PROTOCOL.md` / `ALERT_SWEEP_DECISION.md`.
 
 ## 2. Detector diagnostic — the Evaluation notebooks (catalog-based)

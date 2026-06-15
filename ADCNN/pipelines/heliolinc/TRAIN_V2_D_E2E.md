@@ -72,7 +72,7 @@ cd $HL/run_ft && sbatch --export=ALL,RUN=$HL/run_blind,\
 python run_dev/recompute_lendb.py --src run_blind_v2eval --manifests run_blind \
   --out run_blind_v2eval_cal --offset 7.67 --slope 0.9425 --fields 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 24 25 26 27 28 29
 # symlink run_blind inject/truth/manifest/retime into run_blind_v2eval_cal (so the scorer can label tp/fp)
-PYTHONPATH=$REPO python regen_v2_report.py     # -> the headline table (v1 vs v2_D, all/off-ecl/ecliptic)
+PYTHONPATH=$REPO python -m ADCNN.evaluation.summarize_results     # -> the headline table (v1 vs v2_D, all/off-ecl/ecliptic)
 ```
 
 ## Headline reproduced (release reference)

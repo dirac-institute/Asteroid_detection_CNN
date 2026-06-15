@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 
 import ADCNN.pipelines.heliolinc.sweep_S as sw
-from ADCNN.pipelines.heliolinc.trail_state_link import (radec_to_unit, _chord_radius, physical_check,
+from ADCNN.linking.link_2visit import (radec_to_unit, _chord_radius, physical_check,
                                                         pair_chi2)
 
 PCHECK = dict(pa_tol_deg=20.0, lin_rms_arcsec=1.0, min_epochs=2, pa_tol_2v_deg=10.0, orbit_check_2v=True,

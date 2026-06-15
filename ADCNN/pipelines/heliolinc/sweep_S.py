@@ -19,7 +19,7 @@ import numpy as np, pandas as pd
 from scipy.spatial import cKDTree
 from scipy.stats import norm, chi2 as chi2dist
 
-from ADCNN.pipelines.heliolinc.trail_state_link import chord_seed_pairs, physical_check
+from ADCNN.linking.link_2visit import chord_seed_pairs, physical_check
 from ADCNN.pipelines.heliolinc.recurrence import add_recurrence
 from ADCNN.pipelines.heliolinc.retime_cadence import apply_retime
 

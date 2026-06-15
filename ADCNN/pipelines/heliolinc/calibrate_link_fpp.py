@@ -28,7 +28,7 @@ import numpy as np, pandas as pd
 warnings.filterwarnings("ignore")
 import sys
 sys.path.insert(0, "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
-from ADCNN.pipelines.heliolinc.trail_state_link import link, physical_check, crossmatch
+from ADCNN.linking.link_2visit import link, physical_check, crossmatch
 
 PC = dict(pa_tol_deg=20.0, lin_rms_arcsec=1.0, min_epochs=2, pa_tol_2v_deg=10.0,
           orbit_check_2v=True, score_2v_min=0.0, max_arc_2v_min=None,

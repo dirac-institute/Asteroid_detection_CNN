@@ -3,7 +3,7 @@
 #SBATCH --account=rubin:commissioning
 #SBATCH --qos=normal
 #SBATCH --gres=gpu:l40s:4
-#SBATCH -c 32
+#SBATCH -c 16
 #SBATCH --mem=128G
 #SBATCH -t 8:00:00
 #SBATCH -J v2_detect
@@ -22,9 +22,9 @@ k=$SLURM_ARRAY_TASK_ID
 M=$RUN/manifest_$k.csv
 [ -f "$M" ] || { echo "no manifest $M -- skip"; exit 0; }
 [ -f "$OUT/adcnn_dets_masked_$k.csv" ] && { echo "masked_$k exists -- skip"; exit 0; }
-python ADCNN/pipelines/heliolinc/discover_stream.py --n-gpus 4 --cnn-thr 0.50 \
+python ADCNN/inference/detect_night.py --n-gpus 4 --cnn-thr 0.50 \
   --seg-model "$SEG" \
   --manifest "$M" --out "$OUT/adcnn_dets_$k.csv" --inject "$RUN/inject_$k.csv"
 python ADCNN/pipelines/heliolinc/mask_flags.py \
-  --dets "$OUT/adcnn_dets_$k.csv" --manifest "$M" --out "$OUT/adcnn_dets_masked_$k.csv" --workers 32
+  --dets "$OUT/adcnn_dets_$k.csv" --manifest "$M" --out "$OUT/adcnn_dets_masked_$k.csv" --workers 16
 echo "V2_DETECT DONE $k"

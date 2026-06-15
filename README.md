@@ -165,7 +165,7 @@ python -m ADCNN.pipelines.train_end_to_end --run-name seg \
     --cnn-val-h5  DATA_DIFFIM/cnn_val.h5   --cnn-val-csv  DATA_DIFFIM/cnn_val.csv
 
 # Stage C — evaluate on the simulated + real test sets
-python -m ADCNN.pipelines.make_eval_catalogs --sets test test_real
+python -m ADCNN.evaluation.make_notebook_inputs --sets test test_real
 
 # Stage D — render the notebooks
 jupyter nbconvert --to notebook --execute --inplace Evaluation/*.ipynb

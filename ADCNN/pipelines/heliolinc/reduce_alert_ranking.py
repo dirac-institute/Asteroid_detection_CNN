@@ -8,7 +8,7 @@ operationally small; truth ranks ahead of the FP bulk; NY2 regression separately
 import json, glob, os
 import numpy as np
 
-from ADCNN.pipelines.heliolinc.alert_stream import priority_score
+from ADCNN.linking.rank_alerts import priority_score
 
 RUN = "ADCNN/pipelines/heliolinc/run_lambda"
 

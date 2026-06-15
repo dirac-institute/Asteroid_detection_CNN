@@ -3,7 +3,7 @@
   make_sim_data           build the simulated injected-trail train/val/test sets from the Butler
   make_real_data          build the real-asteroid test diffim set from the Butler
   train_end_to_end        train the segmentation model + the focal cutout-CNN second stage
-  make_eval_catalogs      score the test sets with the deployed models -> detection catalogs + metrics
+  (moved) evaluation.make_notebook_inputs  score the test sets with the deployed models -> detection catalogs + metrics
 
 Each is runnable as ``python -m ADCNN.pipelines.<name> --help``.
 
