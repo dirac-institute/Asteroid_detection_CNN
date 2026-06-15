@@ -90,19 +90,28 @@ DEFAULT_CONFIG = InferenceConfig()
 PROGRESS_S = 20.0  # heartbeat interval (s) for the per-shard progress print
 
 # segmentation model's segmentation/matched-filter over-extends trail ends ("ends bloom"): the raw mf_length is
-# biased, mf_length ≈ MF_LEN_SLOPE*L_true + MF_LEN_OFFSET (≈0.887*L + 33.4 px, fit on test).
-# The emitted `length` INVERTS this to the physical trail length (median residual ~0px vs truth),
-# so eval parameter-recovery is unbiased and HelioLinC gets the true length. Single source of
-# truth: downstream consumers read the corrected `length` directly (no re-correction).
-# Env-overridable so a model-specific recalibration (e.g. a domain-adapted v2 stage-1 with a different
-# ends-bloom) can supply its OWN constants without editing this file or affecting the v1 default.
-# Set ADCNN_MF_LEN_OFFSET=0 ADCNN_MF_LEN_SLOPE=1 to emit RAW length (for fitting the constants).
-MF_LEN_OFFSET = float(os.environ.get("ADCNN_MF_LEN_OFFSET", "33.4"))
-MF_LEN_SLOPE = float(os.environ.get("ADCNN_MF_LEN_SLOPE", "0.887"))
-if (MF_LEN_OFFSET, MF_LEN_SLOPE) != (33.4, 0.887):   # provenance: a non-v1 de-bias is in effect
-    import sys as _sys
-    print(f"[catalog] MF_LEN de-bias OVERRIDDEN via env: offset={MF_LEN_OFFSET} slope={MF_LEN_SLOPE} "
-          f"(v1 default 33.4/0.887)", file=_sys.stderr, flush=True)
+# biased, mf_length ≈ MF_LEN_SLOPE*L_true + MF_LEN_OFFSET. The emitted `length` INVERTS this to the
+# physical trail length (median residual ~0px vs truth), so eval parameter-recovery is unbiased and
+# HelioLinC gets the true length. Single source of truth: downstream consumers read the corrected
+# `length` directly (no re-correction).
+#
+# The de-bias is MODEL-SPECIFIC (a domain-adapted stage-1 has a different ends-bloom), so it lives in
+# the active pipeline config (ADCNN/config.py -> models/<pipeline>/pipeline.json) and TRAVELS WITH THE
+# MODEL. Mixing one model with another's de-bias silently corrupts `len_db` (the linker length gate then
+# deletes real detections). Select a pipeline with ADCNN_PIPELINE; the current default carries 7.67/0.9425.
+# Escape hatch for FITTING a new de-bias: ADCNN_MF_LEN_OFFSET=0 ADCNN_MF_LEN_SLOPE=1 -> raw length
+# (env override is applied inside load_pipeline()).
+from ADCNN.config import ACTIVE as _PIPE  # resolved once at import (honors ADCNN_PIPELINE / env overrides)
+
+if _PIPE is not None:
+    MF_LEN_OFFSET = _PIPE.mf_len_offset
+    MF_LEN_SLOPE = _PIPE.mf_len_slope
+else:  # no pipeline config on disk (bootstrap) -> last-resort env, else raw (no de-bias)
+    MF_LEN_OFFSET = float(os.environ.get("ADCNN_MF_LEN_OFFSET", "0"))
+    MF_LEN_SLOPE = float(os.environ.get("ADCNN_MF_LEN_SLOPE", "1"))
+import sys as _sys
+print(f"[catalog] MF_LEN de-bias offset={MF_LEN_OFFSET} slope={MF_LEN_SLOPE} "
+      f"(pipeline={_PIPE.name if _PIPE else 'none'})", file=_sys.stderr, flush=True)
 
 
 def panel_to_catalog_rows(pid: int, prob, img, agg, rl, cnn,
@@ -322,8 +331,10 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--h5", required=True, help="diffim panel h5 (images + real_labels)")
     ap.add_argument("--panels", help="optional panels.csv -> attach visit/detector/band")
-    ap.add_argument("--seg-model", default=str(REPO / "models/segmentation_model.pt"))
-    ap.add_argument("--cnn", default=str(REPO / "models/cnn_postproc.pt"), help="stage-2 cutout CNN")
+    _seg_def = str(_PIPE.seg_model) if _PIPE else str(REPO / "models/current/segmentation_scripted.pt")
+    _cnn_def = str(_PIPE.cnn_model) if _PIPE else str(REPO / "models/current/cnn_postproc.pt")
+    ap.add_argument("--seg-model", default=_seg_def, help="stage-1 segmentation (default: active pipeline)")
+    ap.add_argument("--cnn", default=_cnn_def, help="stage-2 cutout CNN (default: active pipeline)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--cnn-thr", type=float, default=CNN_DEFAULT_THR, help="CNN operating point (pre-chosen)")
     ap.add_argument("--gate-pmax", type=float, default=0.0, help="skip features below this peak NN prob (val-chosen)")

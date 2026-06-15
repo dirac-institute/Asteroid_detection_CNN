@@ -1,0 +1,21 @@
+{
+  "_comment": "ACTIVE/DEFAULT ADCNN detection pipeline. This is the promoted current detector (the domain-adapted stage-1 + refit stage-2). Loaded by ADCNN/config.py:load_pipeline() unless ADCNN_PIPELINE points elsewhere. Model files are POINTERS into the frozen release models/v2_D/ (md5s in models/v2_D/v2_D_release.json are the immutable release identity). The prior baseline lives at models/legacy_v1/pipeline.json.",
+  "name": "current",
+  "provenance": "adcnn-v2_D-rc1",
+  "models": {
+    "segmentation": "models/current/segmentation_scripted.pt",
+    "cnn_postproc": "models/current/cnn_postproc.pt",
+    "cnn_sidecar": "models/current/cnn_postproc.json"
+  },
+  "mf_len_debias": {
+    "_comment": "Trail-length de-bias for THIS stage-1's ends-bloom: len_db = clip((raw_mf_length - offset)/slope, 0). Re-derived field-held-out on non-blind dev injections (residual ~1px over 6-60px). Travels with the model; do not mix with another model's de-bias.",
+    "offset": 7.67,
+    "slope": 0.9425
+  },
+  "cnn_thr_floor": 0.50,
+  "alert_op_point": "ADCNN/pipelines/heliolinc/op_2v_alert.json",
+  "headline": {
+    "_comment": "Reference only (frozen blind result; reproduce via ADCNN/pipelines/heliolinc/regen_v2_report.py). Not read by code.",
+    "faint_fast_2v_alert_completeness": "3.64% -> 10.33% vs prior baseline (+184%), purity 86.1->88.6%, 26 DM-53195 blind fields"
+  }
+}

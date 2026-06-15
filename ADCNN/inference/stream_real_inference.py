@@ -138,8 +138,11 @@ def _reader(in_q, src, n_workers, n_fail_counter):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--seg", default=str(REPO / "models/segmentation_model.pt"))
-    ap.add_argument("--cnn", default=str(REPO / "models/cnn_postproc.pt"))
+    from ADCNN.config import ACTIVE as _PIPE  # active pipeline (ADCNN_PIPELINE selects; default=current)
+    _seg_def = str(_PIPE.seg_model) if _PIPE else str(REPO / "models/current/segmentation_scripted.pt")
+    _cnn_def = str(_PIPE.cnn_model) if _PIPE else str(REPO / "models/current/cnn_postproc.pt")
+    ap.add_argument("--seg", default=_seg_def, help="stage-1 segmentation (default: active pipeline)")
+    ap.add_argument("--cnn", default=_cnn_def, help="stage-2 cutout CNN (default: active pipeline)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--gpus", type=int, default=0, help="0 = use all visible GPUs")
     ap.add_argument("--queue-size", type=int, default=16, help="bounded queue depth (RAM cap)")

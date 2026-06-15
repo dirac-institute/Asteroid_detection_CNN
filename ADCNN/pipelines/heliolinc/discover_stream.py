@@ -218,9 +218,12 @@ def run_shard(gpu_id, rows, seg_ckpt, cnn_model, thr, prefetch, out_csv, n_worke
 def main():
     import torch
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    from ADCNN.config import ACTIVE as _PIPE  # active pipeline (ADCNN_PIPELINE selects; default=current)
+    _seg_def = str(_PIPE.seg_model) if _PIPE else str(REPO / "models/current/segmentation_scripted.pt")
+    _cnn_def = str(_PIPE.cnn_model) if _PIPE else str(REPO / "models/current/cnn_postproc.pt")
     ap.add_argument("--manifest", default=str(REPO / "ADCNN/pipelines/heliolinc/run_disco/manifest.csv"))
-    ap.add_argument("--seg-model", default=str(REPO / "models/segmentation_model.pt"))
-    ap.add_argument("--cnn", default=str(REPO / "models/cnn_postproc.pt"), help="focal-cutout CNN model")
+    ap.add_argument("--seg-model", default=_seg_def, help="stage-1 segmentation (default: active pipeline)")
+    ap.add_argument("--cnn", default=_cnn_def, help="focal-cutout CNN model (default: active pipeline)")
     ap.add_argument("--cnn-thr", type=float, default=None, help="CNN operating point (default = val2-calibrated 'threshold' in the cnn_postproc.json sidecar)")
     ap.add_argument("--prefetch", type=int, default=6, help="FITS reads in flight per GPU (bounds memory)")
     ap.add_argument("--n-gpus", type=int, default=0, help="0 = all visible")

@@ -1,0 +1,17 @@
+{
+  "_comment": "PRIOR BASELINE ADCNN pipeline (v1.0; the 2026-05-31 release). NOT the default. Select it explicitly with ADCNN_PIPELINE=legacy_v1 (or .../models/legacy_v1/pipeline.json) for regression, provenance, and historical comparison. The active default is models/current/pipeline.json.",
+  "name": "legacy_v1",
+  "provenance": "adcnn-v1-blind-baseline (v1.0)",
+  "models": {
+    "segmentation": "models/legacy_v1/segmentation_model.pt",
+    "cnn_postproc": "models/legacy_v1/cnn_postproc.pt",
+    "cnn_sidecar": "models/legacy_v1/cnn_postproc.json"
+  },
+  "mf_len_debias": {
+    "_comment": "v1 stage-1 ends-bloom de-bias (fit on the DM-53881 test set). Specific to the v1 segmentation; not valid for the current model.",
+    "offset": 33.4,
+    "slope": 0.887
+  },
+  "cnn_thr_floor": 0.5886,
+  "alert_op_point": "ADCNN/pipelines/heliolinc/op_2v_alert.json"
+}

@@ -38,9 +38,12 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--sets", nargs="*", default=DEFAULT_SETS, help="test-set dirs under DATA_DIFFIM/")
+    from ADCNN.config import ACTIVE as _PIPE  # active pipeline (ADCNN_PIPELINE selects; default=current)
+    _seg_def = str(_PIPE.seg_model) if _PIPE else str(REPO / "models/current/segmentation_scripted.pt")
+    _cnn_def = str(_PIPE.cnn_model) if _PIPE else str(REPO / "models/current/cnn_postproc.pt")
     ap.add_argument("--data-root", default=str(REPO / "DATA_DIFFIM"))
-    ap.add_argument("--seg-model", default=str(REPO / "models/segmentation_model.pt"))
-    ap.add_argument("--cnn", default=str(REPO / "models/cnn_postproc.pt"))
+    ap.add_argument("--seg-model", default=_seg_def, help="stage-1 segmentation (default: active pipeline)")
+    ap.add_argument("--cnn", default=_cnn_def, help="stage-2 cutout CNN (default: active pipeline)")
     ap.add_argument("--out", default=str(REPO / "Evaluation/catalogs"))
     ap.add_argument("--cnn-thr", type=float, default=CNN_DEFAULT_THR, help="CNN operating point (pre-chosen)")
     ap.add_argument("--gate-pmax", type=float, default=0.10,

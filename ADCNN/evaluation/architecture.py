@@ -129,10 +129,14 @@ def _save(fig, savepath):
 # --------------------------------------------------------------------------------------------------
 # model loading + tracing  (everything below reads the real architecture)
 # --------------------------------------------------------------------------------------------------
-def load_seg_model(path="models/segmentation_model.pt"):
+def load_seg_model(path=None):
     """Reconstruct the segmentation nn.Module from the scripted checkpoint so we can hook it.
-    Widths/depth/in_ch are inferred from the state_dict tensor shapes (no literals)."""
+    Widths/depth/in_ch are inferred from the state_dict tensor shapes (no literals).
+    ``path=None`` -> the active pipeline's segmentation model (ADCNN_PIPELINE selects; default=current)."""
     import torch
+    if path is None:
+        from ADCNN.config import ACTIVE
+        path = str(ACTIVE.seg_model) if ACTIVE else "models/current/segmentation_scripted.pt"
     from ADCNN.core.detector import UNetResSEOrientHough
     sd = torch.jit.load(str(path), map_location="cpu").state_dict()
     in_ch = int(sd["backbone.stem.0.weight"].shape[1])
@@ -566,12 +570,20 @@ def plot_system(seg_spec=None, cnn_spec=None, savepath=None):
 # --------------------------------------------------------------------------------------------------
 # public entry point — called from the Evaluation notebook
 # --------------------------------------------------------------------------------------------------
-def make_architecture_figures(seg_path="models/segmentation_model.pt",
-                              cnn_path="models/cnn_postproc.pt",
+def make_architecture_figures(seg_path=None, cnn_path=None,
                               outdir="Evaluation/figures", show=True, save=True):
     """Build all architecture figures from the deployed weights. Returns {name: Figure}.
+    ``seg_path``/``cnn_path`` None -> the active pipeline (ADCNN_PIPELINE selects; default=current).
     Robust: a model that can't be loaded/traced is skipped with a printed note (never raises)."""
     from ADCNN.inference.cnn_postproc import load_cnn, CNN_DEFAULT_THR
+    if seg_path is None or cnn_path is None:
+        from ADCNN.config import ACTIVE
+        if ACTIVE is not None:
+            seg_path = seg_path or str(ACTIVE.seg_model)
+            cnn_path = cnn_path or str(ACTIVE.cnn_model)
+        else:
+            seg_path = seg_path or "models/current/segmentation_scripted.pt"
+            cnn_path = cnn_path or "models/current/cnn_postproc.pt"
     figs = {}
     outdir = Path(outdir)
     if save:
