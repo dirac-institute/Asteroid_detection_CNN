@@ -1,0 +1,28 @@
+{
+  "operating_point": {
+    "score_min": 0.8,
+    "mfsnr_min": 5.0,
+    "chi2_max": 5.0,
+    "rate_lo": 1.0,
+    "rate_hi": 8.0,
+    "len_min": 6.0
+  },
+  "training_range": {
+    "snr": [
+      2.0,
+      10.0
+    ],
+    "len_px": [
+      6.0,
+      60.0
+    ]
+  },
+  "n_recoverable_trainingrange_objs": 274,
+  "n_recovered_objs": 79,
+  "completeness_pct": 28.83,
+  "n_tp_pairs": 206,
+  "n_fp_pairs": 0,
+  "purity_pct": 100.0,
+  "n_seed_pairs": 2060,
+  "n_pairs_passing_physcheck": 1018
+}

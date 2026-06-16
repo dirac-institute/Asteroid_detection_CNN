@@ -1,0 +1,11 @@
+{
+  "note": "Wall time reconstructed from sacct + detect-progress log (the in-job auto-capture was lost when the measure step crashed on a PYTHONPATH issue; pipeline stages themselves all succeeded). A clean re-run captures per-stage exactly.",
+  "hardware": "2x A100 (ampere), 16 cores",
+  "n_visits": 12, "n_detector_panels": 768,
+  "total_job_seconds": 2421,
+  "detect_seconds_approx": 1920,
+  "detect_rate_panels_per_s_per_gpu": 0.2,
+  "detect_s_per_panel_per_gpu": 5.0,
+  "detect_s_per_visit": 160,
+  "inject_mask_link_seconds_approx": 500
+}
