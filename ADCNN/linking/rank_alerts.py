@@ -125,7 +125,8 @@ def priority_score(status, tier, chi2, score_min, mfsnr_min):
 
 
 def build_alert(g, *, alert_id, night, obscode, status, tier, chi2, a_au, ecc, rms_arcsec,
-                match_obj="", match_frac=0.0, offsets_days=PREDICT_OFFSETS_DAYS, thumbnails=None):
+                match_obj="", match_frac=0.0, offsets_days=PREDICT_OFFSETS_DAYS, thumbnails=None,
+                hiconf_score=0.80):
     """Build one alert dict from a track's member detection rows `g` (a DataFrame slice) + its summary.
 
     `g` must carry per-epoch mjd, ra, dec (and optionally mag, mf_snr, len_db, score, visit, detector,
@@ -155,6 +156,11 @@ def build_alert(g, *, alert_id, night, obscode, status, tier, chi2, a_au, ecc, r
     # vetting block: everything a human/robot vetter ranks and filters on, pulled from the members.
     score_min = float(s.score.min()) if "score" in s.columns else None
     mfsnr_min = float(s.mf_snr.min()) if "mf_snr" in s.columns else None
+    # two-tier follow-up confidence: A = both members >= hiconf_score (the formal 0.80 purity-floor op);
+    # B = a CANDIDATE alert (weakest member in [candidate_floor, hiconf)) -- lower per-alert purity, kept
+    # because the stream is RANKED + CAPPED and a follow-up/3rd epoch confirms. Tier A always outranks B
+    # via priorityScore (0.95*weakest-score), so this label just lets follow-up filter by capacity.
+    confidence_tier = ("A" if (score_min is not None and score_min >= hiconf_score) else "B")
     vetting = dict(
         score_min=_f(score_min),
         score_max=_f(float(s.score.max())) if "score" in s.columns else None,
@@ -170,6 +176,7 @@ def build_alert(g, *, alert_id, night, obscode, status, tier, chi2, a_au, ecc, r
         asOfMjd=round(mjd_ref, 6),                       # earliest this same-night alert could fire
         status=status,                                   # NEW (candidate) | CONFIRMED (known recovery)
         tier=tier,                                       # 2visit | 3+visit
+        confidenceTier=confidence_tier,                  # A = both members >=hiconf (0.80); B = candidate (0.60-0.80)
         priority=priority,
         priorityScore=round(priority_score(status, tier, chi2, score_min, mfsnr_min), 4),
         nEpochs=int(len(epochs)),

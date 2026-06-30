@@ -177,6 +177,42 @@ def link(dets, *, exptime_s=30.0, tref=None, pos_tol_deg=0.017, vel_frac=0.30, v
     return labels, tracks
 
 
+def auto_2v_window_min(dets, *, pointing_tol_deg=1.0, margin=1.15, lo=40.0, hi=75.0):
+    """PER-NIGHT 2-visit Δt window, sized from the data so every visit can pair with its nearest
+    SAME-POINTING revisit. A pure time heuristic fails on a WFD night -- consecutive visits in TIME
+    are different fields (~30s apart) and the same-field revisit is ~35-45 min later -- so we group by
+    POINTING: a visit pair counts only if their detection centroids lie within `pointing_tol_deg`.
+
+    window = clamp( max_visit(nearest same-pointing gap) * margin, lo, hi ). The floor `lo` keeps the
+    calibrated behaviour on dense/deep-drilling cadence (and preserves skip-visit linking); the ceiling
+    `hi` stops a stray wide pair from exploding the seed count. Cross-night pairs (gap > 120 min) are
+    excluded, so this is safe to compute over a multi-night `dets`. Falls back to `lo` if no
+    same-pointing pair exists. Returns (window_min, info_str)."""
+    if "visit" not in getattr(dets, "columns", []) or not len(dets):
+        return lo, f"no visit column -> {lo:.0f}min"
+    cen = {v: (float(np.median(g.ra)), float(np.median(g.dec)), float(np.median(g.mjd)))
+           for v, g in dets.groupby("visit")}
+    vs = list(cen)
+    if len(vs) < 2:
+        return lo, f"<2 visits -> {lo:.0f}min"
+    ra = np.array([cen[v][0] for v in vs]); dec = np.array([cen[v][1] for v in vs])
+    mjd = np.array([cen[v][2] for v in vs])
+    U = radec_to_unit(ra, dec)                       # unit vectors; dot -> angular sep (RA-wrap/pole safe)
+    nn = []                                           # per visit: gap to nearest SAME-POINTING revisit
+    for i in range(len(vs)):
+        sep = np.degrees(np.arccos(np.clip(U @ U[i], -1.0, 1.0)))
+        gap = np.abs(mjd - mjd[i]) * 1440.0
+        same = (sep < pointing_tol_deg) & (gap > 5.0) & (gap < 120.0)
+        if same.any():
+            nn.append(float(gap[same].min()))
+    if not nn:
+        return lo, f"no same-pointing pairs (tol {pointing_tol_deg:g}deg) -> {lo:.0f}min"
+    raw = max(nn) * margin
+    win = min(max(raw, lo), hi)
+    return win, (f"{len(nn)} paired visit(s), widest nearest-revisit {max(nn):.1f}min "
+                 f"x{margin:g} -> {win:.0f}min (clamp[{lo:.0f},{hi:.0f}])")
+
+
 def chord_seed_pairs(dets, *, max_arc_min=40.0, rate_min=0.3, rate_max=10.0, max_visit_pairs=None):
     """Seed 2-visit candidate pairs by the POSITION CHORD, not the noisy trail-velocity. For each pair of
     adjacent same-night visits (gap <= max_arc_min) enumerate detection pairs whose sky separation is
@@ -555,12 +591,18 @@ def main():
     ap.add_argument("--len-db-min", type=float, default=6.0, help="hard trail-length floor (px); cut ALL shorter dets regardless of source")
     ap.add_argument("--art-frac-max", type=float, default=0.3, help="LSST mask cut")
     ap.add_argument("--score-min", type=float, default=0.0, help="ADCNN stage-2 CNN (trained real/bogus) score floor; raise to thin FP density for 2-visit linking")
+    ap.add_argument("--score-candidate-min", type=float, default=0.0, help="TWO-TIER follow-up floor: link down to this score (tier-B CANDIDATE alerts), labelling alerts confidenceTier A (both members>=--score-hiconf) vs B. 0=off (use --score-min as the single floor). The op sets 0.60 for the WFD 2-visit-pair product; do NOT use on dense fields (0.60 explodes the link).")
+    ap.add_argument("--score-hiconf", type=float, default=0.80, help="weakest-member score boundary for confidenceTier A (high-confidence) vs B (candidate)")
     ap.add_argument("--npt", type=int, default=2, help="min detections (distinct visits) per track")
     ap.add_argument("--vel-frac", type=float, default=0.30)
     ap.add_argument("--max-rms", type=float, default=1.0, help="arcsec; LINEAR motion fit RMS (physical_check, >=3 epochs)")
     ap.add_argument("--pa-tol", type=float, default=20.0, help="deg; trail PA vs motion PA agreement (>=3 epochs)")
     ap.add_argument("--pa-tol-2v", type=float, default=10.0, help="deg; TIGHTER trail-PA tol for 2-visit tier + trail-vs-trail agreement")
-    ap.add_argument("--max-arc-2v-min", type=float, default=40.0, help="2-visit Δt window (min): only pair within the scheduler pair gap; the single strongest 2v FP cut (purity 0.28->0.71). None to disable")
+    ap.add_argument("--max-arc-2v-min", type=lambda s: s if str(s).lower() == "auto" else float(s),
+                    default=40.0, help="2-visit Δt window (min): only pair within the scheduler pair gap; the "
+                    "single strongest 2v FP cut (purity 0.28->0.71). 'auto' = derive per-night from the actual "
+                    "same-pointing visit-pair gaps (auto_2v_window_min) so longer WFD pairs (e.g. 42min) are not "
+                    "silently dropped; the op-point sets 'auto'. None to disable")
     ap.add_argument("--orbit-rate-tol", type=float, default=0.25, help="2-visit bound-orbit velocity-residual tol (frac of trail speed); 0.25 is the purity/recall knee (0.5 was too loose). Tighter=purer")
     ap.add_argument("--epoch-gap-s", type=float, default=40.0, help="seconds; detections closer than this in time are merged into ONE epoch (intra-visit snaps). MUST be < the same-night revisit gap or genuine separate visits merge and 2-visit links are rejected as '1 epoch' -- the shipped 120s WRONGLY merged the ~1-min deep-drilling cadence. 40s separates >=40s-apart visits, merges true back-to-back snaps; no-op for WFD's ~34-min pairs.")
     ap.add_argument("--chi2-2v-max", type=float, default=5.0, help="2-visit COMBINED orbit-fit chi^2 gate -- THE primary purity lever. The GEOMETRIC chi2 (collinearity + trail-vs-motion PA & speed) is the STRONG true/false discriminator (true median ~4 vs false ~39, FAST movers); TIGHTENING it 10->5 lifts the 3sigma completeness at the realistic 34-min WFD cadence from 0.070 to ~0.10 (+~45%%, validated on 80 off-ecliptic lambda fields) at NO purity cost. 0 to disable")
@@ -594,7 +636,8 @@ def main():
     # Overlay the calibrated op-point JSON: it sets each param UNLESS that flag was passed explicitly on the CLI.
     if a.op_point and os.path.exists(a.op_point):
         _op = json.load(open(a.op_point))
-        _flag = {"score_min": "--score-min", "chi2_2v_max": "--chi2-2v-max", "mfsnr_min_2v": "--mfsnr-min-2v",
+        _flag = {"score_min": "--score-min", "score_candidate_min": "--score-candidate-min",
+                 "score_hiconf": "--score-hiconf", "chi2_2v_max": "--chi2-2v-max", "mfsnr_min_2v": "--mfsnr-min-2v",
                  "rate_lo_2v": "--rate-lo-2v", "rate_hi_2v": "--rate-hi-2v", "pa_tol": "--pa-tol",
                  "pa_tol_2v": "--pa-tol-2v", "max_rms": "--max-rms", "pos_tol_3v": "--pos-tol-3v",
                  "max_arc_2v_min": "--max-arc-2v-min", "promote_3v": "--promote-3v",
@@ -611,8 +654,14 @@ def main():
         d = d[d.art_frac.fillna(0.0) < a.art_frac_max]   # NaN (unmeasured mask) -> keep, never silently drop
     if "len_db" in d and a.len_db_min > 0:
         d = d[d.len_db >= a.len_db_min]
-    if "score" in d and a.score_min > 0:
-        d = d[d.score >= a.score_min]
+    # TWO-TIER follow-up: link down to the CANDIDATE floor when set (op: 0.60), else the single score_min.
+    # The hi-confidence boundary (score_hiconf, 0.80) only LABELS each alert A/B in build_alert -- it does
+    # not gate here, so tier-B (0.60-0.80) pairs still pass the mfsnr/chi2/rate purity gates.
+    _score_floor = a.score_candidate_min if (a.score_candidate_min and a.score_candidate_min > 0) else a.score_min
+    if "score" in d and _score_floor > 0:
+        d = d[d.score >= _score_floor]
+        if a.score_candidate_min and a.score_candidate_min > 0:
+            print(f"[trail-link] TWO-TIER follow-up: candidate floor {_score_floor}, hi-conf (tier A) >= {a.score_hiconf}", flush=True)
     d = d.reset_index(drop=True)
     need = ["mjd", "ra", "dec", "ra0", "dec0", "ra1", "dec1", "visit"]
     miss = [c for c in need if c not in d.columns]
@@ -622,6 +671,12 @@ def main():
     kindex = build_known_index(known)   # one cKDTree over all known sightings (crossmatch O(log M)/det at scale)
     d["night"] = np.floor(d.mjd - 0.5).astype(int)
     print(f"[trail-link] {n0} dets -> {len(d)} after cuts | nights {sorted(d.night.unique())}", flush=True)
+    # PER-NIGHT auto 2v Δt window: size the gap filter to the data's actual same-pointing pair gaps so a
+    # longer WFD pair (e.g. this night's 42.5min vs a hardcoded 40) is not silently dropped. Resolved here,
+    # once d's visits are known; --max-arc-2v-min auto (op default) triggers it, an explicit number overrides.
+    if isinstance(a.max_arc_2v_min, str):
+        a.max_arc_2v_min, _winfo = auto_2v_window_min(d)
+        print(f"[trail-link] auto 2v window: {_winfo}", flush=True)
 
     rows = []
     alerts = []
@@ -711,7 +766,7 @@ def main():
                 alerts.append(build_alert(g, alert_id=f"{tier[:2]}_{int(night)}_{len(rows)-1:06d}",
                                           night=night, obscode=_oc, status=status, tier=tier,
                                           chi2=chi2v, a_au=av, ecc=ev, rms_arcsec=rms,
-                                          match_obj=obj, match_frac=frac))
+                                          match_obj=obj, match_frac=frac, hiconf_score=a.score_hiconf))
         print(f"  night {night}: {len(dn)} dets -> {len(cand)} candidates, {npass} passed", flush=True)
     TRACK_COLS = ["night", "ndet", "nvisit", "n_epochs", "tier", "arc_hr", "rms_arcsec", "speed_degday",
                   "chi2", "a_au", "ecc", "ra", "dec", "check", "match_obj", "match_frac", "status"]

@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from ADCNN.linking.link_2visit import (
     radec_to_unit, _chord_radius, trail_velocity, pair_chi2, physical_check,
     chord_seed_pairs, crossmatch, build_known_index, extend_to_triplets,
+    auto_2v_window_min,
 )
 from ADCNN.pipelines.heliolinc.orbit_check import orbit_ok
 from ADCNN.linking.rank_alerts import build_alert, write_alerts
@@ -268,7 +269,28 @@ def test_resume_dedup_key():
     _check("dedup collapses duplicated panel rows", len(dup) == 5 and len(out) == 3)
 
 
+def test_auto_2v_window():
+    # WFD pair: same pointing, 42.5-min gap -> window extends to admit it (42.5*1.15=48.9 -> 49)
+    g = 42.5 / 1440.0
+    wfd = pd.DataFrame(dict(visit=[1, 1, 2, 2], ra=[10.0, 10.001, 10.0, 10.001],
+                            dec=[5.0, 5.001, 5.0, 5.001], mjd=[60000.10, 60000.10, 60000.10 + g, 60000.10 + g]))
+    w, _ = auto_2v_window_min(wfd)
+    _check("auto window admits a 42.5-min WFD pair (>40)", 48 <= w <= 50)
+    # dense/short pair (30 min) clamps UP to the 40-min floor (no regression on calibrated cadence)
+    g2 = 30.0 / 1440.0
+    dense = wfd.copy(); dense.loc[2:, "mjd"] = 60000.10 + g2
+    _check("short pair clamps to 40-min floor", auto_2v_window_min(dense)[0] == 40.0)
+    # two DIFFERENT pointings (>1 deg apart) are not a same-pointing pair -> fall back to floor
+    diff = pd.DataFrame(dict(visit=[1, 1, 2, 2], ra=[10.0, 10.0, 200.0, 200.0],
+                             dec=[5.0, 5.0, -40.0, -40.0], mjd=[60000.10, 60000.10, 60000.13, 60000.13]))
+    _check("different fields -> floor (no false pairing)", auto_2v_window_min(diff)[0] == 40.0)
+    # ceiling caps a pathologically wide pair at 75
+    wide = wfd.copy(); wide.loc[2:, "mjd"] = 60000.10 + 90.0 / 1440.0
+    _check("wide pair capped at 75-min ceiling", auto_2v_window_min(wide)[0] == 75.0)
+
+
 TESTS = [test_radec_to_unit_and_chord, test_trail_velocity_ra_wrap, test_chord_seed_across_ra0_equals_ra180,
+         test_auto_2v_window,
          test_crossmatch_kd_equals_brute_and_ra0, test_pair_chi2_true_low_false_high,
          test_physical_check_gate_and_nan, test_orbit_ok_runs_and_flags,
          test_alert_build_predict_and_wrap, test_extend_to_triplets, test_seed_3v_first_wide_arc, test_prefilter_2v_exactness,
