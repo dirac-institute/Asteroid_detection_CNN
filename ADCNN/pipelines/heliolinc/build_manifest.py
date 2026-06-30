@@ -35,10 +35,14 @@ def parse_tracts(s):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--tracts", required=True, help="comma list / ranges, e.g. 8731 or 8487-8493,8729-8735")
+    ap.add_argument("--tracts", help="comma list / ranges, e.g. 8731 or 8487-8493,8729-8735 "
+                    "(tract-indexed coadd-style diffims). Mutually exclusive with --visits.")
+    ap.add_argument("--visits", help="comma list / ranges of visit ids, e.g. 2026062900673,2026062900725 "
+                    "(for per-visit diffims with NO tract dimension, e.g. the embargo prompt-processing "
+                    "ApPipe difference_image). Mutually exclusive with --tracts.")
     ap.add_argument("--skymap", default="lsst_cells_v1")
-    ap.add_argument("--day-start", type=int, required=True, help="day_obs >= (inclusive)")
-    ap.add_argument("--day-end", type=int, required=True, help="day_obs <  (exclusive)")
+    ap.add_argument("--day-start", type=int, help="day_obs >= (inclusive); required with --tracts")
+    ap.add_argument("--day-end", type=int, help="day_obs <  (exclusive); required with --tracts")
     ap.add_argument("--exclude", default=str(REPO / "ADCNN/pipelines/heliolinc/train_visit_detector.csv"),
                     help="CSV of train (visit,detector) to exclude (leakage guard)")
     ap.add_argument("--out", required=True)
@@ -46,12 +50,20 @@ def main():
     ap.add_argument("--collection", default=STAGE4, help="diffim collection (default $BUTLER_COLLECTION)")
     a = ap.parse_args()
 
-    tracts = parse_tracts(a.tracts); tl = ",".join(map(str, tracts))
+    if bool(a.tracts) == bool(a.visits):
+        ap.error("give exactly one of --tracts or --visits")
     b = Butler(a.butler_repo)
+    if a.visits:
+        vl = ",".join(map(str, parse_tracts(a.visits)))   # parse_tracts handles plain lists + ranges
+        where = f"instrument='LSSTCam' AND visit IN ({vl})"
+    else:
+        if a.day_start is None or a.day_end is None:
+            ap.error("--day-start and --day-end are required with --tracts")
+        tl = ",".join(map(str, parse_tracts(a.tracts)))
+        where = (f"instrument='LSSTCam' AND skymap='{a.skymap}' AND tract IN ({tl}) "
+                 f"AND visit.day_obs>={a.day_start} AND visit.day_obs<{a.day_end}")
     refs = list(b.registry.queryDatasets(
-        "difference_image", collections=a.collection, findFirst=True,
-        where=(f"instrument='LSSTCam' AND skymap='{a.skymap}' AND tract IN ({tl}) "
-               f"AND visit.day_obs>={a.day_start} AND visit.day_obs<{a.day_end}")))
+        "difference_image", collections=a.collection, findFirst=True, where=where))
     exclude = set()
     if Path(a.exclude).exists():
         ex = pd.read_csv(a.exclude); exclude = set(zip(ex.visit.astype(int), ex.detector.astype(int)))
@@ -67,8 +79,9 @@ def main():
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(a.out, index=False)
     nights = len({int(str(v)[:8]) for v in df.visit})
+    scope = f"visits {a.visits}" if a.visits else f"{len(parse_tracts(a.tracts))} tracts"
     print(f"[manifest] {len(df)} panels | {df.visit.nunique()} visits | {nights} nights | "
-          f"{len(tracts)} tracts (excluded {nex} train) -> {a.out}")
+          f"{scope} (excluded {nex} train) -> {a.out}")
 
 
 if __name__ == "__main__":
