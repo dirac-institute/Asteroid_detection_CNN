@@ -67,7 +67,8 @@ def read_panels(manifest):
     for _, r in m.iterrows():
         try:
             wj = _wcs_from_json(getattr(r, "wcs_json", None))
-            with fits.open(r.fits_path, memmap=True) as h:
+            from ADCNN.inference.diffim_io import open_diffim
+            with open_diffim(r.fits_path, memmap=True) as h:
                 hdr = h[1].header; h0 = h[0].header
                 nx, ny = int(hdr["NAXIS1"]), int(hdr["NAXIS2"])
                 w = wj or _wcs_any(hdr)

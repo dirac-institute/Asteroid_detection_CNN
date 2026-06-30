@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import pandas as pd
 from lsst.daf.butler import Butler
+from ADCNN.inference.diffim_io import datastore_uri
 
 REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
 STAGE4 = os.environ.get("BUTLER_COLLECTION", "LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage4")
@@ -59,7 +60,7 @@ def main():
         v, d = int(r.dataId["visit"]), int(r.dataId["detector"])
         if (v, d) in exclude:
             nex += 1; continue
-        rows.append((v, d, r.dataId.get("band", ""), b.getURI(r).ospath))
+        rows.append((v, d, r.dataId.get("band", ""), datastore_uri(b, r)))
     df = pd.DataFrame(rows, columns=["visit", "detector", "band", "fits_path"]).drop_duplicates("fits_path")
     df = df.sort_values(["visit", "detector"]).reset_index(drop=True)
     df.insert(0, "image_id", range(len(df)))

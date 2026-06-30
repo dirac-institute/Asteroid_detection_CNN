@@ -80,12 +80,13 @@ def _wcs_any(hdr):
 
 def read_fits_panel(path: str, wcs_json=None):
     """Read one diffim FITS directly: (image float32, astropy WCS, mjd-mid). HDU1=IMAGE (validated).
-    WCS preference: manifest wcs_json (exact-SkyWcs FITS approximation) > header WCS."""
-    from astropy.io import fits
-    from astropy.wcs import WCS
+    WCS preference: manifest wcs_json (exact-SkyWcs FITS approximation) > header WCS.
+    `path` is a Butler datastore URI (build_manifest): a local file path read byte-identically,
+    or an s3:// URI fetched in-memory -- see ADCNN.inference.diffim_io.open_diffim."""
+    from ADCNN.inference.diffim_io import open_diffim
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        with fits.open(path, memmap=False) as hdul:
+        with open_diffim(path, memmap=False) as hdul:
             img = np.nan_to_num(hdul[1].data.astype(np.float32))
             wcs = _wcs_from_json(wcs_json) or _wcs_any(hdul[1].header)
             h0 = hdul[0].header

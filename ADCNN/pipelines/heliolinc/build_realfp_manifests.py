@@ -12,6 +12,7 @@ from astropy.coordinates import SkyCoord
 import astropy.units as u
 from lsst.daf.butler import Butler
 from lsst.geom import SpherePoint, degrees
+from ADCNN.inference.diffim_io import datastore_uri
 
 REPO = Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
 
@@ -124,7 +125,7 @@ def main():
                     where=(f"instrument='LSSTCam' AND skymap='{a.skymap}' AND tract={tract} "
                            f"AND visit.day_obs={night}")))
         man = [dict(visit=int(r.dataId["visit"]), detector=int(r.dataId["detector"]),
-                    band=r.dataId.get("band", ""), fits_path=b.getURI(r).ospath) for r in refs]
+                    band=r.dataId.get("band", ""), fits_path=datastore_uri(b, r)) for r in refs]
         mdf = pd.DataFrame(man).drop_duplicates(["visit", "detector"])
         if len(mdf) and excl:                     # drop leakage (train/train2) visits
             mdf = mdf[~mdf.visit.isin(excl)]

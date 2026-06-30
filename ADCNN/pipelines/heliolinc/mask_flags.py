@@ -34,12 +34,12 @@ HALFWID = 1      # +/- pixels perpendicular sampling (trail core)
 
 def _panel_flags(args):
     fits_path, recs = args
-    from astropy.io import fits
+    from ADCNN.inference.diffim_io import open_diffim
     out = []
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            with fits.open(fits_path, memmap=True) as h:
+            with open_diffim(fits_path, memmap=True) as h:
                 mhdu = h["MASK"]
                 bit = {k[3:]: int(v) for k, v in mhdu.header.items() if k.startswith("MP_")}
                 mask = mhdu.data

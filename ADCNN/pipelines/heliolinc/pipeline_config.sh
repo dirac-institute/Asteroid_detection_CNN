@@ -21,6 +21,18 @@ export LSST_STACK_SETUP="${LSST_STACK_SETUP:-source /cvmfs/sw.lsst.eu/almalinux-
 export BUTLER_REPO="${BUTLER_REPO:-dp2_prep}"
 export BUTLER_COLLECTION="${BUTLER_COLLECTION:-LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage4}"
 
+# S3 access for a remote (object-store) datastore -- e.g. the `embargo` prompt-processing repo,
+# whose `difference_image` URIs are s3:// (read in-memory by ADCNN.inference.diffim_io, no local
+# clutter). These are inherited by the LSST stack env but NOT by the torch detect env, so export
+# them here so detect_night's S3 reads work. Harmless for a local (POSIX) datastore. The two
+# CHECKSUM knobs are mandatory: without them botocore thrashes the SDF gateway (~33 s/panel vs
+# ~0.65 s) -- diffim_io also sets them defensively, this just makes the launcher self-contained.
+export S3_ENDPOINT_URL="${S3_ENDPOINT_URL:-https://s3dfrgw.slac.stanford.edu}"
+export LSST_RESOURCES_S3_PROFILE_embargo="${LSST_RESOURCES_S3_PROFILE_embargo:-https://sdfembs3.sdf.slac.stanford.edu}"
+export AWS_SHARED_CREDENTIALS_FILE="${AWS_SHARED_CREDENTIALS_FILE:-$HOME/.lsst/aws-credentials.ini}"
+export AWS_REQUEST_CHECKSUM_CALCULATION="${AWS_REQUEST_CHECKSUM_CALCULATION:-WHEN_REQUIRED}"
+export AWS_RESPONSE_CHECKSUM_VALIDATION="${AWS_RESPONSE_CHECKSUM_VALIDATION:-WHEN_REQUIRED}"
+
 # Observatory MPC code carried into the detection catalogue.
 export OBSCODE="${OBSCODE:-I11}"
 

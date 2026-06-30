@@ -164,7 +164,8 @@ def stage_assemble(a):
         with h5py.File(h5p, "w") as h5:
             ims = msk = rl = None
             for pid, ((v, det), g) in enumerate(panels):
-                with fits.open(g.fits_path.iloc[0], memmap=False) as hd:
+                from ADCNN.inference.diffim_io import open_diffim
+                with open_diffim(g.fits_path.iloc[0], memmap=False) as hd:
                     img = np.nan_to_num(hd[1].data.astype(np.float32))
                 if ims is None:
                     H, W = img.shape
