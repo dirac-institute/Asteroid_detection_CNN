@@ -269,6 +269,39 @@ def test_resume_dedup_key():
     _check("dedup collapses duplicated panel rows", len(dup) == 5 and len(out) == 3)
 
 
+def test_promote_from_survivors_preserves_real_triplets():
+    # THE FIX (2026-07-01): extend_to_triplets is fed only the prefilter-SURVIVING pairs, not every raw
+    # seed pair -- on a dense field the raw path is ~1e7 pairs (the 20260630 ~95-min hang). This must NOT
+    # drop real triplets: a real mover's pairs pass the geometric prefilter, so its triplet survives.
+    from ADCNN.linking.link_2visit import prefilter_2v_pairs
+    # (a) in-window real mover (3 visits within the 2v window): its pairs survive the prefilter
+    g = _mover_dets(200.0, -15.0, 3.0, 60.0, n_visits=3, gap_min=20.0)
+    cp = chord_seed_pairs(g, max_arc_min=75.0)
+    surv = prefilter_2v_pairs(g, cp, 5.0, exptime_s=EXPT)
+    _check("real in-window mover's pairs survive the prefilter", len(surv) >= 1)
+    tri = extend_to_triplets(g, surv, pos_tol_arcsec=5.0)
+    _check("triplet recovered from SURVIVORS (not raw)", max((len(set(t)) for t in tri), default=0) >= 3)
+    # (b) wide-arc real mover (0/50/100 min, no in-window pair): the prefilter checks geometry/photometry,
+    # NOT the arc, so a real wide pair still survives -> the design rule (triplets don't need the arc gate)
+    # is preserved under survivor-gating.
+    gw = _mover_dets(180.0, -20.0, 3.0, 45.0, n_visits=3, gap_min=50.0)
+    wide = chord_seed_pairs(gw, max_arc_min=180.0)
+    wsurv = prefilter_2v_pairs(gw, wide, 5.0, exptime_s=EXPT)
+    _check("real WIDE-arc mover's pair survives the prefilter (arc is not a prefilter term)", len(wsurv) >= 1)
+    wtri = extend_to_triplets(gw, wsurv, pos_tol_arcsec=5.0)
+    _check("wide-arc triplet recovered from SURVIVORS", max((len(set(t)) for t in wtri), default=0) >= 3)
+    # (c) chance scatter: prefilter kills the pairs -> few/no survivors to extend (the perf win)
+    rng = np.random.default_rng(11)
+    gc = pd.DataFrame(dict(detid=range(60), mjd=np.repeat([60000.0, 60000.0 + 20/1440.0], 30),
+                           ra=200.0 + rng.uniform(-0.2, 0.2, 60), dec=-15.0 + rng.uniform(-0.2, 0.2, 60),
+                           visit=np.repeat([1000, 1001], 30), detector=1, score=0.95, mf_snr=30.0))
+    gc["ra0"] = gc.ra - 1e-4; gc["dec0"] = gc.dec; gc["ra1"] = gc.ra + 1e-4; gc["dec1"] = gc.dec
+    gc["len_db"] = 8.0
+    csurv = prefilter_2v_pairs(gc, chord_seed_pairs(gc, max_arc_min=75.0), 5.0, exptime_s=EXPT)
+    _check("chance scatter yields far fewer survivors than raw seed pairs",
+           len(csurv) < 0.5 * max(len(chord_seed_pairs(gc, max_arc_min=75.0)), 1))
+
+
 def test_auto_2v_window():
     # WFD pair: same pointing, 42.5-min gap -> window extends to admit it (42.5*1.15=48.9 -> 49)
     g = 42.5 / 1440.0
@@ -290,7 +323,7 @@ def test_auto_2v_window():
 
 
 TESTS = [test_radec_to_unit_and_chord, test_trail_velocity_ra_wrap, test_chord_seed_across_ra0_equals_ra180,
-         test_auto_2v_window,
+         test_promote_from_survivors_preserves_real_triplets, test_auto_2v_window,
          test_crossmatch_kd_equals_brute_and_ra0, test_pair_chi2_true_low_false_high,
          test_physical_check_gate_and_nan, test_orbit_ok_runs_and_flags,
          test_alert_build_predict_and_wrap, test_extend_to_triplets, test_seed_3v_first_wide_arc, test_prefilter_2v_exactness,

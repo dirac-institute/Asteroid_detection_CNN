@@ -625,6 +625,11 @@ def main():
                     help="promote a passing 2-visit chord pair to the PURE 3+visit tier when a real same-night detection lies on its precise 2-centroid track (the (FP)^N collapse). Free purity for the multi-visit subset; no-op for a WFD pair. --no-promote-3v to disable")
     ap.add_argument("--promote-tol-arcsec", type=float, default=5.0,
                     help="position tolerance (arcsec) for attaching the 3rd detection to the chord-extrapolated track in --promote-3v")
+    ap.add_argument("--promote-from", choices=["survivors", "raw"], default="survivors",
+                    help="which 2v pairs get extended to triplets. 'survivors' (default): only the "
+                    "prefilter-passing pairs -- ~1700x faster on dense fields (0.3s vs ~500s), same real "
+                    "triplets, fewer chance triplets. 'raw': every seed pair (exhaustive; a triplet never "
+                    "needs a passing 2v parent) -- intractable on dense/ecliptic fields, kept for audit.")
     ap.add_argument("--alerts-out", default=None,
                     help="JSONL same-night alert stream (one actionable candidate per line: endpoints, motion vector, forward-predicted ephemeris, confidence). Default: alerts.jsonl beside --out. --no-alerts to disable")
     ap.add_argument("--no-alerts", action="store_true", help="do not emit the JSONL alert stream")
@@ -642,7 +647,7 @@ def main():
                  "pa_tol_2v": "--pa-tol-2v", "max_rms": "--max-rms", "pos_tol_3v": "--pos-tol-3v",
                  "max_arc_2v_min": "--max-arc-2v-min", "promote_3v": "--promote-3v",
                  "promote_tol_arcsec": "--promote-tol-arcsec", "alerts_top_n": "--alerts-top-n",
-                 "seed_3v_arc_min": "--seed-3v-arc-min"}
+                 "seed_3v_arc_min": "--seed-3v-arc-min", "promote_from": "--promote-from"}
         _applied = [f"{k}={_op[k]}" for k, fl in _flag.items()
                     if k in _op and fl not in sys.argv and (setattr(a, k, _op[k]) or True)]
         if _applied:
@@ -704,12 +709,25 @@ def main():
             # per-pair orbit fit for ~99% of chance pairs. Applied to the 2v CANDIDATE list only; the
             # raw cpairs still feed promotion/3v-first seeding below (3v candidates must never require
             # a passing 2v parent).
-            cand += prefilter_2v_pairs(dn, cpairs, a.chi2_2v_max, exptime_s=a.exptime)
+            surv2v = prefilter_2v_pairs(dn, cpairs, a.chi2_2v_max, exptime_s=a.exptime)
+            cand += surv2v
             # PROMOTE 2v->3v: attach a consistent 3rd same-night detection on the precise chord track.
             # A real 3rd on the 2-point line -> pure 3v tier (free purity for the multi-visit subset);
             # no-op for a 2-visit WFD night. The pair stays in `cand` as a fallback if the triplet fails.
+            #
+            # SCALABILITY (--promote-from): on a DENSE field cpairs is ~1e6 (mostly chance pairs) and
+            # extending EVERY raw pair to triplets is the dominant cost -- measured ~500s (the ~47-min
+            # 20260630-ecliptic hang) vs 0.3s when extending only the ~1e2 prefilter survivors, which also
+            # manufactures ~1e4 chance triplets that physical_check must then reject. Default 'survivors'
+            # extends only the physically-plausible (2v-gate-passing) pairs: a real 3-visit mover's
+            # constituent pairs pass the 2v trail-PA/speed gate (its 3 dets are collinear at constant
+            # velocity), so real triplets are preserved while chance-triplet manufacture is cut. 'raw'
+            # restores the exhaustive behaviour (extend every seed pair -- a triplet then never requires a
+            # passing 2v parent, at the dense-field cost). Empirically validated equal on the NY2 anchor +
+            # real-night recoveries; use 'raw' only to audit that equivalence.
             if a.promote_3v:
-                cand += extend_to_triplets(dn, cpairs, pos_tol_arcsec=a.promote_tol_arcsec)
+                _promote_src = surv2v if a.promote_from == "survivors" else cpairs
+                cand += extend_to_triplets(dn, _promote_src, pos_tol_arcsec=a.promote_tol_arcsec)
                 # 3v-FIRST seeding: the 40-min 2v arc cap is an FP lever for the PAIR tier, not a physical
                 # constraint on triplets -- a real mover seen in visits at e.g. 0/50/100 min has NO pair
                 # inside the 2v window and was previously unfindable. Seed pairs in a WIDER window
@@ -721,6 +739,13 @@ def main():
                     wide = chord_seed_pairs(dn, max_arc_min=a.seed_3v_arc_min,
                                             rate_min=a.rate_min, rate_max=a.rate_max,
                                             max_visit_pairs=a.max_visit_pairs)
+                    # SAME survivor-gating as the main path (dominant on dense fields): the wide window
+                    # (seed_3v_arc_min=120min default) seeds ~1e7 pairs on an ecliptic field -- 13.6M on
+                    # 20260630, extending all of them raw = the ~95-min hang. Prefilter to the physically-
+                    # plausible pairs first (13.6M->3.3k in 11s); a real >window-arc mover passes (its long-
+                    # arc chord is well-determined so trail-PA/speed agree). 'raw' keeps the exhaustive path.
+                    if a.promote_from == "survivors":
+                        wide = prefilter_2v_pairs(dn, wide, a.chi2_2v_max, exptime_s=a.exptime)
                     cand += extend_to_triplets(dn, wide, pos_tol_arcsec=a.promote_tol_arcsec)
         cand.sort(key=len, reverse=True)   # 3+visit (longer) first; a triplet's dets aren't re-reported as pairs
         npass = 0; used = set()
