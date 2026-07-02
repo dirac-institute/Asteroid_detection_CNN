@@ -68,6 +68,13 @@ def trail_velocity(d, exptime_s):
 # [|dSNR|/min], dpa_tm [deg trail-vs-motion PA], dspeed [frac trail-vs-motion speed].
 CHI2_SIG_2V = dict(perp=0.127, resid=0.133, dsnr=0.558, dpa_tm=4.869, dspeed=0.237)
 
+# admissible-region summary keys (orbit_check.orbit_ok): [lo,hi] ranges of the bound, plausible 2-point
+# orbit FAMILY the gate accepted. Reported in tracks.csv and the alert orbit block INSTEAD of the old
+# argmin (a, e) point estimate, which is degenerate for a same-night 2-point arc (resid flat in rho;
+# the argmin sat on the grid floor and reported Earth-clone a~1/e~0 -- see orbit_check.fit_orbit).
+ADM_KEYS = ("adm_n", "adm_rho_lo", "adm_rho_hi", "adm_a_lo", "adm_a_hi",
+            "adm_e_lo", "adm_e_hi", "adm_q_lo", "adm_q_hi")
+
 
 def pair_chi2(g, exptime_s=30.0, sig=None):
     """Combined orbit-fit chi^2 for a 2-visit pair (g = 2-row member df). Returns (chi2, info-dict).
@@ -107,7 +114,8 @@ def pair_chi2(g, exptime_s=30.0, sig=None):
     f = dict(perp=perp, resid=resid, dsnr=dsnr, dpa_tm=dpa_tm, dspeed=dspeed)
     chi2 = float(sum((f[k] / sig[k])**2 for k in sig))
     return chi2, dict(bound=bool(of.get("bound", False)), a=float(of.get("a", np.nan)),
-                      e=float(of.get("e", np.nan)), **f)
+                      e=float(of.get("e", np.nan)),
+                      **{k: of.get(k, np.nan) for k in ADM_KEYS}, **f)
 
 
 def link(dets, *, exptime_s=30.0, tref=None, pos_tol_deg=0.017, vel_frac=0.30, vel_floor=0.3,
@@ -778,27 +786,32 @@ def main():
             rms, speed = fit_residual(dn, members, a.exptime)
             obj, frac = crossmatch(dn, members, known, a.tol_arcsec, a.tol_day, index=kindex)
             g = dn.iloc[members]
-            # numeric orbit-fit columns for ranking the (candidate-grade) 2-visit stream
+            # numeric orbit-fit columns for the (candidate-grade) 2-visit stream: chi2 is the geometry
+            # gate statistic; a_au/ecc are the DEGENERATE argmin diagnostics (kept in tracks.csv for
+            # audit only); the adm_* admissible-region ranges are what the alert packet publishes.
             if n_ep == 2:
                 c2, ci = pair_chi2(g, a.exptime); chi2v, av, ev = c2, ci["a"], ci["e"]
+                adm = {k: ci.get(k, np.nan) for k in ADM_KEYS}
             else:
                 chi2v, av, ev = np.nan, np.nan, np.nan
+                adm = dict.fromkeys(ADM_KEYS, np.nan)
             tier = "2visit" if n_ep == 2 else "3+visit"
             status = "CONFIRMED" if obj else "NEW"
             rows.append(dict(night=int(night), ndet=len(members), nvisit=g.visit.nunique(),
                              n_epochs=n_ep, tier=tier,
                              arc_hr=(g.mjd.max() - g.mjd.min()) * 24, rms_arcsec=rms, speed_degday=speed,
                              chi2=chi2v, a_au=av, ecc=ev, ra=g.ra.mean(), dec=g.dec.mean(), check=info,
-                             match_obj=obj, match_frac=frac, status=status))
+                             match_obj=obj, match_frac=frac, status=status, **adm))
             if emit_alerts:
                 _oc = str(g["obscode"].iloc[0]) if "obscode" in g.columns else os.environ.get("OBSCODE", "I11")
                 alerts.append(build_alert(g, alert_id=f"{tier[:2]}_{int(night)}_{len(rows)-1:06d}",
                                           night=night, obscode=_oc, status=status, tier=tier,
-                                          chi2=chi2v, a_au=av, ecc=ev, rms_arcsec=rms,
+                                          chi2=chi2v, orbit_adm=adm, rms_arcsec=rms,
                                           match_obj=obj, match_frac=frac, hiconf_score=a.score_hiconf))
         print(f"  night {night}: {len(dn)} dets -> {len(cand)} candidates, {npass} passed", flush=True)
     TRACK_COLS = ["night", "ndet", "nvisit", "n_epochs", "tier", "arc_hr", "rms_arcsec", "speed_degday",
-                  "chi2", "a_au", "ecc", "ra", "dec", "check", "match_obj", "match_frac", "status"]
+                  "chi2", "a_au", "ecc", "ra", "dec", "check", "match_obj", "match_frac", "status",
+                  *ADM_KEYS]
     T = pd.DataFrame(rows, columns=TRACK_COLS)   # always carry the header, so an empty result is a valid CSV
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     T.to_csv(a.out, index=False)

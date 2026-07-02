@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from ADCNN.linking.link_2visit import (
     radec_to_unit, _chord_radius, trail_velocity, pair_chi2, physical_check,
     chord_seed_pairs, crossmatch, build_known_index, extend_to_triplets,
-    auto_2v_window_min,
+    auto_2v_window_min, ADM_KEYS,
 )
 from ADCNN.pipelines.heliolinc.orbit_check import orbit_ok
 from ADCNN.linking.rank_alerts import build_alert, write_alerts
@@ -145,6 +145,46 @@ def test_orbit_ok_runs_and_flags():
            np.isfinite(res["cost"]) or np.isinf(res["cost"]))
     _check("orbit_ok a/e are finite-or-nan (guarded)",
            (np.isfinite(res["a"]) or np.isnan(res["a"])))
+    _check("orbit_ok carries the admissible-region summary keys", all(k in res for k in ADM_KEYS))
+
+
+def test_orbit_admissible_region_and_alert_block():
+    """The 2-point 'orbit' is a FAMILY, not a point (resid flat in rho -> argmin is a grid artifact
+    that published Earth-clone a~1/e~0). The fix: orbit_ok summarizes the Milani admissible region
+    (adm_* ranges) and the alert packet publishes those ranges with degenerate=true -- never a scalar
+    point estimate. Ground truth: 1997 UT25 (main-belt, a~2.3) 2-visit sub-pairs argmin'd to a=1.01."""
+    import json
+    g = _mover_dets(180.0, -20.0, 3.0, 45.0)
+    _ok, res = orbit_ok(g, exptime_s=EXPT)
+    _check("clean mover has a non-empty admissible family", res["adm_n"] > 0)
+    _check("family a-range is WIDE (the 2-point degeneracy is real, not a point)",
+           res["adm_a_hi"] > 1.5 * res["adm_a_lo"])
+    _check("admissible ranges are ordered", res["adm_rho_lo"] <= res["adm_rho_hi"]
+           and res["adm_e_lo"] <= res["adm_e_hi"] and res["adm_q_lo"] <= res["adm_q_hi"])
+    # NB: the argmin (a, e) point estimate is NOT asserted to lie inside the family -- on the flat
+    # resid(rho) curve it can land in the near-parabolic tail the plausibility bounds exclude, which
+    # is precisely the artifact the admissible-region reporting fixes.
+    adm = {k: res[k] for k in ADM_KEYS}
+    al = build_alert(g, alert_id="2v_60000_000001", night=60000, obscode="I11", status="NEW",
+                     tier="2visit", chi2=2.0, orbit_adm=adm, rms_arcsec=0.3)
+    ob = al["orbit"]
+    _check("2v alert orbit block is the admissible region (degenerate=true, [lo,hi] lists)",
+           ob["degenerate"] is True and isinstance(ob["a_au"], list) and len(ob["a_au"]) == 2
+           and isinstance(ob["ecc"], list) and isinstance(ob["rho_au"], list) and isinstance(ob["q_au"], list))
+    _check("no scalar point-estimate a/e in the packet", not isinstance(ob["a_au"], float)
+           and not isinstance(ob["ecc"], float))
+    _check("orbit block is JSON-serializable", isinstance(json.dumps(al), str))
+    # 3+visit: no 2-point fit -> null ranges, degenerate not asserted
+    al3 = build_alert(g, alert_id="3+_60000_000000", night=60000, obscode="I11", status="NEW",
+                      tier="3+visit", chi2=np.nan, orbit_adm=None, rms_arcsec=0.3)
+    _check("3+visit orbit block has null ranges", al3["orbit"]["a_au"] is None
+           and al3["orbit"]["degenerate"] is None)
+    # empty/NaN adm (e.g. cheap-gate rejection path) degrades to the null block, still degenerate-flagged
+    al0 = build_alert(g, alert_id="2v_60000_000002", night=60000, obscode="I11", status="NEW",
+                      tier="2visit", chi2=4.0, orbit_adm=dict.fromkeys(ADM_KEYS, float("nan")),
+                      rms_arcsec=0.3)
+    _check("NaN adm summary -> null ranges but degenerate=true (2visit)",
+           al0["orbit"]["a_au"] is None and al0["orbit"]["degenerate"] is True)
 
 
 # ---------------------------------------------------------------- alert stream
@@ -153,7 +193,7 @@ def test_alert_build_predict_and_wrap():
     # 2-visit mover straddling RA=0 -> the alert's motion must be a small +RA rate, not a wrap artefact
     g = _mover_dets(359.99, -10.0, 3.0, 30.0, mf_snr=12.0).rename(columns={})
     al = build_alert(g, alert_id="2v_60000_000000", night=60000, obscode="I11", status="NEW",
-                     tier="2visit", chi2=2.3, a_au=1.1, ecc=0.4, rms_arcsec=0.3)
+                     tier="2visit", chi2=2.3, rms_arcsec=0.3)
     _check("alert is JSON-serializable", isinstance(json.dumps(al), str))
     _check("alert has the actionable blocks", all(k in al for k in ("epochs", "motion", "predict", "orbit")))
     _check("2-visit NEW alert is priority 2", al["priority"] == 2)
@@ -164,7 +204,7 @@ def test_alert_build_predict_and_wrap():
            all(p["mjd"] > al["asOfMjd"] for p in al["predict"]))
     # a known recovery is lower priority than a NEW candidate
     al_conf = build_alert(g, alert_id="x", night=60000, obscode="I11", status="CONFIRMED", tier="2visit",
-                          chi2=1.0, a_au=1.0, ecc=0.1, rms_arcsec=0.3, match_obj="2025 NY2", match_frac=1.0)
+                          chi2=1.0, rms_arcsec=0.3, match_obj="2025 NY2", match_frac=1.0)
     _check("CONFIRMED recovery is priority 3 (below NEW)", al_conf["priority"] == 3)
     n = write_alerts([al, al_conf], "/tmp/_alert_test.jsonl")
     _check("write_alerts emits one JSON line per alert", n == 2 and
@@ -326,6 +366,7 @@ TESTS = [test_radec_to_unit_and_chord, test_trail_velocity_ra_wrap, test_chord_s
          test_promote_from_survivors_preserves_real_triplets, test_auto_2v_window,
          test_crossmatch_kd_equals_brute_and_ra0, test_pair_chi2_true_low_false_high,
          test_physical_check_gate_and_nan, test_orbit_ok_runs_and_flags,
+         test_orbit_admissible_region_and_alert_block,
          test_alert_build_predict_and_wrap, test_extend_to_triplets, test_seed_3v_first_wide_arc, test_prefilter_2v_exactness,
          test_resume_dedup_key]
 

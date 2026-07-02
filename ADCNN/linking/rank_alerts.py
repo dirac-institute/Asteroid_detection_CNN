@@ -8,7 +8,10 @@ member detections of a track into a self-describing alert record and appends ONE
 
   endpoints (per-epoch ra/dec/mjd/snr/...), the motion vector (rate, position angle, dRA/dDec rates),
   a forward-predicted ephemeris (linear extrapolation with a 2-point lever-arm uncertainty), and the
-  confidence (orbit-fit chi2 / a / ecc / tier / priority).
+  confidence (geometry-gate chi2 + the admissible-region orbit RANGES / tier / priority). A 2-point
+  same-night arc cannot determine an orbit -- the packet publishes the Milani admissible-region
+  [lo,hi] element ranges with degenerate=true, never a scalar (a, e) point estimate (see
+  orbit_check.fit_orbit for the measured degeneracy).
 
 JSONL is append-able same-night and schema-stamped, so a follow-up coordinator or human vetter can
 ingest it line-by-line. The producer (the linker) calls `build_alert` while it still holds the member
@@ -20,7 +23,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-ALERT_SCHEMA_VERSION = "adcnn-samenight-2v/1.1"
+ALERT_SCHEMA_VERSION = "adcnn-samenight-2v/1.2"   # 1.2: orbit block = admissible-region ranges (was argmin point)
 SOLARDAY = 86400.0
 # forward-prediction look-aheads (days from the last epoch): +30/60/90 min, +4 h, +1 night.
 PREDICT_OFFSETS_DAYS = (30 / 1440.0, 60 / 1440.0, 90 / 1440.0, 240 / 1440.0, 1.0)
@@ -109,6 +112,34 @@ def _f(x):
     return x if np.isfinite(x) else None
 
 
+def _orbit_block(chi2, tier, adm):
+    """Honest orbit reporting for a short-arc alert (schema 1.2, 2026-07-02). A same-night 2-point arc
+    CANNOT determine an orbit: the fit residual is FLAT in topocentric distance (measured 1.2e-5 deg/day
+    variation across the whole bound family vs ~0.5 deg/day trail-velocity noise), so the old scalar
+    (a_au, ecc) argmin was a grid artifact -- it sat on the rho-grid floor and published Earth-clone
+    a~1/e~0 for 50/74 alerts on 20260630, reading falsely as "NEO-like"; ground truth 1997 UT25
+    (main-belt, a~2.3) came out a=1.01. We publish the Milani ADMISSIBLE REGION instead: [lo, hi]
+    ranges of the bound, physically plausible family the gate accepted (orbit_check.orbit_ok adm_*).
+    degenerate=true marks the 2-point family explicitly. chi2 stays: it is the GEOMETRY gate statistic
+    (collinearity + trail-vs-motion PA/speed + bound-orbit residual), not an orbit-fit merit. 3+visit
+    tracks carry null ranges (no 2-point fit; their confirmation is the (FP)^N triplet geometry). A
+    real orbit determination needs a 3rd epoch -- which is what the alert requests."""
+    adm = adm or {}
+    n = adm.get("adm_n")
+    try:
+        has_family = n is not None and np.isfinite(float(n)) and float(n) > 0
+    except (TypeError, ValueError):
+        has_family = False
+    if has_family:
+        def rng(k):
+            lo, hi = _f(adm.get(k + "_lo")), _f(adm.get(k + "_hi"))
+            return [None if lo is None else round(lo, 4), None if hi is None else round(hi, 4)]
+        return dict(chi2=_f(chi2), degenerate=True, rho_au=rng("adm_rho"),
+                    a_au=rng("adm_a"), ecc=rng("adm_e"), q_au=rng("adm_q"))
+    return dict(chi2=_f(chi2), degenerate=True if tier == "2visit" else None,
+                rho_au=None, a_au=None, ecc=None, q_au=None)
+
+
 def priority_score(status, tier, chi2, score_min, mfsnr_min):
     """CONTINUOUS follow-up priority (higher = point a telescope sooner). RECALIBRATED 2026-06-10 on the
     v2 per-pair table (82 injection fields, exact FP, field-grouped CV; ALERT_SWEEP_DECISION.md addendum):
@@ -124,13 +155,15 @@ def priority_score(status, tier, chi2, score_min, mfsnr_min):
     return float(base + 0.95 * min(max(sc, 0.0), 1.0))
 
 
-def build_alert(g, *, alert_id, night, obscode, status, tier, chi2, a_au, ecc, rms_arcsec,
+def build_alert(g, *, alert_id, night, obscode, status, tier, chi2, rms_arcsec, orbit_adm=None,
                 match_obj="", match_frac=0.0, offsets_days=PREDICT_OFFSETS_DAYS, thumbnails=None,
                 hiconf_score=0.80):
     """Build one alert dict from a track's member detection rows `g` (a DataFrame slice) + its summary.
 
     `g` must carry per-epoch mjd, ra, dec (and optionally mag, mf_snr, len_db, score, visit, detector,
-    art_frac). `thumbnails`: optional list of cutout paths/IDs (references, never embedded blobs).
+    art_frac). `orbit_adm`: the adm_* admissible-region summary dict from pair_chi2/orbit_ok (2-visit
+    tracks; None/empty for 3+visit) -- becomes the packet's orbit block via _orbit_block. `thumbnails`:
+    optional list of cutout paths/IDs (references, never embedded blobs).
     Returns a json-serializable dict (the alert packet)."""
     s = g.sort_values("mjd")
     vra, vdec, rate, pa, ra_ref, dec_ref, mjd_ref = _motion(s)
@@ -185,7 +218,7 @@ def build_alert(g, *, alert_id, night, obscode, status, tier, chi2, a_au, ecc, r
         motion=dict(rate_degday=_f(rate), pa_deg=_f(pa),
                     dra_degday=_f(vra), ddec_degday=_f(vdec)),
         predict=predict,
-        orbit=dict(chi2=_f(chi2), a_au=_f(a_au), ecc=_f(ecc)),
+        orbit=_orbit_block(chi2, tier, orbit_adm),
         match=dict(obj=match_obj or None, frac=_f(match_frac)),
         vetting=vetting,
         thumbnails=thumbnails,

@@ -175,7 +175,14 @@ def fit_orbit(t1, ra1, dec1, vx1, vy1, t2, ra2, dec2, vx2, vy2, rate_frac=0.35):
     TRAIL-measured angular velocities at both epochs. Positions are matched exactly (anchored); the
     discriminator is the trail-velocity residual + the orbit being bound and physically plausible.
     Returns dict: rate_resid (deg/day, RMS over the 4 velocity components), a (AU), e, bound, rho1,
-    rho2, cost."""
+    rho2, cost, and `scan` = the full rho-grid [(rho, resid, a, e, bound), ...].
+
+    NB (2026-07-02, measured): with only 2 same-night epochs the resid(rho) curve is FLAT -- ~1e-5
+    deg/day variation across the whole bound family vs ~0.5 deg/day trail-velocity noise -- so the
+    argmin (a, e) point estimate is a GRID ARTIFACT (it lands on the rho=0.02 grid floor, whose
+    Lambert solution inherits Earth's own elements a~1, e~0), NOT a distance determination. Use the
+    admissible-region summary orbit_ok() derives from `scan` for any reporting; the point estimate is
+    kept only for the gate's diagnostics."""
     e1, _, _ = _los_basis(ra1, dec1)
     e2, _, _ = _los_basis(ra2, dec2)
     R1, V1 = _earth_helio(t1); R2, V2 = _earth_helio(t2)
@@ -199,24 +206,36 @@ def fit_orbit(t1, ra1, dec1, vx1, vy1, t2, ra2, dec2, vx2, vy2, rate_frac=0.35):
             return np.inf, None
         return np.sqrt(np.mean(out**2)), (r1, v1)
 
-    # robust 1-D scan over rho (log-spaced), then refine around the best node
+    # robust 1-D scan over rho (log-spaced), then refine around the best node. Every solvable node is
+    # kept (scan) so the caller can summarize the ADMISSIBLE REGION -- the flat resid(rho) curve means
+    # the family, not the argmin, is the honest description of what the 2-point arc constrains.
     grid = np.geomspace(0.02, 60.0, 80)
-    res = [rate_resid_at(r)[0] for r in grid]
+    nodes = [(float(r),) + rate_resid_at(r) for r in grid]     # (rho, resid, state|None) per node
+    res = [n[1] for n in nodes]
     j = int(np.argmin(res))
     lo, hi = grid[max(j - 1, 0)], grid[min(j + 1, len(grid) - 1)]
     fine = np.geomspace(lo, hi, 40)
-    best_rho, best_r, best_state = grid[j], res[j], rate_resid_at(grid[j])[1]
+    best_rho, best_r, best_state = grid[j], res[j], nodes[j][2]
     for r in fine:
         rr, st = rate_resid_at(r)
         if rr < best_r:
             best_r, best_rho, best_state = rr, r, st
+    scan = []
+    for rho_n, rr_n, st_n in nodes:
+        if st_n is None or not np.isfinite(rr_n):
+            continue
+        a_n, e_n, en_n = _elements(*st_n)
+        if np.isfinite(a_n) and np.isfinite(e_n) and np.isfinite(en_n):
+            scan.append((rho_n, float(rr_n), float(a_n), float(e_n), bool(en_n < 0)))
     if best_state is None:
-        return dict(cost=np.inf, rate_resid=np.inf, a=np.nan, e=np.nan, bound=False, rho1=np.nan, rho2=np.nan)
+        return dict(cost=np.inf, rate_resid=np.inf, a=np.nan, e=np.nan, bound=False, rho1=np.nan,
+                    rho2=np.nan, scan=scan)
     a, e, energy = _elements(*best_state)
     if not (np.isfinite(a) and np.isfinite(e) and np.isfinite(energy)):   # numerical failure -> not a valid orbit
-        return dict(cost=np.inf, rate_resid=np.inf, a=np.nan, e=np.nan, bound=False, rho1=np.nan, rho2=np.nan)
+        return dict(cost=np.inf, rate_resid=np.inf, a=np.nan, e=np.nan, bound=False, rho1=np.nan,
+                    rho2=np.nan, scan=scan)
     return dict(cost=float(best_r / rate_sig), rate_resid=float(best_r), a=float(a), e=float(e),
-                bound=bool(energy < 0), rho1=float(best_rho), rho2=float(best_rho))
+                bound=bool(energy < 0), rho1=float(best_rho), rho2=float(best_rho), scan=scan)
 
 
 def orbit_ok(track, *, exptime_s=30.0, pos_tol_arcsec=2.0, rate_frac_tol=0.5,
@@ -245,6 +264,24 @@ def orbit_ok(track, *, exptime_s=30.0, pos_tol_arcsec=2.0, rate_frac_tol=0.5,
     f = fit_orbit(a_row.mjd, a_row.ra, a_row.dec, vx1, vy1,
                   b_row.mjd, b_row.ra, b_row.dec, vx2, vy2)
     speed = max(np.hypot(vx2, vy2), np.hypot(vx1, vy1))
+    # ADMISSIBLE-REGION summary (Milani): [lo,hi] ranges over the scan nodes that satisfy this gate's
+    # own acceptance (bound + plausible + velocity residual within tolerance). Because resid(rho) is
+    # flat for a 2-point same-night arc, this family -- typically Earth-clone THROUGH near-parabolic,
+    # a >10x span in a -- is what the data actually constrain; report IT, never the argmin point.
+    tol = rate_frac_tol * max(speed, 0.1)
+    adm = [(rho_n, a_n, e_n, a_n * (1.0 - e_n)) for rho_n, rr_n, a_n, e_n, b_n in f.pop("scan", [])
+           if b_n and rr_n < tol and a_min < a_n < a_max
+           and a_n * (1.0 - e_n) > q_min and rho_min < rho_n < rho_max]
+    if adm:
+        A = np.array(adm)
+        f.update(adm_n=len(adm),
+                 adm_rho_lo=float(A[:, 0].min()), adm_rho_hi=float(A[:, 0].max()),
+                 adm_a_lo=float(A[:, 1].min()), adm_a_hi=float(A[:, 1].max()),
+                 adm_e_lo=float(A[:, 2].min()), adm_e_hi=float(A[:, 2].max()),
+                 adm_q_lo=float(A[:, 3].min()), adm_q_hi=float(A[:, 3].max()))
+    else:
+        f.update(adm_n=0, adm_rho_lo=np.nan, adm_rho_hi=np.nan, adm_a_lo=np.nan, adm_a_hi=np.nan,
+                 adm_e_lo=np.nan, adm_e_hi=np.nan, adm_q_lo=np.nan, adm_q_hi=np.nan)
     q = f["a"] * (1 - f["e"]) if f.get("bound") else np.nan
     ok = (f.get("bound", False)
           and f["rate_resid"] < rate_frac_tol * max(speed, 0.1)
