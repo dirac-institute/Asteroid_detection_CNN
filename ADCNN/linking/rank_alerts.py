@@ -23,8 +23,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-ALERT_SCHEMA_VERSION = "adcnn-samenight-2v/1.3"   # 1.3: veto-stack annotations (stationarity/fpp/pixelVet),
-#     sigma_rate-aware motion block + neoRateGate, dt^2 short-gap priority bonus, demotion-aware ranking.
+ALERT_SCHEMA_VERSION = "adcnn-samenight-2v/1.4"   # 1.4: staticVeto block (template-footprint bright-static
+#     seed-exclusion; single-static alerts FLAG-demoted, never dropped -- expt_staticveto/RESULTS.md).
+#     1.3: veto-stack annotations (stationarity/fpp/pixelVet), sigma_rate-aware motion block +
+#     neoRateGate, dt^2 short-gap priority bonus, demotion-aware ranking.
 #     1.2: orbit block = admissible-region ranges (was argmin point).
 SOLARDAY = 86400.0
 # Per-epoch astrometric scatter floor (arcsec) for the RATE-uncertainty budget: faint trailed dets
@@ -189,7 +191,7 @@ def rate_sigma_degday(rms_arcsec, arc_days):
 
 def build_alert(g, *, alert_id, night, obscode, status, tier, chi2, rms_arcsec, orbit_adm=None,
                 match_obj="", match_frac=0.0, offsets_days=PREDICT_OFFSETS_DAYS, thumbnails=None,
-                hiconf_score=0.80, stationarity=None, fpp=None, rate_lo=1.0):
+                hiconf_score=0.80, stationarity=None, fpp=None, static_veto=None, rate_lo=1.0):
     """Build one alert dict from a track's member detection rows `g` (a DataFrame slice) + its summary.
 
     `g` must carry per-epoch mjd, ra, dec (and optionally mag, mf_snr, len_db, score, visit, detector,
@@ -200,7 +202,10 @@ def build_alert(g, *, alert_id, night, obscode, status, tier, chi2, rms_arcsec, 
     Veto-stack annotations (schema 1.3, all FLAG-not-drop): `stationarity` = the motion-aware catalog
     stationarity block from link_2visit.stationarity_check (vetoStationary demotes the alert in
     write_alerts, below every clean alert, but it is still published); `fpp` = the null-calibrated
-    chance-link block from link_2visit.fpp_block; `rate_lo` = the op rate floor used ONLY for the
+    chance-link block from link_2visit.fpp_block; `static_veto` (schema 1.4) = the template-footprint
+    bright-static annotation from link_2visit (nStaticMembers>=1 demotes like a stationarity flag --
+    the member sits in a bright coadd static's residual wings; static-STATIC pairs never reach here,
+    they are excluded at seeding); `rate_lo` = the op rate floor used ONLY for the
     neoRateGate annotation (rate - 3*sigma_rate > rate_lo -- is the NEO-rate claim secure against the
     short-arc rate error? the hard gate on the measured rate stays in physical_check, unchanged).
     A later pixel_vet stage adds the `pixelVet` block.
@@ -271,6 +276,7 @@ def build_alert(g, *, alert_id, night, obscode, status, tier, chi2, rms_arcsec, 
         vetting=vetting,
         stationarity=stationarity,                       # catalog veto block (link_2visit); None if untested
         fpp=fpp,                                         # null-calibrated chance-link block; None if no calib
+        staticVeto=static_veto,                          # bright-static template-footprint block; None if no catalog
         thumbnails=thumbnails,
     )
 
@@ -280,12 +286,15 @@ def _rank_class(a):
     a vetoed alert is still PUBLISHED (the audit measured a 3-5%/alert true-mover cost on the veto
     stack, so silent drops are not economical), it just sorts below every clean alert and cannot
     consume the --cap-alerts follow-up budget ahead of one. Class 1 = catalog vetoStationary OR
+    staticVeto nStaticMembers>=1 (a member in a bright coadd static's residual wings; measured
+    2026-07-02 -- static members dominate the false 2v alerts, expt_staticveto/RESULTS.md) OR
     pixelVet FLAGGED (3-5-sigma static evidence / defect-dominated capsule); class 2 = pixelVet
     killed (>=5-sigma mask-clean static, combined-or-single rule)."""
     pv = a.get("pixelVet") or {}
     if pv.get("killed"):
         return 2
     if ((a.get("stationarity") or {}).get("vetoStationary")
+            or (a.get("staticVeto") or {}).get("nStaticMembers", 0) >= 1
             or pv.get("verdict") == "FLAGGED"):
         return 1
     return 0

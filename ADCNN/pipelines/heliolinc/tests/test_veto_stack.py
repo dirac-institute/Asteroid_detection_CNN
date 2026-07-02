@@ -1,7 +1,8 @@
-"""Unit tests for the 2v confidence veto stack (alert schema 1.3, INVESTIGATION_2V_CONFIDENCE.md
-sections 6-8): catalog stationarity flag, per-alert FPP, sigma_rate / dt^2 ranking terms, and the
-pixel-vet formal kill rule (mask-clean snr_at0, combined-OR-single, defect demotion). Pure
-functions + synthetic panels -- no GPU, no Butler, no data files."""
+"""Unit tests for the 2v confidence veto stack (alert schema 1.4, INVESTIGATION_2V_CONFIDENCE.md
+sections 6-9): catalog stationarity flag, per-alert FPP, sigma_rate / dt^2 ranking terms, the
+pixel-vet formal kill rule (mask-clean snr_at0, combined-OR-single, defect demotion), and the
+template-footprint static veto (static-static seed exclusion + single-static FLAG demotion).
+Pure functions + synthetic panels -- no GPU, no Butler, no data files."""
 import json
 
 import numpy as np
@@ -11,8 +12,8 @@ from scipy.spatial import cKDTree
 
 from ADCNN.linking import pixel_vet as pv
 from ADCNN.linking import rank_alerts as ra
-from ADCNN.linking.link_2visit import (_finalize_fpp, fpp_block, radec_to_unit,
-                                       stationarity_check)
+from ADCNN.linking.link_2visit import (_finalize_fpp, drop_static_static_pairs, fpp_block,
+                                       radec_to_unit, stationarity_check)
 
 MIN39 = 39.2 / 1440.0                      # the audited WFD pair gap, days
 
@@ -120,7 +121,7 @@ def test_build_alert_publishes_veto_blocks():
     fpp = dict(lambdaPair=0.5, perAlertShare=0.25)
     al = ra.build_alert(g, alert_id="t", night=61220, obscode="X05", status="NEW", tier="2visit",
                         chi2=1.0, rms_arcsec=0.0, stationarity=stat, fpp=fpp, rate_lo=1.0)
-    assert al["schema"].endswith("/1.3")
+    assert al["schema"].endswith("/1.4")
     assert al["stationarity"] is stat and al["fpp"] is fpp
     m = al["motion"]
     assert m["rate_sigma_degday"] == pytest.approx(0.0058, abs=0.001)
@@ -147,6 +148,52 @@ def test_write_alerts_demotes_flagged_and_killed(tmp_path):
     ra.write_alerts([killed, flagged, clean, pixflag], p, top_n=2)
     scores = [json.loads(l)["priorityScore"] for l in open(p)]
     assert scores == [2.5, 2.95]
+
+
+# --------------------------------------------------------------- template-footprint static veto
+def test_static_static_pairs_excluded_single_kept():
+    # seed exclusion is BOTH-members-only: static-static pairs die, single/zero-static pairs live
+    flag = np.array([True, True, False, True])
+    pairs = [[0, 1], [0, 2], [2, 3], [1, 3]]                   # SS, S-, -S, SS
+    assert drop_static_static_pairs(pairs, flag) == [[0, 2], [2, 3]]
+    assert drop_static_static_pairs([], flag) == []            # empty in, empty out
+    # no flagged dets = exact no-op (the --static-catalog-off equivalence at the pair level)
+    assert drop_static_static_pairs(pairs, np.zeros(4, bool)) == pairs
+
+
+def test_static_veto_rank_class_demotion():
+    # nStaticMembers>=1 demotes to class 1 (FLAG level); 0 / absent stays clean; pixel-kill wins
+    assert ra._rank_class(dict(staticVeto=dict(nStaticMembers=1))) == 1
+    assert ra._rank_class(dict(staticVeto=dict(nStaticMembers=0))) == 0
+    assert ra._rank_class(dict(staticVeto=None)) == 0
+    assert ra._rank_class(dict(staticVeto=dict(nStaticMembers=1),
+                               pixelVet=dict(killed=True))) == 2
+
+
+def test_static_veto_flag_demotes_never_drops(tmp_path):
+    clean = dict(priorityScore=2.5, priority=2)
+    single = dict(priorityScore=2.9, priority=2, staticVeto=dict(nStaticMembers=1))
+    zero = dict(priorityScore=2.7, priority=2, staticVeto=dict(nStaticMembers=0))
+    p = tmp_path / "a.jsonl"
+    n = ra.write_alerts([single, clean, zero], p)
+    assert n == 3                                              # FLAG, never drop
+    scores = [json.loads(l)["priorityScore"] for l in open(p)]
+    assert scores == [2.7, 2.5, 2.9]                           # clean by score first; flagged one last
+
+
+def test_build_alert_publishes_static_veto_block():
+    g = _members()
+    sv = dict(nStaticMembers=1, magMax=20.0, radiusArcsec=3.0,
+              members=[dict(visit=101, isStatic=True, sepArcsec=1.8, staticMag=17.2),
+                       dict(visit=102, isStatic=False, sepArcsec=45.1, staticMag=19.0)])
+    al = ra.build_alert(g, alert_id="t", night=61220, obscode="X05", status="NEW", tier="2visit",
+                        chi2=1.0, rms_arcsec=0.0, static_veto=sv, rate_lo=1.0)
+    assert al["staticVeto"] is sv and ra._rank_class(al) == 1
+    json.dumps(al)                                             # fully serializable
+    # default (no catalog): the block is null and the alert stays clean
+    al2 = ra.build_alert(g, alert_id="t2", night=61220, obscode="X05", status="NEW", tier="2visit",
+                         chi2=1.0, rms_arcsec=0.0, rate_lo=1.0)
+    assert al2["staticVeto"] is None and ra._rank_class(al2) == 0
 
 
 # --------------------------------------------------------------- pixel vet: capsule statistic

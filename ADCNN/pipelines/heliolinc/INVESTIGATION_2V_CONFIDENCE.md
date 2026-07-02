@@ -262,3 +262,60 @@ flag/kill → FPP tier) degrades gracefully with member faintness instead of gat
 faint bin keeps ~83% of its FP removal (catalog layer), loses most *pixel-kill* certainty
 (7%), and compensates with flags + honest per-alert FPP. Fix the artifact test by making it
 deeper (stacking), never looser (3σ kills) and never by raising the score floor.
+
+## 9. Template-footprint static veto — the §3 structure identified and removed (measured 2026-07-02)
+
+Experiment (embargo 0630, artifacts in `run_embargo_0630/expt_staticveto/`, RESULTS.md there):
+crossmatch every link-input det against the deep-coadd `object` catalog (`main` repo, skymap
+`lsst_cells_v1`, 28 covering tracts, 9.5M primaries), veto within r of statics brighter than
+a cut, relink at candidate floor 0.5 (frozen op untouched; baseline vs cleaned, byte-faithful
+`link.sh` + `--score-candidate-min 0.5`). Truth = fresh SkyBoT match of all dets (1,020 dets /
+693 objects).
+
+Measured:
+- **The §3 "structured background" is ~90% template-static residuals.** Floor-0.5 baseline:
+  107 alerts; member-resolved against the static catalog: 95 static–static, 9 mixed, 3 clean.
+  Cleaned rerun: exactly those 3 survive (×0.03 vs ×0.24 predicted from det-count shrink —
+  chance links are ~10× enriched on statics). The artifact dets live in the 2–3″ *wings* of
+  mag<20 stars (pair-visit kill fraction jumps 0.25→0.60 from r=2″→3″).
+- **Design point mag<20, r=3″**: removes 59.7%/41.0% of the dense-pair dets at
+  **1.31%/det ≈ 2.6%/alert true-mover cost** (SkyBoT-measured; ≈ sky-area chance overlap, so
+  it transfers to fast movers). Full-depth footprint veto costs 14–43% — rejected.
+- **Catalog geometry alone reproduces the §6 pixel-vet stack on this night**: 73/74 canonical
+  floor-0.6 alerts have ≥1 static member; the single 0-static alert is 2v_61221_000062 — the
+  only alert pixel-vet passed. (Disagrees once: kills 000003, pixel-CLEAN at 2.61σ with a known
+  dipole neighbor.)
+- **k in `fpp_2v_chance.json` is ~10× inflated** by this component (post-veto observed 3 vs
+  Σλ′≈25–30). Post-veto perAlertShare is over-conservative until k is recalibrated on
+  static-vetoed input.
+
+Verdict: **GO on floor 0.5 behind the veto** — 3 alerts/night at 0.5+veto vs 74/night at 0.6
+unvetted: deeper reach at 25× lower volume. Production design: bright-limited seed-exclusion
+(exclude static–static pairs from 2v seeding), FLAG-never-drop for single-static alerts,
+demotion in ranking; frozen op keys untouched.
+
+### 9b. Production implementation (SHIPPED 2026-07-02, alert schema 1.4)
+
+`link_2visit --static-catalog CAT.parquet [--static-mag-max 20 --static-radius-arcsec 3]`
+(catalog from `ADCNN/linking/build_static_catalog.py`, coadd `object` tables). Mechanics:
+every linkable det is flagged against the bright statics; **static–static seed pairs are
+excluded from 2v seeding** (`drop_static_static_pairs`, also applied to the wide 3v-seeding
+window — a triplet built on two repeating artifacts is bogus by construction, and a real 3v
+mover keeps its other constituent pairs); **single-static alerts are published with a
+`staticVeto` block** (nStaticMembers + per-member isStatic/sep/mag) and **demoted to rank
+class 1** (same FLAG level as vetoStationary — never dropped; the flag itself costs ~1.3%/det
+of true movers). No `--static-catalog` = exact no-op; frozen `op_2v_alert.json` untouched
+(the veto is CLI-only, not an op key). Tests 75/75 (was 71, +4 static-veto).
+
+Verified on 0630 at floor 0.5 (`expt_staticveto/regress05`, `prod05`):
+- regress (no catalog) ≡ baseline: 107 alerts identical modulo the 1.4 schema stamp and the
+  all-null new fields.
+- prod: seed pairs 7.11M→6.51M at seeding; **12 alerts = exactly the baseline's {0,1}-static
+  set** (95 static–static gone; an independent KD-join member audit agrees with every linker
+  annotation). Ordering: 3 clean first, then 9 demoted single-static. The golden faint
+  candidate (000062-equivalent) is **rank 0, clean**; 000003 re-emerges single-static and
+  correctly sits in the demoted block (its e1 member is 0.31″ from a mag 17.8 static).
+- Runtime 292 s (vs 258 s unvetted): the catalog flag query costs ~30 s, linking no slower.
+
+Still open before any post-veto FPP claim: recalibrate `fpp_2v_chance.json` k on
+static-vetoed input (§9's ~10× inflation).

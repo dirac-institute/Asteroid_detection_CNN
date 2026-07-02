@@ -324,6 +324,31 @@ def prefilter_2v_pairs(dets, pairs, chi2_max, exptime_s=30.0):
     return kept + longer
 
 
+def drop_static_static_pairs(pairs, static_flag):
+    """SEED-EXCLUSION static veto (measured 2026-07-02, run_embargo_0630/expt_staticveto/RESULTS.md):
+    drop every 2-visit seed pair whose BOTH members are template-footprint statics (the per-det
+    `static_veto` flag: within the veto radius of a bright coadd object). A static-static pair is a
+    repeating subtraction artifact linking to itself -- 95/107 of the floor-0.5 alerts on the dense
+    0630 field -- so excluding it from SEEDING removes the structured FP background at ~zero true cost
+    (a real mover pair is static-static only by double chance overlap, ~(1.3%)^2). Pairs with <=1
+    static member are KEPT: the single-static alert is annotated + demoted downstream, never dropped.
+    Only raw [i,j] seed pairs are ever passed here (before prefilter/promotion)."""
+    if not len(pairs):
+        return pairs
+    P = np.asarray(pairs, dtype=int)
+    keep = ~(static_flag[P[:, 0]] & static_flag[P[:, 1]])
+    return P[keep].tolist()
+
+
+def _jf(x, nd=2):
+    """JSON-safe rounded float for alert annotation blocks: NaN/inf/None -> None."""
+    try:
+        x = float(x)
+    except (TypeError, ValueError):
+        return None
+    return round(x, nd) if np.isfinite(x) else None
+
+
 def extend_to_triplets(dets, pairs, *, pos_tol_arcsec=5.0):
     """Promote 2-visit chord pairs to 3+visit tracks WHEN a consistent 3rd same-night detection exists.
 
@@ -741,6 +766,21 @@ def main():
     ap.add_argument("--fpp-calib", default=str(HL / "fpp_2v_chance.json"),
                     help="null-donor chance-link calibration JSON (fpp_2v_chance.json) for the per-alert "
                     "fpp block: lambda = k*n1*n2*(dt/dt_ref)^2. 'none' or a missing file disables the block")
+    ap.add_argument("--static-catalog", default=None,
+                    help="bright-static template-footprint catalog (parquet/CSV with ra,dec,mag columns; "
+                    "build with ADCNN/linking/build_static_catalog.py from the coadd `object` tables). "
+                    "Enables the SEED-EXCLUSION static veto: 2v seed pairs whose BOTH members lie within "
+                    "--static-radius-arcsec of a mag<--static-mag-max static are never seeded (measured "
+                    "2026-07-02 on embargo 0630: ~90%% of the dense-field 2v FP background is template-"
+                    "static subtraction residuals, not chance); SINGLE-static alerts get a staticVeto "
+                    "annotation + ranking demotion -- FLAG, never drop. Omit = veto off (default)")
+    ap.add_argument("--static-mag-max", type=float, default=20.0,
+                    help="static-veto catalog magnitude cut (brightest griz cModel). 20.0 = the measured "
+                    "knee: removes the bright-star wing artifact population at ~1.3%%/det true-mover cost; "
+                    "deeper cuts eat real movers fast (mag<23 -> 3.4%%/det, full depth -> 14-43%%)")
+    ap.add_argument("--static-radius-arcsec", type=float, default=3.0,
+                    help="static-veto match radius: 3\" reaches the 2-3\" bright-star WINGS where the "
+                    "subtraction-residual dipoles live (per-visit kill fraction 0.25->0.60 going 2\"->3\")")
     a = ap.parse_args()
     # Overlay the calibrated op-point JSON: it sets each param UNLESS that flag was passed explicitly on the CLI.
     if a.op_point and os.path.exists(a.op_point):
@@ -789,6 +829,33 @@ def main():
     miss = [c for c in need if c not in d.columns]
     if miss:
         raise SystemExit(f"--dets missing {miss}")
+    # TEMPLATE-FOOTPRINT STATIC VETO (measured 2026-07-02 on embargo 0630, expt_staticveto/RESULTS.md):
+    # ~90% of the dense-field 2v FP background is subtraction residuals living in the 2-3" WINGS of
+    # bright (mag<20) coadd statics -- structured, NOT chance (95/107 floor-0.5 alerts were static-
+    # static pairs; exactly the clean ones survived removal). Flag every linkable det within the veto
+    # radius of a bright static; the night loop then EXCLUDES static-static pairs from 2v seeding
+    # (drop_static_static_pairs) and ANNOTATES + DEMOTES single-static alerts (staticVeto block --
+    # FLAG, never drop; the det-level true-mover flag cost is ~1.3%). No catalog = exact no-op.
+    static_cfg = None
+    if a.static_catalog and str(a.static_catalog).lower() != "none":
+        if not os.path.exists(a.static_catalog):
+            raise SystemExit(f"--static-catalog not found: {a.static_catalog}")
+        _sc = (pd.read_parquet(a.static_catalog) if str(a.static_catalog).endswith((".parquet", ".pq"))
+               else pd.read_csv(a.static_catalog))
+        _sc = _sc[np.isfinite(_sc.mag) & (_sc.mag < a.static_mag_max)]
+        if not len(_sc):
+            raise SystemExit(f"--static-catalog {a.static_catalog}: no statics brighter than "
+                             f"mag {a.static_mag_max} -- wrong catalog or cut")
+        _sd, _si = cKDTree(radec_to_unit(_sc.ra.to_numpy(), _sc.dec.to_numpy())).query(
+            radec_to_unit(d.ra.to_numpy(), d.dec.to_numpy()), k=1)
+        _sep = np.degrees(2.0 * np.arcsin(np.minimum(np.atleast_1d(_sd) / 2.0, 1.0))) * 3600.0
+        d["static_veto"] = _sep <= a.static_radius_arcsec
+        d["static_sep_arcsec"] = _sep
+        d["static_mag"] = _sc.mag.to_numpy()[np.atleast_1d(_si)]
+        static_cfg = dict(magMax=float(a.static_mag_max), radiusArcsec=float(a.static_radius_arcsec))
+        print(f"[trail-link] static veto: {len(_sc)} statics (mag<{a.static_mag_max:g}) from "
+              f"{a.static_catalog} -> {int(d.static_veto.sum())}/{len(d)} dets flagged "
+              f"(r={a.static_radius_arcsec:g}\")", flush=True)
     known = pd.read_csv(a.known)
     kindex = build_known_index(known)   # one cKDTree over all known sightings (crossmatch O(log M)/det at scale)
     d["night"] = np.floor(d.mjd - 0.5).astype(int)
@@ -830,6 +897,14 @@ def main():
             cpairs = chord_seed_pairs(dn, max_arc_min=(a.max_arc_2v_min or 1e9),
                                       rate_min=a.rate_min, rate_max=a.rate_max,
                                       max_visit_pairs=a.max_visit_pairs)
+            # SEED-EXCLUSION static veto: a static-static pair is a repeating-artifact self-link --
+            # never seed it. Single-static pairs stay (annotated + demoted at the alert, not dropped).
+            if static_cfg is not None:
+                _sflag = dn.static_veto.to_numpy()
+                _nsp = len(cpairs)
+                cpairs = drop_static_static_pairs(cpairs, _sflag)
+                print(f"  [static-veto] night {night}: 2v seed pairs {_nsp} -> {len(cpairs)} "
+                      f"(static-static excluded)", flush=True)
             # EXACT vectorized fast path (prefilter_2v_pairs): drop pairs whose partial chi2 already
             # exceeds the gate -- behavior-identical (the orbit-residual term is >=0), removes the
             # per-pair orbit fit for ~99% of chance pairs. Applied to the 2v CANDIDATE list only; the
@@ -865,6 +940,11 @@ def main():
                     wide = chord_seed_pairs(dn, max_arc_min=a.seed_3v_arc_min,
                                             rate_min=a.rate_min, rate_max=a.rate_max,
                                             max_visit_pairs=a.max_visit_pairs)
+                    # same seed-exclusion as the main 2v path: a triplet built ON a static-static
+                    # pair is bogus by construction (2/3 members are repeating artifacts); a real
+                    # 3-visit mover keeps 2 other constituent pairs to seed the same triplet.
+                    if static_cfg is not None:
+                        wide = drop_static_static_pairs(wide, dn.static_veto.to_numpy())
                     # SAME survivor-gating as the main path (dominant on dense fields): the wide window
                     # (seed_3v_arc_min=120min default) seeds ~1e7 pairs on an ecliptic field -- 13.6M on
                     # 20260630, extending all of them raw = the ~95-min hang. Prefilter to the physically-
@@ -911,8 +991,10 @@ def main():
                 adm = dict.fromkeys(ADM_KEYS, np.nan)
             tier = "2visit" if n_ep == 2 else "3+visit"
             status = "CONFIRMED" if obj else "NEW"
-            # 2v veto-stack annotations (FLAG, never drop): catalog stationarity + chance-link fpp.
-            stat = fpp = None
+            # 2v veto-stack annotations (FLAG, never drop): catalog stationarity + chance-link fpp
+            # + template-footprint staticVeto (static-static pairs never got here -- seed-excluded;
+            # what remains is 0- or 1-static, and the 1-static alerts are demoted in ranking).
+            stat = fpp = sveto = None
             if n_ep == 2:
                 if stat_trees:
                     stat = stationarity_check(g, stat_trees, stat_mjd, tol_arcsec=a.stat_tol_arcsec,
@@ -921,6 +1003,13 @@ def main():
                 if fpp_calib and len(vv) == 2:
                     dtm = abs(vmjd_n[vv[1]] - vmjd_n[vv[0]]) * 1440.0
                     fpp = fpp_block(fpp_calib, pool.get(vv[0], 0), pool.get(vv[1], 0), dtm, visits=vv)
+                if static_cfg is not None:
+                    _gs = g.sort_values("mjd")
+                    sveto = dict(nStaticMembers=int(_gs.static_veto.sum()), **static_cfg,
+                                 members=[dict(visit=int(r.visit), isStatic=bool(r.static_veto),
+                                               sepArcsec=_jf(r.static_sep_arcsec),
+                                               staticMag=_jf(r.static_mag))
+                                          for _, r in _gs.iterrows()])
             rows.append(dict(night=int(night), ndet=len(members), nvisit=g.visit.nunique(),
                              n_epochs=n_ep, tier=tier,
                              arc_hr=(g.mjd.max() - g.mjd.min()) * 24, rms_arcsec=rms, speed_degday=speed,
@@ -928,18 +1017,20 @@ def main():
                              match_obj=obj, match_frac=frac, status=status, **adm,
                              veto_stationary=(stat or {}).get("vetoStationary"),
                              stat_testable=(stat or {}).get("testable"),
-                             fpp_lambda_pair=(fpp or {}).get("lambdaPair")))
+                             fpp_lambda_pair=(fpp or {}).get("lambdaPair"),
+                             n_static_members=(sveto or {}).get("nStaticMembers")))
             if emit_alerts:
                 _oc = str(g["obscode"].iloc[0]) if "obscode" in g.columns else os.environ.get("OBSCODE", "I11")
                 alerts.append(build_alert(g, alert_id=f"{tier[:2]}_{int(night)}_{len(rows)-1:06d}",
                                           night=night, obscode=_oc, status=status, tier=tier,
                                           chi2=chi2v, orbit_adm=adm, rms_arcsec=rms,
                                           match_obj=obj, match_frac=frac, hiconf_score=a.score_hiconf,
-                                          stationarity=stat, fpp=fpp, rate_lo=a.rate_lo_2v))
+                                          stationarity=stat, fpp=fpp, static_veto=sveto,
+                                          rate_lo=a.rate_lo_2v))
         print(f"  night {night}: {len(dn)} dets -> {len(cand)} candidates, {npass} passed", flush=True)
     TRACK_COLS = ["night", "ndet", "nvisit", "n_epochs", "tier", "arc_hr", "rms_arcsec", "speed_degday",
                   "chi2", "a_au", "ecc", "ra", "dec", "check", "match_obj", "match_frac", "status",
-                  *ADM_KEYS, "veto_stationary", "stat_testable", "fpp_lambda_pair"]
+                  *ADM_KEYS, "veto_stationary", "stat_testable", "fpp_lambda_pair", "n_static_members"]
     T = pd.DataFrame(rows, columns=TRACK_COLS)   # always carry the header, so an empty result is a valid CSV
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     T.to_csv(a.out, index=False)
@@ -954,8 +1045,9 @@ def main():
         write_alerts(alerts, apath, top_n=(a.alerts_top_n if a.cap_alerts else None))
         n2new = sum(1 for al in alerts if al["tier"] == "2visit" and al["status"] == "NEW")
         nveto = sum(1 for al in alerts if (al.get("stationarity") or {}).get("vetoStationary"))
+        nsv = sum(1 for al in alerts if (al.get("staticVeto") or {}).get("nStaticMembers", 0) >= 1)
         print(f"[trail-link] alert stream: {len(alerts)} alerts ({n2new} same-night 2-visit NEW, "
-              f"{nveto} stationarity-flagged) -> {apath}", flush=True)
+              f"{nveto} stationarity-flagged, {nsv} static-flagged) -> {apath}", flush=True)
     if len(T):
         conf = sorted(T[T.status == "CONFIRMED"].match_obj.unique())
         new = T[T.status == "NEW"]
