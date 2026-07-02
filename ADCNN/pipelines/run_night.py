@@ -222,11 +222,20 @@ def run(a):
                f"--npt 2 --min-epochs 2 --seed-2v chord --alerts-out {out}/alerts.jsonl")
         _bash(cmd, a.dry_run)
 
+    def s_vet():
+        # pixel stationarity vet (INVESTIGATION_2V_CONFIDENCE.md sections 7/8): annotates pixelVet +
+        # `confident`, demotes flagged/killed alerts in the ranking, never drops. Needs the dets
+        # catalog's fits_path for panel lookup -- pixel_vet itself no-ops (pass-through) without it.
+        cmd = (f"python -m ADCNN.linking.pixel_vet --alerts {out}/alerts.jsonl "
+               f"--dets {out}/adcnn_dets_masked.csv --in-place")
+        _bash(cmd, a.dry_run)
+
     tm.stage("build_manifest", s_manifest)
     tm.stage("detect", s_detect)
     tm.stage("build_known", s_known)
     tm.stage("mask_flags", s_mask)
     tm.stage("link_2visit", s_link)
+    tm.stage("pixel_vet", s_vet)
 
     n_visits, n_passes = _manifest_counts(manifest)
     rep = tm.report(n_visits, n_passes)

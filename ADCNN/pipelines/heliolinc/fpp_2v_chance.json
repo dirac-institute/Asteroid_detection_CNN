@@ -1,0 +1,16 @@
+{
+  "_comment": "Per-alert chance-link (FPP) calibration for the same-night 2-visit alert stream. lambda_chance(pair) = k_per_det2 * n1 * n2 * (dt/dt_ref)^dt_power, where n1/n2 are the two visits' LINKABLE det pools (after the op floor: score>=score_candidate_min, len_db>=6, art_frac<0.3) and dt is the pair gap. The dt^2 law is the measured chance-annulus scaling (FP-link rate ~ dt^2, samenight lambda campaign 2026-06-04). k is calibrated from CROSS-FIELD NULL runs: visit 2026063000345 re-linked against 4 same-night far-away donor visits translated onto 396's footprint (real links physically impossible, densities/trail statistics preserved) -- every surviving 2v track is a chance link. Consumed by ADCNN.linking.link_2visit (--fpp-calib); published per alert as fpp.lambdaPair / fpp.perAlertShare. INVESTIGATION_2V_CONFIDENCE.md section 3a/6.",
+  "k_per_det2": 3.273e-07,
+  "dt_ref_min": 39.2,
+  "dt_power": 2.0,
+  "calibrated_on": "embargo 20260630 swarm pair 345->396 (dt 39.2 min), donors 129/663/712/715",
+  "donors": [
+    {"donor_visit": 2026063000129, "n1": 4211, "n2": 7999, "chance_2v_tracks": 6},
+    {"donor_visit": 2026063000663, "n1": 4211, "n2": 5105, "chance_2v_tracks": 15},
+    {"donor_visit": 2026063000712, "n1": 4211, "n2": 3723, "chance_2v_tracks": 0},
+    {"donor_visit": 2026063000715, "n1": 4211, "n2": 12191, "chance_2v_tracks": 19}
+  ],
+  "fit": "k = sum(lambda_i) / sum(n1*n2_i) = 40 / 1.222e8; cross-check: predicts 8.8 chance links for the real 345->396 pair vs audit lambda_indep ~ 10 +/- 8",
+  "calib_quality": "factor ~2 (4 donors, donor panel footprints differ from the real visit's). Recalibrate with >=8 donors before quoting per-alert FPP below ~1e-2 as a hard number; the RANKING it induces is robust.",
+  "pool_def": "per-visit, per-night det counts after the linker's cuts (art_frac, len_db, score candidate floor) -- the pool that can actually seed chance pairs"
+}

@@ -23,8 +23,19 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-ALERT_SCHEMA_VERSION = "adcnn-samenight-2v/1.2"   # 1.2: orbit block = admissible-region ranges (was argmin point)
+ALERT_SCHEMA_VERSION = "adcnn-samenight-2v/1.3"   # 1.3: veto-stack annotations (stationarity/fpp/pixelVet),
+#     sigma_rate-aware motion block + neoRateGate, dt^2 short-gap priority bonus, demotion-aware ranking.
+#     1.2: orbit block = admissible-region ranges (was argmin point).
 SOLARDAY = 86400.0
+# Per-epoch astrometric scatter floor (arcsec) for the RATE-uncertainty budget: faint trailed dets
+# centroid to ~0.4" (the audit's short-arc term: 49-s pair => sigma_rate ~0.3 deg/day; a 39-min pair
+# => ~0.006, negligible). Distinct from RMS_FLOOR_ARCSEC (0.1, the ephemeris-extrapolation floor):
+# a 2-point track fits exactly (rms==0), so the rate error must carry its own realistic floor.
+SIGMA_POS_2V_ARCSEC = 0.4
+# Short-gap priority bonus reference (min): the chance-link annulus scales as dt^2 (measured lambda
+# law), so a short-gap pair is intrinsically more trustworthy. The bonus saturates below DT_BONUS_REF.
+DT_BONUS_REF_MIN = 10.0
+DT_BONUS_MAX = 0.04   # keeps 2v NEW max = 2.0 + 0.95 + 0.04 = 2.99 < 3.0 (the 3+visit base): tier order is preserved
 # forward-prediction look-aheads (days from the last epoch): +30/60/90 min, +4 h, +1 night.
 PREDICT_OFFSETS_DAYS = (30 / 1440.0, 60 / 1440.0, 90 / 1440.0, 240 / 1440.0, 1.0)
 RMS_FLOOR_ARCSEC = 0.1   # per-epoch astrometric sigma floor for the extrapolation error budget
@@ -140,7 +151,7 @@ def _orbit_block(chi2, tier, adm):
                 rho_au=None, a_au=None, ecc=None, q_au=None)
 
 
-def priority_score(status, tier, chi2, score_min, mfsnr_min):
+def priority_score(status, tier, chi2, score_min, mfsnr_min, dt_min=None):
     """CONTINUOUS follow-up priority (higher = point a telescope sooner). RECALIBRATED 2026-06-10 on the
     v2 per-pair table (82 injection fields, exact FP, field-grouped CV; ALERT_SWEEP_DECISION.md addendum):
     within the gated stream the WEAKEST-MEMBER CNN score is the entire useful ranking signal -- it beat the
@@ -149,21 +160,50 @@ def priority_score(status, tier, chi2, score_min, mfsnr_min):
     information; chance 2-point fits give FPs a fat LOW-chi2 tail, so chi2 is a GATE, not a ranking
     weight). chi2/mfsnr args are kept for API stability but intentionally NOT used in the variable term.
     Tier base (3+visit > 2-visit NEW > known recovery) + 0.95*score_min keeps tiers separated
-    (2v NEW max 2.95 < 3.0 = 3+visit base)."""
+    (2v NEW max 2.95 < 3.0 = 3+visit base).
+
+    dt^2 SHORT-GAP BONUS (2026-07-02, INVESTIGATION_2V_CONFIDENCE.md section 5/6): the chance-link rate
+    scales as dt^2, so a ~1-min mosaic-revisit pair has ~10^3x smaller chance area than a 39-min WFD
+    pair. 2v NEW alerts get + DT_BONUS_MAX*min(1, (DT_BONUS_REF_MIN/dt)^2) -- bounded at 0.04 so the
+    tier ordering is preserved BY CONSTRUCTION (max 2.99 < 3.0) and the WFD-cadence ranking that the
+    2026-06-10 recalibration validated is essentially untouched (39-min pairs get +0.003). The real
+    chance-term weight lives in the per-alert fpp block; this is the ordinal tiebreak."""
     base = 0.5 if status == "CONFIRMED" else (3.0 if tier == "3+visit" else 2.0)
     sc = float(score_min) if (score_min is not None and np.isfinite(score_min)) else 0.0
-    return float(base + 0.95 * min(max(sc, 0.0), 1.0))
+    bonus = 0.0
+    if tier == "2visit" and status == "NEW" and dt_min is not None and np.isfinite(dt_min) and dt_min > 0:
+        bonus = DT_BONUS_MAX * min(1.0, (DT_BONUS_REF_MIN / float(dt_min)) ** 2)
+    return float(base + 0.95 * min(max(sc, 0.0), 1.0) + bonus)
+
+
+def rate_sigma_degday(rms_arcsec, arc_days):
+    """1-sigma apparent-rate uncertainty for a short linear arc: sqrt(2)*sigma_pos / dt, with the
+    per-epoch positional scatter floored at SIGMA_POS_2V_ARCSEC (a 2-point fit has rms==0 by
+    construction, so the measured rms alone would claim zero rate error). 49-s pair -> ~0.3 deg/day;
+    39-min pair -> ~0.006."""
+    s = max(float(rms_arcsec) if (rms_arcsec is not None and np.isfinite(rms_arcsec)) else 0.0,
+            SIGMA_POS_2V_ARCSEC)
+    dt = max(float(arc_days), 1.0 / SOLARDAY)
+    return float(np.sqrt(2.0) * (s / 3600.0) / dt)
 
 
 def build_alert(g, *, alert_id, night, obscode, status, tier, chi2, rms_arcsec, orbit_adm=None,
                 match_obj="", match_frac=0.0, offsets_days=PREDICT_OFFSETS_DAYS, thumbnails=None,
-                hiconf_score=0.80):
+                hiconf_score=0.80, stationarity=None, fpp=None, rate_lo=1.0):
     """Build one alert dict from a track's member detection rows `g` (a DataFrame slice) + its summary.
 
     `g` must carry per-epoch mjd, ra, dec (and optionally mag, mf_snr, len_db, score, visit, detector,
     art_frac). `orbit_adm`: the adm_* admissible-region summary dict from pair_chi2/orbit_ok (2-visit
     tracks; None/empty for 3+visit) -- becomes the packet's orbit block via _orbit_block. `thumbnails`:
     optional list of cutout paths/IDs (references, never embedded blobs).
+
+    Veto-stack annotations (schema 1.3, all FLAG-not-drop): `stationarity` = the motion-aware catalog
+    stationarity block from link_2visit.stationarity_check (vetoStationary demotes the alert in
+    write_alerts, below every clean alert, but it is still published); `fpp` = the null-calibrated
+    chance-link block from link_2visit.fpp_block; `rate_lo` = the op rate floor used ONLY for the
+    neoRateGate annotation (rate - 3*sigma_rate > rate_lo -- is the NEO-rate claim secure against the
+    short-arc rate error? the hard gate on the measured rate stays in physical_check, unchanged).
+    A later pixel_vet stage adds the `pixelVet` block.
     Returns a json-serializable dict (the alert packet)."""
     s = g.sort_values("mjd")
     vra, vdec, rate, pa, ra_ref, dec_ref, mjd_ref = _motion(s)
@@ -179,6 +219,12 @@ def build_alert(g, *, alert_id, night, obscode, status, tier, chi2, rms_arcsec, 
     predict = _predict(ra_ref, dec_ref, vra, vdec, rate, arc_days, rms_arcsec, offsets_days, pa_deg=pa)
     for p in predict:                                   # stamp absolute MJDs onto the look-aheads
         p["mjd"] = round(mjd_ref + p["dt_min"] / 1440.0, 6)
+    # short-arc rate error + the sigma-aware NEO-rate annotation: is rate>=rate_lo secure against the
+    # 2-point lever arm? (49-s pair: sigma~0.3 deg/day -- a 1.2 deg/day "NEO rate" is NOT 3-sigma secure.)
+    # Annotation only: the hard gate on the measured rate lives in physical_check, unchanged.
+    rate_sig = rate_sigma_degday(rms_arcsec, arc_days)
+    neo_rate_gate = (bool(rate - 3.0 * rate_sig > float(rate_lo))
+                     if (tier == "2visit" and rate_lo is not None) else None)
     # priority: 3+visit NEW (3-sigma grade) first, then 2-visit NEW candidates, then known recoveries.
     if status == "CONFIRMED":
         priority = 3
@@ -211,25 +257,47 @@ def build_alert(g, *, alert_id, night, obscode, status, tier, chi2, rms_arcsec, 
         tier=tier,                                       # 2visit | 3+visit
         confidenceTier=confidence_tier,                  # A = both members >=hiconf (0.80); B = candidate (0.60-0.80)
         priority=priority,
-        priorityScore=round(priority_score(status, tier, chi2, score_min, mfsnr_min), 4),
+        priorityScore=round(priority_score(status, tier, chi2, score_min, mfsnr_min,
+                                           dt_min=arc_days * 1440.0), 4),
         nEpochs=int(len(epochs)),
         arcMin=round(arc_days * 1440.0, 3),
         epochs=epochs,
         motion=dict(rate_degday=_f(rate), pa_deg=_f(pa),
-                    dra_degday=_f(vra), ddec_degday=_f(vdec)),
+                    dra_degday=_f(vra), ddec_degday=_f(vdec),
+                    rate_sigma_degday=_f(rate_sig), neoRateGate=neo_rate_gate),
         predict=predict,
         orbit=_orbit_block(chi2, tier, orbit_adm),
         match=dict(obj=match_obj or None, frac=_f(match_frac)),
         vetting=vetting,
+        stationarity=stationarity,                       # catalog veto block (link_2visit); None if untested
+        fpp=fpp,                                         # null-calibrated chance-link block; None if no calib
         thumbnails=thumbnails,
     )
 
 
+def _rank_class(a):
+    """Demotion class for ranking (0 = clean, 1 = veto-flagged, 2 = pixel-killed). FLAG-not-drop:
+    a vetoed alert is still PUBLISHED (the audit measured a 3-5%/alert true-mover cost on the veto
+    stack, so silent drops are not economical), it just sorts below every clean alert and cannot
+    consume the --cap-alerts follow-up budget ahead of one. Class 1 = catalog vetoStationary OR
+    pixelVet FLAGGED (3-5-sigma static evidence / defect-dominated capsule); class 2 = pixelVet
+    killed (>=5-sigma mask-clean static, combined-or-single rule)."""
+    pv = a.get("pixelVet") or {}
+    if pv.get("killed"):
+        return 2
+    if ((a.get("stationarity") or {}).get("vetoStationary")
+            or pv.get("verdict") == "FLAGGED"):
+        return 1
+    return 0
+
+
 def write_alerts(alerts, path, *, append=False, top_n=None):
     """Write/append alert dicts to a JSONL file (one compact json object per line), ranked by
-    priorityScore descending (falls back to the integer priority) so the headline is line 1.
-    `top_n` caps the emitted count (per-night follow-up budget); the cut is logged, never silent."""
-    ranked = sorted(alerts, key=lambda a: (-a.get("priorityScore", 0.0), a.get("priority", 9)))
+    (demotion class, priorityScore desc) so the headline is line 1 and no veto-flagged alert
+    outranks a clean one. `top_n` caps the emitted count (per-night follow-up budget) AFTER the
+    ordering, so demoted alerts are cut first; the cut is logged, never silent."""
+    ranked = sorted(alerts, key=lambda a: (_rank_class(a), -a.get("priorityScore", 0.0),
+                                           a.get("priority", 9)))
     if top_n is not None and len(ranked) > top_n:
         print(f"[alerts] top-N cap: emitting {top_n} of {len(ranked)} alerts", flush=True)
         ranked = ranked[:top_n]

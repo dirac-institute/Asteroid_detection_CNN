@@ -532,6 +532,87 @@ def physical_check(dets, members, exptime_s=30.0, pa_tol_deg=20.0, speed_frac=0.
     return True, f"OK {tag} PA {motion_pa:.0f} {motion_speed:.2f}deg/day {n_ep}ep", n_ep
 
 
+def stationarity_check(g, stat_trees, stat_mjd, *, tol_arcsec=3.0, min_disp_arcsec=10.0):
+    """Motion-aware CATALOG stationarity test for a 2-visit track (AUDITED 2026-07-02,
+    INVESTIGATION_2V_CONFIDENCE.md section 3b): a >=1 deg/day mover is >=27" from itself after a
+    39-min pair gap, so a counterpart detection within `tol_arcsec` of a member's position IN THE
+    OTHER MEMBER'S VISIT means that member is a repeating static artifact, not the mover. The
+    counterpart catalog is ADCNN's OWN full detection list (pre-score-floor -- ADCNN-vs-ADCNN), so
+    the test inherits the detector's sub-5sigma depth and keeps ~83%% kill power in the faintest
+    (mf_snr<7) bin where 5sigma forced photometry collapses; LSST source detection appears nowhere.
+
+    MOTION-AWARE VALIDITY GUARD: the test only applies when the expected displacement rate*dt
+    exceeds `min_disp_arcsec` (>> tol) -- at a 46-s companion cadence a real mover moves only
+    ~2-9" and would otherwise SELF-veto (its own other-epoch detection is the "counterpart").
+    Measured false-kill cost on real movers (30"-offset KD test): ~1.0%%/member = ~2%%/alert.
+    This is a FLAG, never a silent drop: vetoed alerts stay published, ranked after clean ones.
+
+    g: the 2 member rows (sorted by mjd). stat_trees: {visit: (cKDTree over unit vectors, n_dets)}
+    built from the FULL (pre-floor) night catalog. stat_mjd: {visit: median mjd}.
+    Returns dict(vetoStationary, testable, e1/e2 sub-dicts with sep_arcsec / n_counterparts)."""
+    g = g.sort_values("mjd")
+    a, b = g.iloc[0], g.iloc[-1]
+    cd = float(np.cos(np.radians(g.dec.mean())))
+    dt = float(b.mjd - a.mjd)
+    rate = (np.hypot((b.ra - a.ra) * cd, b.dec - a.dec) / dt) if dt > 0 else 0.0   # deg/day
+    disp_as = rate * dt * 3600.0                                                    # = member separation
+    out = {"testable": bool(disp_as >= min_disp_arcsec), "minDispArcsec": float(min_disp_arcsec),
+           "tolArcsec": float(tol_arcsec), "expectedDispArcsec": round(disp_as, 2)}
+    veto = False
+    qr = _chord_radius(tol_arcsec / 3600.0)
+    for tag, mem, other_visit in (("e1", a, int(b.visit)), ("e2", b, int(a.visit))):
+        sub = {"counterpart": None, "sep_arcsec": None, "n_counterparts": 0}
+        if out["testable"] and other_visit in stat_trees:
+            tree, _n = stat_trees[other_visit]
+            u = radec_to_unit(mem.ra, mem.dec)
+            idx = tree.query_ball_point(u, qr)
+            sub["n_counterparts"] = int(len(idx))
+            sub["counterpart"] = bool(idx)
+            if idx:
+                veto = True
+                chord = float(tree.query(u, k=1)[0])
+                sub["sep_arcsec"] = round(np.degrees(2 * np.arcsin(min(chord / 2, 1.0))) * 3600, 2)
+        out[tag] = sub
+    out["vetoStationary"] = bool(veto and out["testable"])
+    return out
+
+
+def fpp_block(calib, n1, n2, dt_min, visits=None):
+    """Per-pair chance-link expectation lambda = k*n1*n2*(dt/dt_ref)^p from the null-donor
+    calibration (fpp_2v_chance.json; k factor-~2 with 4 donors). n1/n2 = the two visits' post-floor
+    linkable pools, dt_min = the pair gap; the dt^2 term is the measured chance-annulus law.
+    perAlertShare (= lambda / #alerts this pair produced) is filled AFTER the night's loop by
+    _finalize_fpp, once the pair's alert count is known: it is the pre-pixel-evidence prior that
+    any given alert from this pair is a chance link."""
+    if not calib:
+        return None
+    lam = (float(calib["k_per_det2"]) * float(n1) * float(n2)
+           * (float(dt_min) / float(calib["dt_ref_min"])) ** float(calib.get("dt_power", 2.0)))
+    return {"lambdaPair": round(lam, 4), "n1": int(n1), "n2": int(n2),
+            "dtMin": round(float(dt_min), 2), "perAlertShare": None,
+            "visits": ([int(v) for v in visits] if visits is not None else None),
+            "calib": calib.get("calibrated_on"), "calibQuality": calib.get("calib_quality")}
+
+
+def _finalize_fpp(alerts):
+    """Second pass over the night's alerts: fpp.perAlertShare = lambdaPair / (# 2v alerts from the
+    same visit pair). min(1, ...) keeps it a probability; pairs with a single alert get the full
+    lambda. Non-2v alerts / missing fpp are left untouched."""
+    from collections import Counter
+    npair = Counter()
+    key = lambda f: tuple(f["visits"]) if f.get("visits") else (f["n1"], f["n2"], f["dtMin"])
+    for al in alerts:
+        f = al.get("fpp")
+        if f and al.get("tier") == "2visit":
+            npair[key(f)] += 1
+    for al in alerts:
+        f = al.get("fpp")
+        if f and al.get("tier") == "2visit":
+            m = max(npair[key(f)], 1)
+            f["perAlertShare"] = round(min(1.0, f["lambdaPair"] / m), 4)
+            f["nAlertsPair"] = int(m)
+
+
 def fit_residual(dets, members, exptime_s=30.0):
     """Fit a constant-velocity (+ small accel) track to the member detections; return astrometric
     RMS (arcsec) and the fitted deg/day speed. Short-arc: linear+quadratic in each coord vs time."""
@@ -649,6 +730,17 @@ def main():
                     "priorityScore-ordered so a follow-up consumer can read top-down and stop at its own capacity.")
     ap.add_argument("--seed-3v-arc-min", type=float, default=120.0,
                     help="3v-FIRST seeding: also seed chord pairs up to this arc (min) and use them ONLY to extend to triplets (3-epoch-gated), so a mover with no pair inside the 2v window (e.g. visits 0/50/100 min) is still found. 0 to disable")
+    ap.add_argument("--stat-tol-arcsec", type=float, default=3.0,
+                    help="catalog stationarity veto: counterpart match radius in the OTHER member visit "
+                    "(audited 2026-07-02: kills 88%% of false 2v alerts at ~2%%/alert true cost; FLAG, never drop)")
+    ap.add_argument("--stat-min-disp-arcsec", type=float, default=10.0,
+                    help="stationarity validity guard: test only when the expected displacement rate*dt "
+                    "exceeds this (motion-aware -- a short-gap real mover must not self-veto). Below it the "
+                    "alert is marked stationarity.testable=false")
+    ap.add_argument("--no-stationarity", action="store_true", help="skip the catalog stationarity annotation")
+    ap.add_argument("--fpp-calib", default=str(HL / "fpp_2v_chance.json"),
+                    help="null-donor chance-link calibration JSON (fpp_2v_chance.json) for the per-alert "
+                    "fpp block: lambda = k*n1*n2*(dt/dt_ref)^2. 'none' or a missing file disables the block")
     a = ap.parse_args()
     # Overlay the calibrated op-point JSON: it sets each param UNLESS that flag was passed explicitly on the CLI.
     if a.op_point and os.path.exists(a.op_point):
@@ -667,6 +759,19 @@ def main():
 
     d = pd.read_csv(a.dets)
     n0 = len(d)
+    # FULL pre-floor catalog snapshot for the stationarity counterpart trees: the veto is
+    # ADCNN-vs-ADCNN, so its counterpart catalog must be the DEEPEST list available (every det the
+    # detector emitted, before the art/len/score cuts below) -- that is what preserves the faint-bin
+    # (sub-5sigma) kill power. Only the 4 columns the KD-trees need are kept.
+    d_all = (d[["ra", "dec", "mjd", "visit"]].copy()
+             if (not a.no_stationarity and {"ra", "dec", "mjd", "visit"} <= set(d.columns)) else None)
+    if d_all is not None:
+        d_all["night"] = np.floor(d_all.mjd - 0.5).astype(int)
+    fpp_calib = None
+    if a.fpp_calib and str(a.fpp_calib).lower() != "none" and os.path.exists(a.fpp_calib):
+        fpp_calib = json.load(open(a.fpp_calib))
+        print(f"[trail-link] fpp calib: {a.fpp_calib} (k={fpp_calib['k_per_det2']:.3g}/det^2 "
+              f"@ dt_ref {fpp_calib['dt_ref_min']}min)", flush=True)
     if "art_frac" in d and a.art_frac_max > 0:
         d = d[d.art_frac.fillna(0.0) < a.art_frac_max]   # NaN (unmeasured mask) -> keep, never silently drop
     if "len_db" in d and a.len_db_min > 0:
@@ -702,6 +807,15 @@ def main():
         from ADCNN.linking.rank_alerts import build_alert, write_alerts
     for night, dn in d.groupby("night"):
         dn = dn.reset_index(drop=True)
+        # stationarity counterpart trees over the FULL pre-floor catalog (ADCNN-vs-ADCNN, sub-5sigma
+        # deep) + the post-floor per-visit pools/mjds the fpp chance-link block needs.
+        stat_trees, stat_mjd = {}, {}
+        if d_all is not None:
+            for v, gg in d_all[d_all.night == night].groupby("visit"):
+                stat_trees[int(v)] = (cKDTree(radec_to_unit(gg.ra.to_numpy(), gg.dec.to_numpy())), len(gg))
+                stat_mjd[int(v)] = float(gg.mjd.median())
+        pool = dn.groupby("visit").size().to_dict()
+        vmjd_n = dn.groupby("visit").mjd.median().to_dict()
         if a.recur_max is not None:
             from ADCNN.pipelines.heliolinc.recurrence import add_recurrence
             dn = add_recurrence(dn)
@@ -797,32 +911,51 @@ def main():
                 adm = dict.fromkeys(ADM_KEYS, np.nan)
             tier = "2visit" if n_ep == 2 else "3+visit"
             status = "CONFIRMED" if obj else "NEW"
+            # 2v veto-stack annotations (FLAG, never drop): catalog stationarity + chance-link fpp.
+            stat = fpp = None
+            if n_ep == 2:
+                if stat_trees:
+                    stat = stationarity_check(g, stat_trees, stat_mjd, tol_arcsec=a.stat_tol_arcsec,
+                                              min_disp_arcsec=a.stat_min_disp_arcsec)
+                vv = sorted(int(v) for v in g.visit.unique())
+                if fpp_calib and len(vv) == 2:
+                    dtm = abs(vmjd_n[vv[1]] - vmjd_n[vv[0]]) * 1440.0
+                    fpp = fpp_block(fpp_calib, pool.get(vv[0], 0), pool.get(vv[1], 0), dtm, visits=vv)
             rows.append(dict(night=int(night), ndet=len(members), nvisit=g.visit.nunique(),
                              n_epochs=n_ep, tier=tier,
                              arc_hr=(g.mjd.max() - g.mjd.min()) * 24, rms_arcsec=rms, speed_degday=speed,
                              chi2=chi2v, a_au=av, ecc=ev, ra=g.ra.mean(), dec=g.dec.mean(), check=info,
-                             match_obj=obj, match_frac=frac, status=status, **adm))
+                             match_obj=obj, match_frac=frac, status=status, **adm,
+                             veto_stationary=(stat or {}).get("vetoStationary"),
+                             stat_testable=(stat or {}).get("testable"),
+                             fpp_lambda_pair=(fpp or {}).get("lambdaPair")))
             if emit_alerts:
                 _oc = str(g["obscode"].iloc[0]) if "obscode" in g.columns else os.environ.get("OBSCODE", "I11")
                 alerts.append(build_alert(g, alert_id=f"{tier[:2]}_{int(night)}_{len(rows)-1:06d}",
                                           night=night, obscode=_oc, status=status, tier=tier,
                                           chi2=chi2v, orbit_adm=adm, rms_arcsec=rms,
-                                          match_obj=obj, match_frac=frac, hiconf_score=a.score_hiconf))
+                                          match_obj=obj, match_frac=frac, hiconf_score=a.score_hiconf,
+                                          stationarity=stat, fpp=fpp, rate_lo=a.rate_lo_2v))
         print(f"  night {night}: {len(dn)} dets -> {len(cand)} candidates, {npass} passed", flush=True)
     TRACK_COLS = ["night", "ndet", "nvisit", "n_epochs", "tier", "arc_hr", "rms_arcsec", "speed_degday",
                   "chi2", "a_au", "ecc", "ra", "dec", "check", "match_obj", "match_frac", "status",
-                  *ADM_KEYS]
+                  *ADM_KEYS, "veto_stationary", "stat_testable", "fpp_lambda_pair"]
     T = pd.DataFrame(rows, columns=TRACK_COLS)   # always carry the header, so an empty result is a valid CSV
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     T.to_csv(a.out, index=False)
     if emit_alerts:
         apath = a.alerts_out or str(Path(a.out).with_name("alerts.jsonl"))
+        # fpp second pass: per-alert chance share = lambdaPair / (# alerts the same visit pair produced)
+        _finalize_fpp(alerts)
         # ranked by continuous priorityScore inside write_alerts (3+visit NEW > 2visit NEW > recovery,
-        # then geometric/detector/photometric quality). Publish ALL by default; --cap-alerts opts in to
+        # then geometric/detector/photometric quality); stationarity-vetoed alerts are DEMOTED after the
+        # clean ones (published, never dropped). Publish ALL by default; --cap-alerts opts in to
         # truncating at the --alerts-top-n follow-up budget.
         write_alerts(alerts, apath, top_n=(a.alerts_top_n if a.cap_alerts else None))
         n2new = sum(1 for al in alerts if al["tier"] == "2visit" and al["status"] == "NEW")
-        print(f"[trail-link] alert stream: {len(alerts)} alerts ({n2new} same-night 2-visit NEW) -> {apath}", flush=True)
+        nveto = sum(1 for al in alerts if (al.get("stationarity") or {}).get("vetoStationary"))
+        print(f"[trail-link] alert stream: {len(alerts)} alerts ({n2new} same-night 2-visit NEW, "
+              f"{nveto} stationarity-flagged) -> {apath}", flush=True)
     if len(T):
         conf = sorted(T[T.status == "CONFIRMED"].match_obj.unique())
         new = T[T.status == "NEW"]
