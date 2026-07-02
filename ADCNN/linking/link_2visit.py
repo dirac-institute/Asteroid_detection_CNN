@@ -634,7 +634,11 @@ def main():
                     help="JSONL same-night alert stream (one actionable candidate per line: endpoints, motion vector, forward-predicted ephemeris, confidence). Default: alerts.jsonl beside --out. --no-alerts to disable")
     ap.add_argument("--no-alerts", action="store_true", help="do not emit the JSONL alert stream")
     ap.add_argument("--alerts-top-n", type=int, default=None,
-                    help="cap the alert stream to the top-N by priorityScore (per-night follow-up budget); default unlimited")
+                    help="the recommended per-night follow-up budget (op: 50). Only ENFORCED as a hard cap when --cap-alerts is given; otherwise it is advisory and ALL alerts are published (ranked).")
+    ap.add_argument("--cap-alerts", action="store_true",
+                    help="OPT-IN: truncate the emitted alert stream to the top --alerts-top-n by priorityScore "
+                    "(the follow-up budget). DEFAULT: publish ALL ranked alerts (no cap) -- the alert file is "
+                    "priorityScore-ordered so a follow-up consumer can read top-down and stop at its own capacity.")
     ap.add_argument("--seed-3v-arc-min", type=float, default=120.0,
                     help="3v-FIRST seeding: also seed chord pairs up to this arc (min) and use them ONLY to extend to triplets (3-epoch-gated), so a mover with no pair inside the 2v window (e.g. visits 0/50/100 min) is still found. 0 to disable")
     a = ap.parse_args()
@@ -801,8 +805,9 @@ def main():
     if emit_alerts:
         apath = a.alerts_out or str(Path(a.out).with_name("alerts.jsonl"))
         # ranked by continuous priorityScore inside write_alerts (3+visit NEW > 2visit NEW > recovery,
-        # then geometric/detector/photometric quality); --alerts-top-n caps to the follow-up budget.
-        write_alerts(alerts, apath, top_n=a.alerts_top_n)
+        # then geometric/detector/photometric quality). Publish ALL by default; --cap-alerts opts in to
+        # truncating at the --alerts-top-n follow-up budget.
+        write_alerts(alerts, apath, top_n=(a.alerts_top_n if a.cap_alerts else None))
         n2new = sum(1 for al in alerts if al["tier"] == "2visit" and al["status"] == "NEW")
         print(f"[trail-link] alert stream: {len(alerts)} alerts ({n2new} same-night 2-visit NEW) -> {apath}", flush=True)
     if len(T):
