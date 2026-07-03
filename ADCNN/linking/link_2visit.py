@@ -844,6 +844,13 @@ def main():
                     help="OPT-IN: truncate the emitted alert stream to the top --alerts-top-n by priorityScore "
                     "(the follow-up budget). DEFAULT: publish ALL ranked alerts (no cap) -- the alert file is "
                     "priorityScore-ordered so a follow-up consumer can read top-down and stop at its own capacity.")
+    ap.add_argument("--report", action="store_true",
+                    help="OPT-IN: after writing the alert stream, render the human-inspection QA package "
+                    "beside it -- report/rankNN_<alertId>_<class>.png cutout stamps + report/overlay_* full "
+                    "trail overlays (ADCNN.qa.trail_overlays), the ranked ALERT_REPORT.md, and the "
+                    "machine-readable alert_report.csv (ADCNN.qa.alert_report). Needs the --dets CSV to "
+                    "carry fits_path (the masked adcnn dets do) and the diffim pixels to be reachable; "
+                    "report failures WARN, never fail the link run. Default off = exact no-op")
     ap.add_argument("--seed-3v-arc-min", type=float, default=120.0,
                     help="3v-FIRST seeding: also seed chord pairs up to this arc (min) and use them ONLY to extend to triplets (3-epoch-gated), so a mover with no pair inside the 2v window (e.g. visits 0/50/100 min) is still found. 0 to disable")
     ap.add_argument("--stat-tol-arcsec", type=float, default=3.0,
@@ -1196,6 +1203,21 @@ def main():
         print(f"[trail-link] alert stream: {len(alerts)} alerts ({n2new} same-night 2-visit NEW, "
               f"{nveto} stationarity-flagged, {nsv} static-flagged, {ntv} train/line-flagged) "
               f"-> {apath}", flush=True)
+        if a.report:
+            # QA report package (opt-in): imports live in-branch so matplotlib/pixel IO stay out
+            # of the default link path; a report failure must never invalidate the science outputs.
+            rep_dir = str(Path(apath).with_name("report"))
+            rep_args = ["--alerts", apath, "--dets", a.dets, "--out-dir", rep_dir]
+            if a.static_catalog:
+                rep_args += ["--static-catalog", a.static_catalog,
+                             "--static-mag-max", str(a.static_mag_max)]
+            try:
+                from ADCNN.qa import trail_overlays, alert_report
+                trail_overlays.main(rep_args)
+                alert_report.main(rep_args)
+            except Exception as e:  # noqa: BLE001 -- report is best-effort by contract
+                print(f"[trail-link] WARNING: --report failed ({type(e).__name__}: {e}); "
+                      f"alert stream itself is intact at {apath}", flush=True)
     if len(T):
         conf = sorted(T[T.status == "CONFIRMED"].match_obj.unique())
         new = T[T.status == "NEW"]
