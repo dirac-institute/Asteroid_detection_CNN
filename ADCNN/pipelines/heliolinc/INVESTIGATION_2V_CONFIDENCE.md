@@ -317,5 +317,33 @@ Verified on 0630 at floor 0.5 (`expt_staticveto/regress05`, `prod05`):
   correctly sits in the demoted block (its e1 member is 0.31″ from a mag 17.8 static).
 - Runtime 292 s (vs 258 s unvetted): the catalog flag query costs ~30 s, linking no slower.
 
-Still open before any post-veto FPP claim: recalibrate `fpp_2v_chance.json` k on
-static-vetoed input (§9's ~10× inflation).
+~~Still open before any post-veto FPP claim: recalibrate `fpp_2v_chance.json` k on
+static-vetoed input (§9's ~10× inflation).~~ → done, §10.
+
+## 10. fpp recalibration on veto-stack-clean input (DONE 2026-07-03)
+
+The §3a null-pair method, made reproducible (`ADCNN/linking/make_null_pairs.py` — the
+frame-transport rotation `Rz(ra_t)·Ry(−dec_t)·Ry(dec_d)·Rz(−ra_d)` on per-visit median
+centers was reverse-engineered from the saved pairs to 0.0000″ and the rebuilt pairs
+reproduce the old floor-0.6 counts {6,15,0,19} exactly), then scaled to **13 donors at the
+production op** (floor 0.5, static seed-exclusion with per-pair rotated donor-region
+statics, train veto, stationarity). Counted from `tracks.csv` (no top-N cap):
+**CLEAN = not stationarity-, not static-, not train-flagged.**
+
+- **10 static-covered donors: 13 chance tracks, only 1 clean** (Σn1n2 = 5.18e8) →
+  `k_per_det2 = 1.93e-9` (90% upper 4.4e-9). **170× below the old k** — the old 3.273e-7
+  was floor-0.6, veto-less, and counted the structured FPs the stack now removes.
+- **3 uncovered donors (663/712/715): 61 tracks, 5 clean** → `k_uncovered = 1.83e-8`
+  (~10×, published in the JSON; the linker applies the covered k, so uncovered-tract fpp
+  is ~10× optimistic). Even uncovered, the train veto + anchor-side static flags kill 56/61.
+- Validation: 0630 predicted Σλ_clean ≈ 1.0 vs ≤2 observed clean; 0629's dense swarm seeds
+  only snap pairs (dt~0.8 min) → predicted ~0.1–0.2 vs **0 observed chance-clean** (the one
+  clean alert is the golden NEO, pair λ_clean ~1e-7).
+- **The two 0630 105–128 clean alerts are NOT chance** (pair λ_clean = 3e-3, P(≥2) ~ 5e-6):
+  real-mover candidates or an unmodeled same-field FP class — λ models CROSS-FIELD chance;
+  same-field structure is the veto stack's job. Follow up.
+
+Artifacts: `run_embargo_0630/null2v_recal/` (pairs, per-pair static catalogs, 13 prod +
+4 regression runs, `donor_summary.csv`); reruns with the new calib in
+`run_embargo_*/expt_trainveto/prod05tv_newfpp/`. Full donor table + fit + caveats live in
+`fpp_2v_chance.json` itself.

@@ -1,16 +1,31 @@
 {
-  "_comment": "Per-alert chance-link (FPP) calibration for the same-night 2-visit alert stream. lambda_chance(pair) = k_per_det2 * n1 * n2 * (dt/dt_ref)^dt_power, where n1/n2 are the two visits' LINKABLE det pools (after the op floor: score>=score_candidate_min, len_db>=6, art_frac<0.3) and dt is the pair gap. The dt^2 law is the measured chance-annulus scaling (FP-link rate ~ dt^2, samenight lambda campaign 2026-06-04). k is calibrated from CROSS-FIELD NULL runs: visit 2026063000345 re-linked against 4 same-night far-away donor visits translated onto 396's footprint (real links physically impossible, densities/trail statistics preserved) -- every surviving 2v track is a chance link. Consumed by ADCNN.linking.link_2visit (--fpp-calib); published per alert as fpp.lambdaPair / fpp.perAlertShare. INVESTIGATION_2V_CONFIDENCE.md section 3a/6.",
-  "k_per_det2": 3.273e-07,
+  "_comment": "Per-alert chance-link (FPP) calibration for the same-night 2-visit alert stream. lambda_chance(pair) = k_per_det2 * n1 * n2 * (dt/dt_ref)^dt_power, where n1/n2 are the two visits' LINKABLE det pools (after the op floor: score>=score_candidate_min, len_db>=6, art_frac<0.3) and dt is the pair gap. The dt^2 law is the measured chance-annulus scaling (FP-link rate ~ dt^2, samenight lambda campaign 2026-06-04; NOT re-fit here -- all null pairs share dt=39.2min). RECALIBRATED 2026-07-03 on VETO-STACK-CLEAN counts at the production floor 0.5: lambda now means the expected number of CLEAN chance alerts (not stationarity-flagged, not staticVeto-flagged, not trainVeto-flagged) -- the pre-veto total is k_total below. k is calibrated from CROSS-FIELD NULL runs (ADCNN.linking.make_null_pairs): visit 2026063000345 re-linked against 13 same-night far-away donor visits rigidly rotated onto 396's footprint at 396's epoch (real links physically impossible, densities/trail statistics/pair cadence preserved) -- every surviving 2v track is a chance link. Per-pair static catalogs = real anchor/target-region statics + donor-region statics rotated with the dets, so the static veto is production-faithful (cross-flag cross-term ~0.6-6%/det, small vs the Poisson error). Consumed by ADCNN.linking.link_2visit (--fpp-calib); published per alert as fpp.lambdaPair / fpp.perAlertShare; pixel_vet gates the `confident` bit on perAlertShare. INVESTIGATION_2V_CONFIDENCE.md section 3a/6; run_embargo_0630/null2v_recal/donor_summary.csv.",
+  "k_per_det2": 1.931e-09,
   "dt_ref_min": 39.2,
   "dt_power": 2.0,
-  "calibrated_on": "embargo 20260630 swarm pair 345->396 (dt 39.2 min), donors 129/663/712/715",
+  "calibrated_on": "embargo 20260630 pair 345->396 (dt 39.2 min, centers 1.39 deg apart), 10 static-COVERED donors, floor 0.5, veto stack ON (static seed-exclusion + train veto + stationarity)",
+  "k_uncovered_per_det2": 1.831e-08,
+  "_k_uncovered": "clean-chance rate for pairs WITHOUT DRP `object` static coverage (donors 663/712/715: 5 clean / 2.73e8) -- ~10x the covered rate; the train veto + anchor-side static flags still remove 56/61 there. The linker applies the single covered k; alerts on uncovered tracts under-state lambda ~10x -- treat their fpp as optimistic.",
+  "k_total_per_det2": 2.51e-08,
+  "_k_total": "pre-veto chance rate at floor 0.5, covered donors (13 tracks / 5.18e8). The old k=3.273e-7 was fit at floor 0.6 WITHOUT vetoes and counted structured FPs the veto stack now removes; it over-stated clean chance ~170x and mixed floors (0.6 calib vs 0.5 production pools).",
   "donors": [
-    {"donor_visit": 2026063000129, "n1": 4211, "n2": 7999, "chance_2v_tracks": 6},
-    {"donor_visit": 2026063000663, "n1": 4211, "n2": 5105, "chance_2v_tracks": 15},
-    {"donor_visit": 2026063000712, "n1": 4211, "n2": 3723, "chance_2v_tracks": 0},
-    {"donor_visit": 2026063000715, "n1": 4211, "n2": 12191, "chance_2v_tracks": 19}
+    {"donor_visit": 2026063000103, "covered": true,  "n1": 7668, "n2": 2276,  "chance_2v_total": 0,  "clean": 0},
+    {"donor_visit": 2026063000105, "covered": true,  "n1": 7668, "n2": 2671,  "chance_2v_total": 0,  "clean": 0},
+    {"donor_visit": 2026063000106, "covered": true,  "n1": 7668, "n2": 23798, "chance_2v_total": 4,  "clean": 0},
+    {"donor_visit": 2026063000107, "covered": true,  "n1": 7668, "n2": 2116,  "chance_2v_total": 0,  "clean": 0},
+    {"donor_visit": 2026063000126, "covered": true,  "n1": 7668, "n2": 2195,  "chance_2v_total": 0,  "clean": 0},
+    {"donor_visit": 2026063000128, "covered": true,  "n1": 7668, "n2": 2434,  "chance_2v_total": 0,  "clean": 0},
+    {"donor_visit": 2026063000130, "covered": true,  "n1": 7668, "n2": 948,   "chance_2v_total": 0,  "clean": 0},
+    {"donor_visit": 2026063000271, "covered": true,  "n1": 7668, "n2": 7066,  "chance_2v_total": 7,  "clean": 1},
+    {"donor_visit": 2026063000272, "covered": true,  "n1": 7668, "n2": 2260,  "chance_2v_total": 0,  "clean": 0},
+    {"donor_visit": 2026063000129, "covered": true,  "n1": 7668, "n2": 21780, "chance_2v_total": 2,  "clean": 0},
+    {"donor_visit": 2026063000663, "covered": false, "n1": 7668, "n2": 10264, "chance_2v_total": 25, "clean": 4},
+    {"donor_visit": 2026063000712, "covered": false, "n1": 7668, "n2": 5186,  "chance_2v_total": 0,  "clean": 0},
+    {"donor_visit": 2026063000715, "covered": false, "n1": 7668, "n2": 20159, "chance_2v_total": 36, "clean": 1}
   ],
-  "fit": "k = sum(lambda_i) / sum(n1*n2_i) = 40 / 1.222e8; cross-check: predicts 8.8 chance links for the real 345->396 pair vs audit lambda_indep ~ 10 +/- 8",
-  "calib_quality": "factor ~2 (4 donors, donor panel footprints differ from the real visit's). Recalibrate with >=8 donors before quoting per-alert FPP below ~1e-2 as a hard number; the RANKING it induces is robust.",
-  "pool_def": "per-visit, per-night det counts after the linker's cuts (art_frac, len_db, score candidate floor) -- the pool that can actually seed chance pairs"
+  "fit": "k_clean = sum(clean_i) / sum(n1*n2_i) over COVERED donors = 1 / 5.179e8 = 1.93e-9 (68% Poisson [3e-10, 6.4e-9]; 90% upper 4.4e-9). Regression: the 4 original donors at the old settings (floor 0.6, no vetoes) reproduce the old counts {6,15,0,19} EXACTLY from the rebuilt pairs.",
+  "calib_quality": "the point estimate rests on ONE clean survivor -- absolute per-alert FPP is factor ~3 (90% upper limit 4.4e-9 = 2.3x point); the RANKING it induces is data-driven (n1*n2*dt^2) and robust. Geometry: calibrated at the 345->396 partial-overlap (1.39 deg); pairs with more overlap (same-field) are UNDER-predicted ~2x, barely-overlapping pairs over-predicted (conservative for confidence). lambda models CROSS-FIELD CHANCE only: same-field pairs share static/artifact structure that the veto stack (not lambda) must remove -- the two 20260630 105-128 clean alerts (pair lambda_clean 3e-3) are NOT chance and need follow-up as real-mover candidates or a new FP class.",
+  "validation": "20260630 prod05tv: predicted night sum ~1.0 clean chance (overlap-weighted, 45 in-window pairs) vs <=2 observed clean. 20260629 prod05tv: seeding caps to the 200 nearest-in-time (snap, dt~0.8min) pairs -> predicted ~0.1-0.2 vs 0 observed chance-clean (the single clean alert is the real golden NEO in a dt=0.82min snap pair, lambda_clean ~1e-7).",
+  "pool_def": "per-visit, per-night det counts after the linker's cuts (art_frac<0.3, len_db>=6, score>=candidate floor 0.5) -- the pool that can actually seed chance pairs; pools do NOT exclude static-flagged dets (the veto's effect is absorbed in k_clean)",
+  "history": {"k_per_det2_2026_06": 3.273e-07, "note": "floor 0.6, no vetoes, 4 donors, 40 total tracks / 1.222e8 -- superseded 2026-07-03; git history preserves the full old file"}
 }
