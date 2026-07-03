@@ -602,6 +602,97 @@ def stationarity_check(g, stat_trees, stat_mjd, *, tol_arcsec=3.0, min_disp_arcs
     return out
 
 
+def _sky_pa_mod180(u, v):
+    """Position angle (deg, mod 180) of tangent direction(s) v at sky position(s) u (both (N,3);
+    v need not be normalized). PA convention: 0 = north, 90 = east; mod 180 because trails and
+    great-circle directions are unsigned."""
+    east = np.cross(np.array([0.0, 0.0, 1.0]), u)
+    east /= np.linalg.norm(east, axis=-1, keepdims=True)
+    north = np.cross(u, east)
+    return np.degrees(np.arctan2(np.sum(v * east, -1), np.sum(v * north, -1))) % 180.0
+
+
+def train_veto_check(g, train_arrays, *, perp_tol_arcsec=2.5, window_arcsec=1800.0,
+                     align_tol_deg=20.0, align_len_min_px=5.0, min_aligned=10):
+    """Shared-great-circle LINE veto for a 2-visit track (MEASURED 2026-07-03, embargo 0629+0630).
+
+    Two structured FP classes put the pair's members on a LINE that is densely populated by OTHER
+    detections whose own trail PAs match the line direction:
+      1. SATELLITE TRAINS: train member B trails A by ~1 visit gap on the same orbital plane (= the
+         same great circle on sky), so B's glints land near where A's glints were -- the linker pairs
+         A-knots with B-knots into fake slow "movers" whose motion PA equals the trail-line PA
+         (0629: alert pa 306.1 vs line PA 306.5; STREAK masking caught NONE of it -- the glint chain
+         is sub-5sigma per pixel).
+      2. STATIC template-artifact lines (e.g. coadd column defects): residual knots repeat at the
+         SAME along-positions every visit (sub-arcsec); a pair of non-repeating knots on the line
+         passes stationarity/staticVeto/pixelVet because those test only the member positions.
+    One statistic catches both: the great circle through the two members; count OTHER dets (of the
+    pair's two visits, from the FULL pre-floor catalog) within `perp_tol_arcsec` of the circle and
+    within `window_arcsec` along-track of the member midpoint; 'aligned' additionally requires the
+    det's own trail PA (ra0/dec0 -> ra1/dec1) within `align_tol_deg` of the local circle direction
+    (only dets with length > `align_len_min_px` vote). Veto when the two visits' aligned counts sum
+    to >= `min_aligned`. Threshold basis (floor-0.5 real alerts): pathologies scored {11,12,14,15,15}
+    aligned; every believed-clean alert <=8; the golden NEO scored 1. An isolated real mover adds ~0
+    -- background dets are isotropic, so P(on-circle AND PA-aligned) per det is ~1e-4.
+
+    nRepeats (annotation only): cross-visit pairs of on-line dets at the SAME along-position
+    (<1.5") -- static lines repeat, train glints drift, so it tells a vetter WHICH class fired.
+
+    g: the 2 member rows. train_arrays: {visit: (u, u0, u1, length)} unit-vector arrays over the
+    FULL pre-floor night catalog (u = det centers, u0/u1 = trail endpoints, length in px).
+    Returns a json-able dict (tested, vetoTrain, nCollinear, nAligned, nRepeats, perVisit, config).
+    FLAG, never drop: vetoTrain demotes the alert in ranking (class 1), it is still published."""
+    r2as = np.degrees(1.0) * 3600.0
+    g = g.sort_values("mjd")
+    a, b = g.iloc[0], g.iloc[-1]
+    out = {"tested": False, "vetoTrain": False, "nCollinear": 0, "nAligned": 0, "nRepeats": 0,
+           "perVisit": [], "perpTolArcsec": float(perp_tol_arcsec),
+           "windowArcsec": float(window_arcsec), "alignTolDeg": float(align_tol_deg),
+           "alignLenMinPx": float(align_len_min_px), "minAligned": int(min_aligned)}
+    p1, p2 = radec_to_unit(a.ra, a.dec), radec_to_unit(b.ra, b.dec)
+    n = np.cross(p1, p2)
+    nn = float(np.linalg.norm(n))
+    if nn <= 0.0:
+        return out                       # coincident members -- the circle is undefined; leave untested
+    n = n / nn
+    mid = p1 + p2; mid /= np.linalg.norm(mid)
+    e2 = np.cross(n, mid)                # along-track basis: along = atan2(u.e2, u.mid), 0 at the midpoint
+    on_line = {}                         # visit -> along positions of on-line dets (for nRepeats)
+    tested = False
+    for mem, pm in ((a, p1), (b, p2)):
+        v = int(mem.visit)
+        if v not in train_arrays:
+            out["perVisit"].append({"visit": v, "nCollinear": None, "nAligned": None})
+            continue
+        tested = True
+        u, u0, u1, length = train_arrays[v]
+        perp = np.abs(np.arcsin(np.clip(u @ n, -1.0, 1.0))) * r2as
+        along = np.arctan2(u @ e2, u @ mid) * r2as
+        selfsep = np.degrees(2.0 * np.arcsin(np.minimum(np.linalg.norm(u - pm, axis=1) / 2.0, 1.0))) * 3600.0
+        m = (perp < perp_tol_arcsec) & (np.abs(along) < window_arcsec) & (selfsep > 2.0)
+        ncol, nal = int(m.sum()), 0
+        idx = np.flatnonzero(m & (length > align_len_min_px))
+        if len(idx):
+            t = np.cross(np.broadcast_to(n, (len(idx), 3)), u[idx])   # local circle direction (tangent)
+            t /= np.linalg.norm(t, axis=1, keepdims=True)
+            pa_c = _sky_pa_mod180(u[idx], t)
+            d01 = u1[idx] - u0[idx]                                   # det's own trail direction,
+            d01 -= np.sum(d01 * u[idx], axis=1, keepdims=True) * u[idx]   # projected to the tangent plane
+            pa_d = _sky_pa_mod180(u[idx], d01)
+            dpa = np.abs(pa_d - pa_c); dpa = np.minimum(dpa, 180.0 - dpa)
+            nal = int((dpa < align_tol_deg).sum())
+        on_line[v] = along[m]
+        out["nCollinear"] += ncol; out["nAligned"] += nal
+        out["perVisit"].append({"visit": v, "nCollinear": ncol, "nAligned": nal})
+    if len(on_line) == 2:
+        a1, a2 = on_line.values()
+        if len(a1) and len(a2):
+            out["nRepeats"] = int((np.abs(a1[:, None] - a2[None, :]) < 1.5).any(axis=1).sum())
+    out["tested"] = bool(tested)
+    out["vetoTrain"] = bool(tested and out["nAligned"] >= min_aligned)
+    return out
+
+
 def fpp_block(calib, n1, n2, dt_min, visits=None):
     """Per-pair chance-link expectation lambda = k*n1*n2*(dt/dt_ref)^p from the null-donor
     calibration (fpp_2v_chance.json; k factor-~2 with 4 donors). n1/n2 = the two visits' post-floor
@@ -781,6 +872,28 @@ def main():
     ap.add_argument("--static-radius-arcsec", type=float, default=3.0,
                     help="static-veto match radius: 3\" reaches the 2-3\" bright-star WINGS where the "
                     "subtraction-residual dipoles live (per-visit kill fraction 0.25->0.60 going 2\"->3\")")
+    ap.add_argument("--train-veto", action="store_true",
+                    help="shared-great-circle LINE veto for 2v alerts (measured 2026-07-03, embargo "
+                    "0629+0630): flag a pair whose members sit on a line of >=--train-min-aligned "
+                    "trail-PA-aligned dets -- satellite-train glint chains (train member B glints where "
+                    "A glinted a visit earlier; STREAK masking sees none of it) AND static template-"
+                    "artifact lines both fire; isolated real movers score ~0-1 (golden NEO = 1 vs "
+                    "pathologies 11-15). FLAG + ranking demotion, never drop. Default off = exact no-op")
+    ap.add_argument("--train-perp-arcsec", type=float, default=2.5,
+                    help="train veto: max perpendicular distance (arcsec) from the members' great "
+                    "circle for a det to count as on-line (measured train knots sit <1\" off-plane)")
+    ap.add_argument("--train-window-arcsec", type=float, default=1800.0,
+                    help="train veto: along-track window (arcsec, each side of the member midpoint) -- "
+                    "bounds the line locally so a whole-focal-plane circle cannot accumulate chance dets")
+    ap.add_argument("--train-align-deg", type=float, default=20.0,
+                    help="train veto: max |trail PA - local circle PA| (deg, mod 180) for an on-line "
+                    "det to vote 'aligned' (the pathologies' knot trails lie ALONG the line)")
+    ap.add_argument("--train-align-len-min", type=float, default=5.0,
+                    help="train veto: only dets with trail length > this (px) vote on alignment (a "
+                    "shorter trail's PA is noise)")
+    ap.add_argument("--train-min-aligned", type=int, default=10,
+                    help="train veto: flag when the two visits' aligned counts sum to >= this. 10 = "
+                    "the measured separation (pathologies {11,12,14,15,15}, clean <=8, golden NEO 1)")
     a = ap.parse_args()
     # Overlay the calibrated op-point JSON: it sets each param UNLESS that flag was passed explicitly on the CLI.
     if a.op_point and os.path.exists(a.op_point):
@@ -807,6 +920,21 @@ def main():
              if (not a.no_stationarity and {"ra", "dec", "mjd", "visit"} <= set(d.columns)) else None)
     if d_all is not None:
         d_all["night"] = np.floor(d_all.mjd - 0.5).astype(int)
+    # FULL pre-floor snapshot for the train veto: like the stationarity trees, the line population
+    # must be the DEEPEST det list available -- the glint/artifact knots that populate the line are
+    # exactly the faint dets the score/length floors remove. Thresholds were measured on this
+    # pre-floor catalog, so cutting first would silently shift the statistic.
+    d_train = None
+    if a.train_veto:
+        _tcols = ["ra", "dec", "ra0", "dec0", "ra1", "dec1", "length", "mjd", "visit"]
+        _tmiss = [c for c in _tcols if c not in d.columns]
+        if _tmiss:
+            raise SystemExit(f"--train-veto needs columns {_tmiss} in --dets")
+        d_train = d[_tcols].copy()
+        d_train["night"] = np.floor(d_train.mjd - 0.5).astype(int)
+        print(f"[trail-link] train veto ON: perp<{a.train_perp_arcsec:g}\" window +-{a.train_window_arcsec:g}\" "
+              f"align<{a.train_align_deg:g}deg len>{a.train_align_len_min:g}px -> flag at "
+              f">={a.train_min_aligned} aligned line dets", flush=True)
     fpp_calib = None
     if a.fpp_calib and str(a.fpp_calib).lower() != "none" and os.path.exists(a.fpp_calib):
         fpp_calib = json.load(open(a.fpp_calib))
@@ -881,6 +1009,15 @@ def main():
             for v, gg in d_all[d_all.night == night].groupby("visit"):
                 stat_trees[int(v)] = (cKDTree(radec_to_unit(gg.ra.to_numpy(), gg.dec.to_numpy())), len(gg))
                 stat_mjd[int(v)] = float(gg.mjd.median())
+        # train-veto per-visit line population (full pre-floor): det centers + trail endpoints as
+        # unit vectors, so per-alert great-circle geometry is pure vectorized algebra.
+        train_arrays = {}
+        if d_train is not None:
+            for v, gg in d_train[d_train.night == night].groupby("visit"):
+                train_arrays[int(v)] = (radec_to_unit(gg.ra.to_numpy(), gg.dec.to_numpy()),
+                                        radec_to_unit(gg.ra0.to_numpy(), gg.dec0.to_numpy()),
+                                        radec_to_unit(gg.ra1.to_numpy(), gg.dec1.to_numpy()),
+                                        gg.length.to_numpy())
         pool = dn.groupby("visit").size().to_dict()
         vmjd_n = dn.groupby("visit").mjd.median().to_dict()
         if a.recur_max is not None:
@@ -994,11 +1131,17 @@ def main():
             # 2v veto-stack annotations (FLAG, never drop): catalog stationarity + chance-link fpp
             # + template-footprint staticVeto (static-static pairs never got here -- seed-excluded;
             # what remains is 0- or 1-static, and the 1-static alerts are demoted in ranking).
-            stat = fpp = sveto = None
+            stat = fpp = sveto = tveto = None
             if n_ep == 2:
                 if stat_trees:
                     stat = stationarity_check(g, stat_trees, stat_mjd, tol_arcsec=a.stat_tol_arcsec,
                                               min_disp_arcsec=a.stat_min_disp_arcsec)
+                if train_arrays:
+                    tveto = train_veto_check(g, train_arrays, perp_tol_arcsec=a.train_perp_arcsec,
+                                             window_arcsec=a.train_window_arcsec,
+                                             align_tol_deg=a.train_align_deg,
+                                             align_len_min_px=a.train_align_len_min,
+                                             min_aligned=a.train_min_aligned)
                 vv = sorted(int(v) for v in g.visit.unique())
                 if fpp_calib and len(vv) == 2:
                     dtm = abs(vmjd_n[vv[1]] - vmjd_n[vv[0]]) * 1440.0
@@ -1018,7 +1161,9 @@ def main():
                              veto_stationary=(stat or {}).get("vetoStationary"),
                              stat_testable=(stat or {}).get("testable"),
                              fpp_lambda_pair=(fpp or {}).get("lambdaPair"),
-                             n_static_members=(sveto or {}).get("nStaticMembers")))
+                             n_static_members=(sveto or {}).get("nStaticMembers"),
+                             n_train_aligned=(tveto or {}).get("nAligned"),
+                             veto_train=(tveto or {}).get("vetoTrain")))
             if emit_alerts:
                 _oc = str(g["obscode"].iloc[0]) if "obscode" in g.columns else os.environ.get("OBSCODE", "I11")
                 alerts.append(build_alert(g, alert_id=f"{tier[:2]}_{int(night)}_{len(rows)-1:06d}",
@@ -1026,11 +1171,12 @@ def main():
                                           chi2=chi2v, orbit_adm=adm, rms_arcsec=rms,
                                           match_obj=obj, match_frac=frac, hiconf_score=a.score_hiconf,
                                           stationarity=stat, fpp=fpp, static_veto=sveto,
-                                          rate_lo=a.rate_lo_2v))
+                                          train_veto=tveto, rate_lo=a.rate_lo_2v))
         print(f"  night {night}: {len(dn)} dets -> {len(cand)} candidates, {npass} passed", flush=True)
     TRACK_COLS = ["night", "ndet", "nvisit", "n_epochs", "tier", "arc_hr", "rms_arcsec", "speed_degday",
                   "chi2", "a_au", "ecc", "ra", "dec", "check", "match_obj", "match_frac", "status",
-                  *ADM_KEYS, "veto_stationary", "stat_testable", "fpp_lambda_pair", "n_static_members"]
+                  *ADM_KEYS, "veto_stationary", "stat_testable", "fpp_lambda_pair", "n_static_members",
+                  "n_train_aligned", "veto_train"]
     T = pd.DataFrame(rows, columns=TRACK_COLS)   # always carry the header, so an empty result is a valid CSV
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     T.to_csv(a.out, index=False)
@@ -1046,8 +1192,10 @@ def main():
         n2new = sum(1 for al in alerts if al["tier"] == "2visit" and al["status"] == "NEW")
         nveto = sum(1 for al in alerts if (al.get("stationarity") or {}).get("vetoStationary"))
         nsv = sum(1 for al in alerts if (al.get("staticVeto") or {}).get("nStaticMembers", 0) >= 1)
+        ntv = sum(1 for al in alerts if (al.get("trainVeto") or {}).get("vetoTrain"))
         print(f"[trail-link] alert stream: {len(alerts)} alerts ({n2new} same-night 2-visit NEW, "
-              f"{nveto} stationarity-flagged, {nsv} static-flagged) -> {apath}", flush=True)
+              f"{nveto} stationarity-flagged, {nsv} static-flagged, {ntv} train/line-flagged) "
+              f"-> {apath}", flush=True)
     if len(T):
         conf = sorted(T[T.status == "CONFIRMED"].match_obj.unique())
         new = T[T.status == "NEW"]

@@ -23,7 +23,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-ALERT_SCHEMA_VERSION = "adcnn-samenight-2v/1.4"   # 1.4: staticVeto block (template-footprint bright-static
+ALERT_SCHEMA_VERSION = "adcnn-samenight-2v/1.5"   # 1.5: trainVeto block (shared-great-circle LINE veto:
+#     satellite-train glint chains AND static template-artifact lines both put >=10 trail-PA-aligned
+#     collinear dets on the members' great circle; measured embargo 0629/0630 pathologies 11-15 vs
+#     clean <=8 -- link_2visit.train_veto_check; FLAG-demoted, never dropped).
+#     1.4: staticVeto block (template-footprint bright-static
 #     seed-exclusion; single-static alerts FLAG-demoted, never dropped -- expt_staticveto/RESULTS.md).
 #     1.3: veto-stack annotations (stationarity/fpp/pixelVet), sigma_rate-aware motion block +
 #     neoRateGate, dt^2 short-gap priority bonus, demotion-aware ranking.
@@ -191,7 +195,8 @@ def rate_sigma_degday(rms_arcsec, arc_days):
 
 def build_alert(g, *, alert_id, night, obscode, status, tier, chi2, rms_arcsec, orbit_adm=None,
                 match_obj="", match_frac=0.0, offsets_days=PREDICT_OFFSETS_DAYS, thumbnails=None,
-                hiconf_score=0.80, stationarity=None, fpp=None, static_veto=None, rate_lo=1.0):
+                hiconf_score=0.80, stationarity=None, fpp=None, static_veto=None, train_veto=None,
+                rate_lo=1.0):
     """Build one alert dict from a track's member detection rows `g` (a DataFrame slice) + its summary.
 
     `g` must carry per-epoch mjd, ra, dec (and optionally mag, mf_snr, len_db, score, visit, detector,
@@ -205,7 +210,10 @@ def build_alert(g, *, alert_id, night, obscode, status, tier, chi2, rms_arcsec, 
     chance-link block from link_2visit.fpp_block; `static_veto` (schema 1.4) = the template-footprint
     bright-static annotation from link_2visit (nStaticMembers>=1 demotes like a stationarity flag --
     the member sits in a bright coadd static's residual wings; static-STATIC pairs never reach here,
-    they are excluded at seeding); `rate_lo` = the op rate floor used ONLY for the
+    they are excluded at seeding); `train_veto` (schema 1.5) = the shared-great-circle LINE block from
+    link_2visit.train_veto_check (vetoTrain demotes like the other flags -- the members sit on a line
+    of >=minAligned trail-PA-aligned dets: a satellite-train glint chain or a static template-artifact
+    line, the two measured line-FP classes); `rate_lo` = the op rate floor used ONLY for the
     neoRateGate annotation (rate - 3*sigma_rate > rate_lo -- is the NEO-rate claim secure against the
     short-arc rate error? the hard gate on the measured rate stays in physical_check, unchanged).
     A later pixel_vet stage adds the `pixelVet` block.
@@ -277,6 +285,7 @@ def build_alert(g, *, alert_id, night, obscode, status, tier, chi2, rms_arcsec, 
         stationarity=stationarity,                       # catalog veto block (link_2visit); None if untested
         fpp=fpp,                                         # null-calibrated chance-link block; None if no calib
         staticVeto=static_veto,                          # bright-static template-footprint block; None if no catalog
+        trainVeto=train_veto,                            # shared-great-circle line block; None if untested
         thumbnails=thumbnails,
     )
 
@@ -288,6 +297,9 @@ def _rank_class(a):
     consume the --cap-alerts follow-up budget ahead of one. Class 1 = catalog vetoStationary OR
     staticVeto nStaticMembers>=1 (a member in a bright coadd static's residual wings; measured
     2026-07-02 -- static members dominate the false 2v alerts, expt_staticveto/RESULTS.md) OR
+    trainVeto vetoTrain (the members sit on a shared-great-circle LINE of trail-PA-aligned dets --
+    a satellite-train glint chain or a static template-artifact line; measured 2026-07-03 on embargo
+    0629/0630: pathologies score 11-15 aligned line dets, everything clean <=8, golden NEO 1) OR
     pixelVet FLAGGED (3-5-sigma static evidence / defect-dominated capsule); class 2 = pixelVet
     killed (>=5-sigma mask-clean static, combined-or-single rule)."""
     pv = a.get("pixelVet") or {}
@@ -295,6 +307,7 @@ def _rank_class(a):
         return 2
     if ((a.get("stationarity") or {}).get("vetoStationary")
             or (a.get("staticVeto") or {}).get("nStaticMembers", 0) >= 1
+            or (a.get("trainVeto") or {}).get("vetoTrain")
             or pv.get("verdict") == "FLAGGED"):
         return 1
     return 0

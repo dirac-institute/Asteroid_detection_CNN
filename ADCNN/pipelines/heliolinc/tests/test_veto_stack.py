@@ -1,7 +1,8 @@
-"""Unit tests for the 2v confidence veto stack (alert schema 1.4, INVESTIGATION_2V_CONFIDENCE.md
+"""Unit tests for the 2v confidence veto stack (alert schema 1.5, INVESTIGATION_2V_CONFIDENCE.md
 sections 6-9): catalog stationarity flag, per-alert FPP, sigma_rate / dt^2 ranking terms, the
-pixel-vet formal kill rule (mask-clean snr_at0, combined-OR-single, defect demotion), and the
-template-footprint static veto (static-static seed exclusion + single-static FLAG demotion).
+pixel-vet formal kill rule (mask-clean snr_at0, combined-OR-single, defect demotion), the
+template-footprint static veto (static-static seed exclusion + single-static FLAG demotion), and
+the shared-great-circle train/line veto (satellite-train glint chains + static template lines).
 Pure functions + synthetic panels -- no GPU, no Butler, no data files."""
 import json
 
@@ -13,7 +14,7 @@ from scipy.spatial import cKDTree
 from ADCNN.linking import pixel_vet as pv
 from ADCNN.linking import rank_alerts as ra
 from ADCNN.linking.link_2visit import (_finalize_fpp, drop_static_static_pairs, fpp_block,
-                                       radec_to_unit, stationarity_check)
+                                       radec_to_unit, stationarity_check, train_veto_check)
 
 MIN39 = 39.2 / 1440.0                      # the audited WFD pair gap, days
 
@@ -121,7 +122,7 @@ def test_build_alert_publishes_veto_blocks():
     fpp = dict(lambdaPair=0.5, perAlertShare=0.25)
     al = ra.build_alert(g, alert_id="t", night=61220, obscode="X05", status="NEW", tier="2visit",
                         chi2=1.0, rms_arcsec=0.0, stationarity=stat, fpp=fpp, rate_lo=1.0)
-    assert al["schema"].endswith("/1.4")
+    assert al["schema"].endswith("/1.5")
     assert al["stationarity"] is stat and al["fpp"] is fpp
     m = al["motion"]
     assert m["rate_sigma_degday"] == pytest.approx(0.0058, abs=0.001)
@@ -194,6 +195,128 @@ def test_build_alert_publishes_static_veto_block():
     al2 = ra.build_alert(g, alert_id="t2", night=61220, obscode="X05", status="NEW", tier="2visit",
                          chi2=1.0, rms_arcsec=0.0, rate_lo=1.0)
     assert al2["staticVeto"] is None and ra._rank_class(al2) == 0
+
+
+# --------------------------------------------------------------- shared-great-circle train veto
+def _circle_frame(g):
+    """(n, mid, e2) great-circle basis through the two member positions (as in train_veto_check)."""
+    a, b = g.iloc[0], g.iloc[-1]
+    p1, p2 = radec_to_unit(a.ra, a.dec), radec_to_unit(b.ra, b.dec)
+    n = np.cross(p1, p2); n /= np.linalg.norm(n)
+    mid = p1 + p2; mid /= np.linalg.norm(mid)
+    return n, mid, np.cross(n, mid)
+
+
+def _knots(g, alongs_as, *, perp_as=0.0, aligned=True, length=12.0):
+    """(u, u0, u1, length) train_arrays entry: dets at the given along-track positions (arcsec from
+    the member midpoint), `perp_as` off the members' great circle, with 6\"-long trails ALONG the
+    circle (aligned=True) or PERPENDICULAR to it (False)."""
+    n, mid, e2 = _circle_frame(g)
+    th = np.radians(np.asarray(alongs_as, float) / 3600.0)
+    u = np.cos(th)[:, None] * mid + np.sin(th)[:, None] * e2      # exactly on the circle
+    ph = np.radians(perp_as / 3600.0)
+    u = np.cos(ph) * u + np.sin(ph) * n                           # rotate off-plane by perp_as
+    u /= np.linalg.norm(u, axis=1, keepdims=True)
+    t = np.cross(np.broadcast_to(n, u.shape), u)                  # local circle direction
+    t /= np.linalg.norm(t, axis=1, keepdims=True)
+    v = t if aligned else np.broadcast_to(n, u.shape)             # trail direction
+    eps = np.radians(3.0 / 3600.0)
+    u0 = u - eps * v; u0 /= np.linalg.norm(u0, axis=1, keepdims=True)
+    u1 = u + eps * v; u1 /= np.linalg.norm(u1, axis=1, keepdims=True)
+    return u, u0, u1, np.full(len(u), float(length))
+
+
+# visit-101 glint chain (arcsec along-track). NB: the _members() pair sits at along ~ +-73.5"
+# (147" separation), so the chain (and its +15" visit-102 drift) stays >2" clear of both members --
+# otherwise the 2" self-exclusion eats a knot and the counts are off by one.
+ALONGS_1 = np.array([-170.0, -140.0, -110.0, 100.0, 130.0, 160.0])
+
+
+def test_train_veto_fires_on_glint_train():
+    # 6 aligned on-line knots per visit (the train: member B glints near where A's were) -> 12 >= 10
+    g = _members()
+    ta = {101: _knots(g, ALONGS_1), 102: _knots(g, ALONGS_1 + 15.0)}   # glints DRIFT between visits
+    out = train_veto_check(g, ta)
+    assert out["tested"] and out["vetoTrain"]
+    assert out["nCollinear"] == 12 and out["nAligned"] == 12
+    assert [p["nAligned"] for p in out["perVisit"]] == [6, 6]
+    assert out["nRepeats"] == 0                                    # drifting glints never repeat
+
+
+def test_train_veto_clean_for_isolated_mover():
+    # background 30" OFF the circle: nothing collinear, no veto (the golden-NEO case scored 1)
+    g = _members()
+    ta = {101: _knots(g, ALONGS_1, perp_as=30.0), 102: _knots(g, ALONGS_1 + 15.0, perp_as=30.0)}
+    out = train_veto_check(g, ta)
+    assert out["tested"] and not out["vetoTrain"]
+    assert out["nCollinear"] == 0 and out["nAligned"] == 0
+
+
+def test_train_veto_alignment_and_length_gates():
+    g = _members()
+    # on-line but trails PERPENDICULAR to the circle: collinear yes, aligned no -> no veto
+    ta = {101: _knots(g, ALONGS_1, aligned=False), 102: _knots(g, ALONGS_1 + 15.0, aligned=False)}
+    out = train_veto_check(g, ta)
+    assert out["nCollinear"] == 12 and out["nAligned"] == 0 and not out["vetoTrain"]
+    # on-line and aligned but too SHORT to vote (length <= 5 px): a short trail's PA is noise
+    ta = {101: _knots(g, ALONGS_1, length=3.0), 102: _knots(g, ALONGS_1 + 15.0, length=3.0)}
+    out = train_veto_check(g, ta)
+    assert out["nCollinear"] == 12 and out["nAligned"] == 0 and not out["vetoTrain"]
+
+
+def test_train_veto_window_and_self_exclusion():
+    g = _members()
+    # knots beyond the +-1800" along-track window don't count; dets within 2" of the member
+    # (its own trail re-detection) are self-excluded
+    far = np.array([2200.0, 2500.0, 2800.0, -2200.0, -2500.0, -2800.0])
+    n, mid, e2 = _circle_frame(g)
+    ta = {101: _knots(g, far), 102: _knots(g, far)}
+    assert train_veto_check(g, ta)["nCollinear"] == 0
+    # the members themselves sit ON their own circle at some along position -- recover it and
+    # place a "det" there: it must be self-excluded
+    p1 = radec_to_unit(g.iloc[0].ra, g.iloc[0].dec)
+    al1 = np.degrees(np.arctan2(p1 @ e2, p1 @ mid)) * 3600.0
+    ta = {101: _knots(g, [al1]), 102: _knots(g, [al1 + 500.0])}
+    out = train_veto_check(g, ta)
+    assert out["perVisit"][0]["nCollinear"] == 0                   # v101's det = member 1: excluded
+    assert out["perVisit"][1]["nCollinear"] == 1                   # 500" away in v102: counted
+
+
+def test_train_veto_static_line_repeats():
+    # the 0630 rank-0 pathology: on-line residuals at IDENTICAL along positions both visits --
+    # vetoed by nAligned like a train, and nRepeats tells the vetter it is a STATIC line
+    g = _members()
+    ta = {101: _knots(g, ALONGS_1), 102: _knots(g, ALONGS_1)}      # sub-arcsec repeats
+    out = train_veto_check(g, ta)
+    assert out["vetoTrain"] and out["nRepeats"] == 6
+
+
+def test_train_veto_untested_without_coverage():
+    # a member visit missing from the arrays (no pre-floor rows) -> that side untested (None),
+    # and with NO covered visit the alert can never be vetoed (fail-safe)
+    g = _members()
+    out = train_veto_check(g, {101: _knots(g, ALONGS_1)})
+    assert out["tested"] and out["perVisit"][1]["nCollinear"] is None
+    out = train_veto_check(g, {})
+    assert not out["tested"] and not out["vetoTrain"]
+
+
+def test_train_veto_rank_class_demotion_and_alert_block():
+    # vetoTrain demotes to class 1 (FLAG level, same as stationarity/static); pixel-kill still wins
+    assert ra._rank_class(dict(trainVeto=dict(vetoTrain=True))) == 1
+    assert ra._rank_class(dict(trainVeto=dict(vetoTrain=False))) == 0
+    assert ra._rank_class(dict(trainVeto=None)) == 0
+    assert ra._rank_class(dict(trainVeto=dict(vetoTrain=True), pixelVet=dict(killed=True))) == 2
+    g = _members()
+    tv = train_veto_check(g, {101: _knots(g, ALONGS_1), 102: _knots(g, ALONGS_1 + 15.0)})
+    al = ra.build_alert(g, alert_id="t", night=61220, obscode="X05", status="NEW", tier="2visit",
+                        chi2=1.0, rms_arcsec=0.0, train_veto=tv, rate_lo=1.0)
+    assert al["trainVeto"] is tv and ra._rank_class(al) == 1
+    json.dumps(al)                                                 # fully serializable
+    # default (veto off): the block is null and the alert stays clean -- exact no-op
+    al2 = ra.build_alert(g, alert_id="t2", night=61220, obscode="X05", status="NEW", tier="2visit",
+                         chi2=1.0, rms_arcsec=0.0, rate_lo=1.0)
+    assert al2["trainVeto"] is None and ra._rank_class(al2) == 0
 
 
 # --------------------------------------------------------------- pixel vet: capsule statistic
