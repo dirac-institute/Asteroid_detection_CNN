@@ -17,5 +17,5 @@ SCORES=${SCORES:-0.60 0.65 0.70 0.75 0.80 0.85 0.90}
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
 cd "$REPO"
-python -m ADCNN.pipelines.heliolinc.sweep_S --dir "$RUN" --scores $SCORES --workers 60 --out "$RUN"
+python -m ADCNN.pipelines.heliolinc.sweep_S --dir "$RUN" --scores $SCORES --len-db-max ${LENMAX:-1000000000} --workers 60 --out "$RUN"
 echo "SWEEP_DONE -> $RUN/lambda_vs_S.csv $RUN/s_star.csv"

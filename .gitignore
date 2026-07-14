@@ -54,3 +54,17 @@ ADCNN/pipelines/heliolinc/rb_*.csv
 mrakovci/
 Evaluation/catalogs_thr0/
 Evaluation/tmp_stream_*/
+
+# Oversized / regenerable data (dets_band_box.csv is 128M -- over GitHub's 100M hard limit)
+ADCNN/pipelines/heliolinc/alert_sweep/
+experiments/
+
+# Butler-query snapshots (regenerable; several are stale post dp2_prep purge)
+ADCNN/pipelines/heliolinc/cadence*.csv
+ADCNN/pipelines/heliolinc/field_*.csv
+
+# Belongs to branch nn-experimentation, not this one
+nn_experimentation/
+
+# Accidental symlink to the user's home dir (the dir-form entry above doesn't match a symlink)
+mrakovci

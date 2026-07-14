@@ -1,0 +1,51 @@
+{
+  "target_far": 0.00135,
+  "sigma": "3 (one-sided)",
+  "fit_slope": null,
+  "rho_star": null,
+  "S_star": null,
+  "npt": 3,
+  "min_epochs": 3,
+  "table": [
+    {
+      "score": 0.7,
+      "dets_per_night": 15939.90909090909,
+      "lambda_fp": 0.0015151515151515152,
+      "lambda_err": 0.0015151515151515156,
+      "nreal": 660,
+      "known_recovered": 1,
+      "new": 0,
+      "ny2": true
+    },
+    {
+      "score": 0.8,
+      "dets_per_night": 5007.454545454545,
+      "lambda_fp": 0.0,
+      "lambda_err": 0.0,
+      "nreal": 660,
+      "known_recovered": 1,
+      "new": 0,
+      "ny2": true
+    },
+    {
+      "score": 0.85,
+      "dets_per_night": 2496.4545454545455,
+      "lambda_fp": 0.0,
+      "lambda_err": 0.0,
+      "nreal": 660,
+      "known_recovered": 1,
+      "new": 0,
+      "ny2": true
+    },
+    {
+      "score": 0.9,
+      "dets_per_night": 1072.4545454545455,
+      "lambda_fp": 0.0,
+      "lambda_err": 0.0,
+      "nreal": 660,
+      "known_recovered": 1,
+      "new": 0,
+      "ny2": true
+    }
+  ]
+}

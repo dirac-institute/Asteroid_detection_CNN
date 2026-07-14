@@ -87,10 +87,10 @@ def _cards_from_skywcs(w, nx, ny, tol_arcsec):
     raise RuntimeError(f"TAN-SIP fit residual {last:.3f} arcsec > tol {tol_arcsec}")
 
 
-def _init(collection, tol):
+def _init(collection, tol, butler_repo):
     global _B, _COLL, _TOL
     from lsst.daf.butler import Butler
-    _B = Butler("dp2_prep"); _COLL = collection; _TOL = tol
+    _B = Butler(butler_repo); _COLL = collection; _TOL = tol
 
 
 def _annotate_row(task):
@@ -111,10 +111,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True, help="dir with manifest_*.csv")
     ap.add_argument("--collection", required=True)
+    ap.add_argument("--butler-repo", default=os.environ.get("BUTLER_REPO", "dp2_prep"),
+                    help="Butler repo holding the diffim SkyWcs (default $BUTLER_REPO or dp2_prep)")
     ap.add_argument("--tol", type=float, default=0.1, help="max validation residual (arcsec)")
     ap.add_argument("--workers", type=int, default=32)
     a = ap.parse_args()
-    with Pool(a.workers, initializer=_init, initargs=(a.collection, a.tol)) as pool:
+    with Pool(a.workers, initializer=_init, initargs=(a.collection, a.tol, a.butler_repo)) as pool:
         for mf in sorted(glob.glob(f"{a.run}/manifest_*.csv")):
             m = pd.read_csv(mf)
             if "wcs_json" in m.columns and m.wcs_json.notna().all():
