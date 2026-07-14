@@ -7,9 +7,11 @@ This is the full chain from the v1 detector to the v2_D blind headline
 `rubin:commissioning`); the whole chain is ~1–1.5 days wall-clock on the 1-node cap. The frozen
 result artifact is `models/v2_D/` + `ADCNN_V2_RESULT.md`; this doc lets you rebuild it from scratch.
 
-`REPO=/sdf/.../Asteroid_detection_CNN`, `HL=$REPO/ADCNN/pipelines/heliolinc`. Driver:
-`bash $HL/train_v2_D_e2e.sh` sequences the SLURM steps with dependencies (edit field lists / accounts
-as needed); the steps are also runnable by hand below.
+`REPO=/sdf/.../Asteroid_detection_CNN`, `HL=$REPO/ADCNN/pipelines/heliolinc`,
+`RUNS=$REPO/outputs/runs` (all runtime output lives under repo-root `outputs/`; override with
+`ADCNN_OUTPUTS`). **Submit every sbatch from `$REPO`** — the `#SBATCH -o outputs/logs/…` redirects
+resolve against the submission CWD. Driver: `bash $HL/train_v2_D_e2e.sh` sequences the SLURM steps
+with dependencies (edit field lists / accounts as needed); the steps are also runnable by hand below.
 
 ## 0. Trainable v1 init (one-time; training ckpts were purged)
 ```
@@ -28,10 +30,11 @@ PY
 # Off-ecliptic + ecliptic DM-53195 field-nights, tract-disjoint from run_blind. NOTE/FIX: enforce
 # (visit,detector)-EXPOSURE disjointness, not just tracts (rc1 leaked 12 boundary-CCD panels into 2
 # blind fields via shared night 20250723 -- non-inflating, but exclude for a clean build):
-python build_realfp_manifests.py --collection LSSTCam/runs/DRP/20250421_20250921/d_2025_11_10/DM-53195 \
-  --out-dir run_dev --from-diffim-cadence cadence_diffim.csv --exclude-fields-from run_blind/fields.csv \
+python $HL/build_realfp_manifests.py --collection LSSTCam/runs/DRP/20250421_20250921/d_2025_11_10/DM-53195 \
+  --out-dir $RUNS/run_dev --from-diffim-cadence $REPO/outputs/query_snapshots/cadence_diffim.csv \
+  --exclude-fields-from $HL/run_blind/fields.csv \
   --exclude-mode tract  ...   # + (recommended) drop any (visit,detector) shared with run_blind
-# then per field: retime_cadence.py ; annotate_manifest_wcs.py --run run_dev ; sim_orbits.py (--retime-map)
+# then per field: retime_cadence.py ; annotate_manifest_wcs.py --run $RUNS/run_dev ; sim_orbits.py (--retime-map)
 ```
 
 ## 2. Stage-1 fine-tune (the win: hard-positive domain adaptation)
@@ -39,22 +42,22 @@ python build_realfp_manifests.py --collection LSSTCam/runs/DRP/20250421_20250921
 # v2_D = oversample the stack-found/ADCNN-missed pool (stk-balance 0.85), init from v1, low LR.
 # First build the canonical-contract fine-tune H5 (build_ft_dataset.py: catalog/detect[stack-env]/assemble),
 # then:
-cd $HL/run_ft && sbatch --export=ALL,RUN_NAME=v2_D,LR=5e-5,STKBAL=0.85 variant.slurm
+cd $REPO && sbatch --export=ALL,RUN_NAME=v2_D,LR=5e-5,STKBAL=0.85 $HL/run_ft/variant.slurm
 #  == python -m ADCNN.training.train --init-from models/seg_v1_trainable_init.pt --skip-cnn-equiv
-#       --data-sources run_ft/train.h5:run_ft/train.csv --data-h5 run_ft/val.h5 --data-csv run_ft/val.csv
-#       --epochs 10 --lr 5e-5 --stk-balance 0.85 --intensity-aug
-python -m ADCNN.inference.export --ckpt experiments/diffim_runs/v2_D/ckpts/best.pt \
-  --out $HL/run_ft/v2_D_segmentation_scripted.pt --no-optimize
+#       --data-sources $RUNS/run_ft/train.h5:$RUNS/run_ft/train.csv --data-h5 $RUNS/run_ft/val.h5
+#       --data-csv $RUNS/run_ft/val.csv --epochs 10 --lr 5e-5 --stk-balance 0.85 --intensity-aug
+python -m ADCNN.inference.export --ckpt outputs/training_runs/diffim_runs/v2_D/ckpts/best.pt \
+  --out $RUNS/run_ft/v2_D_segmentation_scripted.pt --no-optimize
 ```
 Detector ladder check (`run_dev/v2_detector_ladder.md`): faint-fast per-sighting recall 22.9→27.6%.
 
 ## 3. Stage-2 refit (REQUIRED after stage-1 changes — leakage-clean panels)
 ```
-python build_ft_dataset.py --stage catalog --run run_dev --out run_ft_cnn \
-  --exclude-catalog run_ft/ft_catalog.csv --panels-train 500 --panels-val 150   # disjoint from stage-1
+python $HL/build_ft_dataset.py --stage catalog --run $RUNS/run_dev --out $RUNS/run_ft_cnn \
+  --exclude-catalog $RUNS/run_ft/ft_catalog.csv --panels-train 500 --panels-val 150   # disjoint from stage-1
 # (then --stage detect [stack env] and --stage assemble [asteroid_cnn])
-cd $HL/run_ft && sbatch refit_stage2.slurm     # train_cnn_with_calibration on the v2_D scripted seg
-#   -> run_ft/v2_D_cnn_postproc.pt  (256G; smaller fp_cap if mem-bound)
+cd $REPO && sbatch $HL/run_ft/refit_stage2.slurm     # train_cnn_with_calibration on the v2_D scripted seg
+#   -> $RUNS/run_ft/v2_D_cnn_postproc.pt  (256G; smaller fp_cap if mem-bound)
 ```
 
 ## 4. MF_LEN trail-length de-bias re-derivation (REQUIRED — v2_D ends-bloom differs)
@@ -66,11 +69,11 @@ cd $HL/run_ft && sbatch refit_stage2.slurm     # train_cnn_with_calibration on t
 
 ## 5. Blind shot (single, pre-registered; run_blind WRITE-PROTECTED)
 ```
-cd $HL/run_ft && sbatch --export=ALL,RUN=$HL/run_blind,\
+cd $REPO && sbatch --export=ALL,RUN=$RUNS/run_blind,\
   SEGMODEL=$REPO/models/v2_D/segmentation_scripted.pt,CNNMODEL=$REPO/models/v2_D/cnn_postproc.pt,\
-  OUTDIR=$HL/run_blind_v2eval -J det_v2blind --array=0-19,24-29 detect_v2full.slurm
-python run_dev/recompute_lendb.py --src run_blind_v2eval --manifests run_blind \
-  --out run_blind_v2eval_cal --offset 7.67 --slope 0.9425 --fields 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 24 25 26 27 28 29
+  OUTDIR=$RUNS/run_blind_v2eval -J det_v2blind --array=0-19,24-29 $HL/run_ft/detect_v2full.slurm
+python $HL/run_dev/recompute_lendb.py --src $RUNS/run_blind_v2eval --manifests $RUNS/run_blind \
+  --out $RUNS/run_blind_v2eval_cal --offset 7.67 --slope 0.9425 --fields 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 24 25 26 27 28 29
 # symlink run_blind inject/truth/manifest/retime into run_blind_v2eval_cal (so the scorer can label tp/fp)
 PYTHONPATH=$REPO python -m ADCNN.evaluation.summarize_results     # -> the headline table (v1 vs v2_D, all/off-ecl/ecliptic)
 ```

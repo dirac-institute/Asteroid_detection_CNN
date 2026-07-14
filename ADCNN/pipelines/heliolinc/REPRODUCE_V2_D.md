@@ -12,7 +12,11 @@ Frozen artifacts (md5 in `models/v2_D/v2_D_release.json`):
 - Verdict caches (durable): `run_blind_v2eval_cal/_nomfsnr_cache/*_smin0.8_v3exact.json`
 
 Env: `source /sdf/group/rubin/sw/loadLSST.sh && setup lsst_distrib` for the stack stages;
-`asteroid_cnn` conda for detection/scoring. `REPO=/sdf/.../Asteroid_detection_CNN`, `HL=$REPO/ADCNN/pipelines/heliolinc`.
+`asteroid_cnn` conda for detection/scoring. `REPO=/sdf/.../Asteroid_detection_CNN`,
+`HL=$REPO/ADCNN/pipelines/heliolinc`, `RUNS=$REPO/outputs/runs` (runtime bulk lives under repo-root
+`outputs/` since the 2026-07-14 reorg; the committed `_nomfsnr_cache` verdict caches stay in the
+package tree). **Submit sbatch from `$REPO`** (the `#SBATCH -o outputs/logs/…` redirect resolves
+against the submission CWD).
 
 ## 0. One-command verdict regeneration (instant, from saved caches)
 ```
@@ -24,20 +28,20 @@ no GPU, no re-detection. First run regenerates any missing v2_D cache via `eval_
 ## 1. Full reproduction from the frozen models (GPU; ~hours, 1-node serial)
 ```
 # (a) detect the 26 blind fields with the v2_D detector (writes run_blind_v2eval/, run_blind untouched)
-cd $HL/run_ft && sbatch --export=ALL,RUN=$HL/run_blind,\
+cd $REPO && sbatch --export=ALL,RUN=$RUNS/run_blind,\
   SEGMODEL=$REPO/models/v2_D/segmentation_scripted.pt,\
   CNNMODEL=$REPO/models/v2_D/cnn_postproc.pt,\
-  OUTDIR=$HL/run_blind_v2eval -J det_v2blind --array=0-19,24-29 detect_v2full.slurm
+  OUTDIR=$RUNS/run_blind_v2eval -J det_v2blind --array=0-19,24-29 $HL/run_ft/detect_v2full.slurm
 #     (detect_v2full.slurm: discover_stream --seg-model $SEGMODEL --cnn $CNNMODEL --cnn-thr 0.50, then mask_flags)
 #     length_raw is stored in the output (catalog.py emits it; ADCNN_MF_LEN_* env optional).
 
 # (b) apply v2_D trail-length de-bias (recompute len_db + endpoints; no re-detect)
 PYTHONPATH=$REPO python $HL/run_dev/recompute_lendb.py \
-  --src $HL/run_blind_v2eval --manifests $HL/run_blind --out $HL/run_blind_v2eval_cal \
+  --src $RUNS/run_blind_v2eval --manifests $RUNS/run_blind --out $RUNS/run_blind_v2eval_cal \
   --offset 7.67 --slope 0.9425 --fields 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 24 25 26 27 28 29
 
 # (c) symlink injection truth into the scoring dir (so eval_field_exact can label tp/fp)
-cd $HL/run_blind_v2eval_cal && for k in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 24 25 26 27 28 29; do \
+cd $RUNS/run_blind_v2eval_cal && for k in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 24 25 26 27 28 29; do \
   for p in inject truth retime manifest; do ln -sf ../run_blind/${p}_$k.csv ${p}_$k.csv; done; done
 
 # (d) verdict
@@ -58,7 +62,7 @@ v1 must reproduce its `BLIND_TEST_REPORT.md` numbers exactly (harness check).
 
 ## 3. Trail-length de-bias re-derivation (how 7.67/0.9425 was obtained)
 Fit `raw_mf_length ≈ slope·L_true + offset` on non-blind dev injections (match dets↔inject 10px,
-faint-fast L 6–60px), field-held-out. Re-run on `run_dev/v2_D_s2` vs `run_dev/inject_*.csv`/`truth_*`.
+faint-fast L 6–60px), field-held-out. Re-run on `$RUNS/run_dev/v2_D_s2` vs `$RUNS/run_dev/inject_*.csv`/`truth_*`.
 Stage-2 was refit (canonical `train_cnn_with_calibration` on the leakage-clean `run_ft_cnn` H5,
 disjoint from the 1,429 stage-1 panels) — see `run_ft/refit_stage2.slurm`.
 

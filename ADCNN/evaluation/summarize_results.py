@@ -14,9 +14,12 @@ import json, os, glob
 from pathlib import Path
 from ADCNN.pipelines.heliolinc import exact_lowS_pairs as ex
 
-HL = str(Path(__file__).resolve().parents[2] / "ADCNN/pipelines/heliolinc")
-V1 = f"{HL}/run_blind"
-V2 = f"{HL}/run_blind_v2eval_cal"
+REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[2])
+OUTPUTS = Path(os.environ.get("ADCNN_OUTPUTS") or REPO / "outputs")
+HL = str(REPO / "ADCNN/pipelines/heliolinc")
+V1 = f"{HL}/run_blind"                                  # committed v1 caches (durable evidence)
+V2 = f"{HL}/run_blind_v2eval_cal"                       # committed v2_D verdict caches
+V2_DATA = str(OUTPUTS / "runs/run_blind_v2eval_cal")    # dets/truth bulk (outputs/ since the reorg)
 OFFECL = [str(k) for k in range(20)]
 ECL = ["24", "25", "26", "27", "28", "29"]
 OP = dict(smin=0.80, mfmin=5.0, rlo=1.0, rhi=8.0)
@@ -27,7 +30,7 @@ def v2_cache(k):
     cp = f"{V2}/_nomfsnr_cache/{k}_smin0.8_v3exact.json"
     if os.path.exists(cp):
         return json.load(open(cp))["rows"]
-    rows, rec, n = ex.eval_field_exact(V2, k, 0.80)
+    rows, rec, n = ex.eval_field_exact(V2_DATA, k, 0.80)
     os.makedirs(f"{V2}/_nomfsnr_cache", exist_ok=True)
     json.dump({"rows": rows, "rec": rec, "n_seed": n}, open(cp + ".tmp", "w"))
     os.replace(cp + ".tmp", cp)

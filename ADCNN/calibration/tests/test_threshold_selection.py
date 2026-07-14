@@ -17,7 +17,7 @@ from ADCNN.calibration import calibrate_mflen as MF
 REPO = Path(__file__).resolve().parents[3]
 CACHE = TS.DEFAULT_CACHE_DIR
 FROZEN_OP = REPO / "ADCNN/pipelines/heliolinc/op_2v_alert.json"
-_HAVE_CACHE = Path(CACHE).exists() and any(Path(CACHE).glob("*_smin0.6_v3exact.json"))
+_HAVE_CACHE = Path(CACHE).exists() and any(Path(CACHE).glob("*_smin0.6_v3exact.json*"))  # .json or committed .json.gz
 
 
 def _skip(msg):
