@@ -5,11 +5,12 @@
 # array drains — see ADCNN_V2_SPRINT.md Phase 3. Thresholds frozen; blind set untouched.
 set -euo pipefail
 NAME=${1:?usage: eval_variant.sh <run-name>}
-REPO=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN
-HL=$REPO/ADCNN/pipelines/heliolinc
-BEST=$REPO/experiments/diffim_runs/$NAME/ckpts/best.pt
-SCRIPTED=$HL/run_ft/${NAME}_segmentation_scripted.pt
-OUT=$HL/run_dev/$NAME
+REPO="${ADCNN_REPO:-/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN}"
+HL=$REPO/ADCNN/pipelines/heliolinc                     # tracked scripts
+RUNS="${ADCNN_OUTPUTS:-$REPO/outputs}/runs"            # run data (outputs/ layout)
+BEST="${ADCNN_OUTPUTS:-$REPO/outputs}/training_runs/diffim_runs/$NAME/ckpts/best.pt"
+SCRIPTED=$RUNS/run_ft/${NAME}_segmentation_scripted.pt
+OUT=$RUNS/run_dev/$NAME
 [ -f "$BEST" ] || { echo "no best.pt for $NAME"; exit 1; }
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn
@@ -24,6 +25,6 @@ for k in $(seq 0 20); do
 done
 cp "$HL/run_dev/reduce_dev.py" "$OUT/reduce_dev.py"
 cp "$HL/run_dev/miss_audit.py" "$OUT/miss_audit.py"
-cd "$HL/run_ft"
-sbatch --exclude=sdfada006 --export=ALL,SEGMODEL=$SCRIPTED,OUTDIR=$OUT -J det_$NAME --array=0-20 detect_variant.slurm
+cd "$REPO"   # submit from repo root: slurm -o outputs/logs/ resolves relative to CWD
+sbatch --exclude=sdfada006 --export=ALL,SEGMODEL=$SCRIPTED,OUTDIR=$OUT -J det_$NAME --array=0-20 "$HL/run_ft/detect_variant.slurm"
 echo "EVAL_VARIANT_SUBMITTED $NAME"

@@ -5,7 +5,7 @@
 #SBATCH --mem=192G
 #SBATCH -t 24:00:00
 #SBATCH -J sn_run
-#SBATCH -o %x_%j.log
+#SBATCH -o outputs/logs/%x_%j.log
 set -eo pipefail
 # CANONICAL same-night NEO pipeline orchestrator (run on CPU; drives the GPU detect + the rest).
 #

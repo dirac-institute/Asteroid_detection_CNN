@@ -30,6 +30,7 @@ import pandas as pd
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 sys.path.insert(0, REPO)
+OUTPUTS = os.environ.get("ADCNN_OUTPUTS") or os.path.join(REPO, "outputs")  # all runtime OUTPUT goes here
 
 TRAIN_NIGHT = 20250723
 VAL_NIGHT = 20250704
@@ -206,8 +207,8 @@ def stage_assemble(a):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--stage", required=True, choices=["catalog", "detect", "assemble"])
-    ap.add_argument("--run", default=f"{HERE}/run_dev")
-    ap.add_argument("--out", default=f"{HERE}/run_ft")
+    ap.add_argument("--run", default=f"{OUTPUTS}/runs/run_dev")
+    ap.add_argument("--out", default=f"{OUTPUTS}/runs/run_ft")
     ap.add_argument("--panels-train", type=int, default=1500)
     ap.add_argument("--panels-val", type=int, default=300)
     ap.add_argument("--trails-min", type=int, default=15)

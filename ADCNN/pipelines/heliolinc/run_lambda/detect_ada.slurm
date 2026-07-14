@@ -7,11 +7,11 @@
 #SBATCH --mem=128G
 #SBATCH -t 8:00:00
 #SBATCH -J lam_detect
-#SBATCH -o %x_%A_%a.log
+#SBATCH -o outputs/logs/%x_%A_%a.log
 set -eo pipefail
 # ADCNN detection (inline injection) + mask flags for one field (array index = field k). ada/kipac normal
 # QOS = NON-PREEMPTABLE L40S. Needs inject_$k.csv from inject.slurm.
-REPO=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN
+REPO="${ADCNN_REPO:-/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN}"
 RUN=${RUN:?set RUN}
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn

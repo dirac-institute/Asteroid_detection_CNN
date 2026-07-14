@@ -21,12 +21,13 @@ CSV with columns mjd, ra, dec (deg) and optionally mag, band; one row per detect
 purified linkage set (clust2det) mapping linkage_id -> detection rows of the input catalogue.
 """
 from __future__ import annotations
-import argparse, subprocess, sys
+import argparse, os, subprocess, sys
 from pathlib import Path
 import numpy as np, pandas as pd
 
-HLX = Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/external/heliolinx/bin")
-AUX = Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/external/heliolinx-aux/tests")
+REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
+HLX = REPO / "external/heliolinx/bin"                 # tool INPUTS (gitignored local build)
+AUX = REPO / "external/heliolinx-aux/tests"
 EARTH = AUX / "Earth1day2020s_02a.csv"
 OBSCODES = AUX / "ObsCodesNew.txt"
 NEO_HYP = AUX / "hypotheses" / "NEO" / "hihyp00aa_neo.txt"

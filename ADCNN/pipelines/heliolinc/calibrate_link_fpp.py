@@ -26,8 +26,11 @@ import argparse, json, warnings
 from pathlib import Path
 import numpy as np, pandas as pd
 warnings.filterwarnings("ignore")
+import os
 import sys
-sys.path.insert(0, "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
+REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
+OUTPUTS = Path(os.environ.get("ADCNN_OUTPUTS") or REPO / "outputs")
+sys.path.insert(0, str(REPO))
 from ADCNN.linking.link_2visit import link, physical_check, crossmatch
 
 PC = dict(pa_tol_deg=20.0, lin_rms_arcsec=1.0, min_epochs=2, pa_tol_2v_deg=10.0,
@@ -105,7 +108,8 @@ def main():
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--mc-target-events", type=int, default=60, help="aim for ~this many false events to size realizations")
     ap.add_argument("--mc-nmax", type=int, default=400, help="max null realizations per night (cap MC cost)")
-    ap.add_argument("--out", default="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/ADCNN/pipelines/heliolinc/link_fpp_calib.json")
+    ap.add_argument("--out", default=str(OUTPUTS / "calib/link_fpp_calib.json"),
+                    help="calib JSON; promote into ADCNN/pipelines/heliolinc/ (tracked) only when frozen")
     a = ap.parse_args()
     rng = np.random.default_rng(a.seed)
     global NPT, PC

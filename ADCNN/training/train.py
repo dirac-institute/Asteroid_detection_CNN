@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import random
 import time
 from pathlib import Path
@@ -38,6 +39,7 @@ from ADCNN.data.dataset import (
 from ADCNN.core.detector import UNetResSEOrientHough
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+OUTPUTS = Path(os.environ.get("ADCNN_OUTPUTS") or REPO_ROOT / "outputs")  # all runtime OUTPUT goes here
 from ADCNN.core.losses import masked_aftl_loss, masked_orient_mse
 
 def pick_train_val_panels(n_total: int, n_train: int, n_val: int, seed: int = 0):
@@ -110,7 +112,7 @@ def main():
     ap.add_argument("--run-name", required=True)
     ap.add_argument("--data-h5", default=str(REPO_ROOT / "DATA_DIFFIM" / "train.h5"))
     ap.add_argument("--data-csv", default=str(REPO_ROOT / "DATA_DIFFIM" / "train.csv"))
-    ap.add_argument("--out-root", default=str(REPO_ROOT / "experiments" / "diffim_runs"))
+    ap.add_argument("--out-root", default=str(OUTPUTS / "training_runs/diffim_runs"))
     ap.add_argument("--n-train-panels", type=int, default=150)
     ap.add_argument("--n-val-panels", type=int, default=30)
     ap.add_argument("--tile", type=int, default=128)

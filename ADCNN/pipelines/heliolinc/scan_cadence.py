@@ -8,22 +8,26 @@ n_visits, n_panels] sorted desc. Build a manifest with build_manifest --tracts <
 """
 from __future__ import annotations
 import argparse
+import os
 from collections import defaultdict
 from pathlib import Path
 import pandas as pd
 from lsst.daf.butler import Butler
 
 STAGE4 = "LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage4"
+REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
+OUTPUTS = Path(os.environ.get("ADCNN_OUTPUTS") or REPO / "outputs")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--skymap", default="lsst_cells_v1")
     ap.add_argument("--min-visits", type=int, default=4)
-    ap.add_argument("--out", default="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/ADCNN/pipelines/heliolinc/cadence.csv")
+    ap.add_argument("--butler-repo", default=os.environ.get("BUTLER_REPO", "main"))
+    ap.add_argument("--out", default=str(OUTPUTS / "query_snapshots/cadence.csv"))
     a = ap.parse_args()
 
-    b = Butler("dp2_prep")
+    b = Butler(a.butler_repo)
     visit_day = {int(r.id): int(r.day_obs) for r in b.registry.queryDimensionRecords("visit", where="instrument='LSSTCam'")}
     tn_visits = defaultdict(set); tn_panels = defaultdict(int); n = 0
     for did in b.registry.queryDataIds(["visit", "detector", "tract"], datasets="difference_image",

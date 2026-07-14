@@ -10,10 +10,15 @@ link. For k ∈ {2,3} and score floors {0.59, 0.80}:
 """
 from __future__ import annotations
 import argparse
+import os
+from pathlib import Path
 import numpy as np, pandas as pd, sys
+
+REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
+OUTPUTS = Path(os.environ.get("ADCNN_OUTPUTS") or REPO / "outputs")
 from scipy.spatial import cKDTree
 from collections import Counter
-sys.path.insert(0, "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
+sys.path.insert(0, str(REPO))
 from ADCNN.linking.link_2visit import link, physical_check
 
 TOL_ARCSEC = 5.0
@@ -48,7 +53,7 @@ def track_objid(det, members, k):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--run", default="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/ADCNN/pipelines/heliolinc/run_test2")
+    ap.add_argument("--run", default=str(OUTPUTS / "runs/run_test2"))
     ap.add_argument("--len-db-min", type=float, default=6.0)
     ap.add_argument("--pos-tol", type=float, default=0.05, help="link clustering radius (deg); 0.05 trades cluster-recall up at no purity cost (physical_check is the precision gate)")
     ap.add_argument("--floors", nargs="+", type=float, default=[0.59, 0.80])

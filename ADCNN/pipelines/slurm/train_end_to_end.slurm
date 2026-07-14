@@ -62,7 +62,7 @@ python3 -u -m ADCNN.pipelines.train_end_to_end \
   --cnn-train-h5 "$DATA_ROOT/cnn_train.h5" --cnn-train-csv "$DATA_ROOT/cnn_train.csv" \
   --cnn_val-h5 "$DATA_ROOT/cnn_val.h5" --cnn_val-csv "$DATA_ROOT/cnn_val.csv" \
   --gpus 4 \
-  --out-root "$REPO/experiments/diffim_runs" --models-dir "$MODELS_DIR"
+  --out-root "${ADCNN_OUTPUTS:-$REPO/outputs}/training_runs/diffim_runs" --models-dir "$MODELS_DIR"
 
 echo "=== TRAINING DONE ==="
 echo "  segmentation: $MODELS_DIR/${RUN_NAME}_segmentation_scripted.pt"

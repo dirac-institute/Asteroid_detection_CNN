@@ -4,7 +4,7 @@
 #                    \-afterok-->  stack (milano CPU)  -----+--> [manual] sweep_S + consolidate
 # Usage: NFIELDS=100 RUN=/abs/run_lambda bash submit_full.sh
 set -eo pipefail
-REPO=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN
+REPO="${ADCNN_REPO:-/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN}"
 HL=$REPO/ADCNN/pipelines/heliolinc
 RUN=${RUN:?set RUN to an absolute run dir}
 NFIELDS=${NFIELDS:?set NFIELDS}

@@ -20,7 +20,8 @@ for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 import sys
-sys.path.insert(0, "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")  # ADCNN importable in LSST env
+REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
+sys.path.insert(0, str(REPO))  # ADCNN importable in LSST env
 import numpy as np
 import pandas as pd
 

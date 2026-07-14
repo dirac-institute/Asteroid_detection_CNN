@@ -7,7 +7,7 @@
 #SBATCH --mem=128G
 #SBATCH -t 8:00:00
 #SBATCH -J sn_detect
-#SBATCH -o %x_%j.log
+#SBATCH -o outputs/logs/%x_%j.log
 #SBATCH --requeue
 #SBATCH --open-mode=append
 set -eo pipefail

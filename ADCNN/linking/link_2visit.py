@@ -34,7 +34,8 @@ import pandas as pd
 from scipy.spatial import cKDTree
 
 REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[2])
-HL = REPO / "ADCNN/pipelines/heliolinc"
+HL = REPO / "ADCNN/pipelines/heliolinc"          # frozen calib/op-point INPUTS only
+OUTPUTS = Path(os.environ.get("ADCNN_OUTPUTS") or REPO / "outputs")  # all runtime OUTPUT goes here
 SOLARDAY = 86400.0
 
 
@@ -790,8 +791,8 @@ def crossmatch(dets, members, known, tol_arcsec, tol_day, index=None):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dets", required=True, help="ADCNN catalog: mjd,ra,dec,ra0,dec0,ra1,dec1,visit[,len_db,score,art_frac,snr]")
-    ap.add_argument("--known", default=str(HL / "run_night8731/known.csv"))
-    ap.add_argument("--out", default=str(HL / "run_night8731/tracks.csv"))
+    ap.add_argument("--known", default=str(OUTPUTS / "runs/run_night8731/known.csv"))
+    ap.add_argument("--out", default=str(OUTPUTS / "runs/run_night8731/tracks.csv"))
     ap.add_argument("--exptime", type=float, default=30.0)
     ap.add_argument("--len-db-min", type=float, default=6.0, help="hard trail-length floor (px); cut ALL shorter dets regardless of source")
     ap.add_argument("--art-frac-max", type=float, default=0.3, help="LSST mask cut")

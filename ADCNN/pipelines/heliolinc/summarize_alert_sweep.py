@@ -2,9 +2,13 @@
 """Summarize the mfsnr alert sweep: per (run, config, night) alert load, known-object recovery,
 unknown-candidate burden, priorityScore/mfsnr/chi2 distributions, and follow-up search radii.
 Feeds ALERT_SWEEP_DECISION.md. Reads the schema-1.1 alerts.jsonl files written by trail_state_link."""
-import json, glob, sys
+import argparse, json, glob, os, sys
+from pathlib import Path
 import numpy as np
 import pandas as pd
+
+REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
+OUTPUTS = Path(os.environ.get("ADCNN_OUTPUTS") or REPO / "outputs")
 
 
 def load_alerts(path):
@@ -28,12 +32,17 @@ def load_alerts(path):
 
 
 def main():
-    runs = sorted(glob.glob("alert_sweep/*/alerts.jsonl"))
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--dir", default=str(OUTPUTS / "runs/alert_sweep"),
+                    help="sweep root with <config>/alerts.jsonl subdirs (frozen evidence copy is "
+                         "committed at ADCNN/pipelines/heliolinc/alert_sweep/)")
+    a = ap.parse_args()
+    runs = sorted(glob.glob(f"{a.dir}/*/alerts.jsonl"))
     if not runs:
-        print("no alerts.jsonl under alert_sweep/*/"); sys.exit(1)
+        print(f"no alerts.jsonl under {a.dir}/*/"); sys.exit(1)
     out = []
     for path in runs:
-        cfg = path.split("/")[1]
+        cfg = Path(path).parent.name
         df = load_alerts(path)
         if not len(df):
             out.append(dict(config=cfg, night="-", n_alerts=0)); continue
@@ -52,7 +61,7 @@ def main():
                 sr90_p50=round(float(g.sr90.median()), 1) if g.sr90.notna().any() else None,
             ))
     res = pd.DataFrame(out)
-    res.to_csv("alert_sweep/summary.csv", index=False)
+    res.to_csv(f"{a.dir}/summary.csv", index=False)
     print(res.to_string(index=False))
     # config-level rollup (alert burden per night is THE follow-up budget number)
     print("\n=== per-config rollup (mean per night) ===")

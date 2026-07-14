@@ -14,14 +14,15 @@ import pandas as pd
 from lsst.daf.butler import Butler
 
 REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
+OUTPUTS = Path(os.environ.get("ADCNN_OUTPUTS") or REPO / "outputs")  # all runtime OUTPUT goes here
 STAGE4 = os.environ.get("BUTLER_COLLECTION", "LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage4")
 BUTLER_REPO = os.environ.get("BUTLER_REPO", "dp2_prep")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--manifest", default=str(REPO / "ADCNN/pipelines/heliolinc/run_disco/manifest.csv"))
-    ap.add_argument("--out", default=str(REPO / "ADCNN/pipelines/heliolinc/run_disco/known.csv"))
+    ap.add_argument("--manifest", default=str(OUTPUTS / "runs/run_disco/manifest.csv"))
+    ap.add_argument("--out", default=str(OUTPUTS / "runs/run_disco/known.csv"))
     ap.add_argument("--butler-repo", default=BUTLER_REPO, help="Butler repo (default $BUTLER_REPO or dp2_prep)")
     ap.add_argument("--collection", default=STAGE4, help="SSObject collection (default $BUTLER_COLLECTION)")
     a = ap.parse_args()

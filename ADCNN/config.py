@@ -34,6 +34,19 @@ from typing import Optional, Union
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_PIPELINE = REPO / "models" / "current" / "pipeline.json"
 
+# The ONE runtime output location (layout since 2026-07-14): repo-root outputs/ holds
+# runs/ (night + campaign run dirs), logs/ (slurm logs), training_runs/, query_snapshots/.
+# Overridable via ADCNN_OUTPUTS (e.g. a scratch filesystem). Nothing may write into the
+# package tree at runtime -- outputs/ is gitignored, the package tree is code + frozen calib.
+OUTPUTS = Path(os.environ.get("ADCNN_OUTPUTS", str(REPO / "outputs")))
+
+
+def outputs_dir(*parts: str) -> Path:
+    """Resolve (and mkdir -p) a directory under the outputs root."""
+    p = OUTPUTS.joinpath(*parts)
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
 
 @dataclass(frozen=True)
 class Pipeline:

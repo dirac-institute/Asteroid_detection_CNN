@@ -22,12 +22,16 @@ Pipeline per field (mirrors measure_nomfsnr.eval_field semantics exactly):
 Cache: {dir}/_nomfsnr_cache/{k}_smin{smin}_v3exact.json (same row schema as v2 -> same reducers work).
 """
 import argparse, json, os, glob
+from pathlib import Path
 import numpy as np
 import pandas as pd
 
 import ADCNN.pipelines.heliolinc.sweep_S as sw
 from ADCNN.linking.link_2visit import (radec_to_unit, _chord_radius, physical_check,
                                                         pair_chi2)
+
+REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
+OUTPUTS = Path(os.environ.get("ADCNN_OUTPUTS") or REPO / "outputs")
 
 PCHECK = dict(pa_tol_deg=20.0, lin_rms_arcsec=1.0, min_epochs=2, pa_tol_2v_deg=10.0, orbit_check_2v=True,
               orbit_rate_tol=0.5, max_arc_2v_min=40.0, chi2_2v_max=5.0)
@@ -167,7 +171,9 @@ def _worker(args):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dir", default="run_lambda")
+    ap.add_argument("--dir", default=str(OUTPUTS / "runs/run_lambda"),
+                    help="run dir with adcnn_dets_masked_*.csv; fresh caches land in <dir>/_nomfsnr_cache "
+                         "(the FROZEN 82-field caches are committed at ADCNN/pipelines/heliolinc/run_lambda/)")
     ap.add_argument("--smin", type=float, default=0.6)
     ap.add_argument("--workers", type=int, default=40)
     ap.add_argument("--validate", action="store_true",

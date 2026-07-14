@@ -12,12 +12,14 @@ Usage:
       --npt 2 --min-epochs 2 --pa-tol 20 --pa-tol-2v 10 --targets "2018 BJ1" "2025 NY2"
 """
 import argparse
+import os
 import sys
+from pathlib import Path
 import numpy as np, pandas as pd
-sys.path.insert(0, "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
+REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
+OUTPUTS = Path(os.environ.get("ADCNN_OUTPUTS") or REPO / "outputs")
+sys.path.insert(0, str(REPO))
 from ADCNN.linking.link_2visit import link, physical_check, fit_residual, crossmatch
-
-HL = "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/ADCNN/pipelines/heliolinc"
 
 
 def scramble(df, rng):
@@ -34,7 +36,7 @@ def scramble(df, rng):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--run", default=f"{HL}/run_band", help="run dir with adcnn_dets_masked.csv + known.csv")
+    ap.add_argument("--run", default=str(OUTPUTS / "runs/run_band"), help="run dir with adcnn_dets_masked.csv + known.csv")
     ap.add_argument("--dets", default=None, help="override masked dets CSV (default <run>/adcnn_dets_masked.csv)")
     ap.add_argument("--known", default=None, help="override known.csv (default <run>/known.csv)")
     ap.add_argument("--night", type=int, required=True, help="integer night = floor(mjd-0.5)")

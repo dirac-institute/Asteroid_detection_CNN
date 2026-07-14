@@ -33,10 +33,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ADCNN.config import load_pipeline
+from ADCNN.config import OUTPUTS, load_pipeline
 
 REPO = Path(__file__).resolve().parents[2]
-HL = REPO / "ADCNN" / "pipelines" / "heliolinc"
+HL = REPO / "ADCNN" / "pipelines" / "heliolinc"   # code + frozen calib INPUTS only
+RUNS = OUTPUTS / "runs"                           # bulky run data (untracked, outputs/ layout)
 
 STAGE_ORDER = ["data", "train-stage1", "train-stage2", "calibrate-mflen",
                "detect", "alert-eval", "report", "evaluation-notebooks"]
@@ -199,12 +200,15 @@ def release_check(pipe):
         from ADCNN.pipelines.leakage_guard import visit_detector_pairs
         import glob
         blind = {mf.split("manifest_")[1].split(".")[0]:
-                 visit_detector_pairs(mf) for mf in glob.glob(str(HL / "run_blind/manifest_*.csv"))}
+                 visit_detector_pairs(mf) for mf in glob.glob(str(RUNS / "run_blind/manifest_*.csv"))}
         train = set()
-        for p in [HL / "run_ft/ft_catalog.csv", HL / "run_ft_cnn/ft_catalog.csv"] + \
-                 [Path(x) for x in glob.glob(str(HL / "run_dev/manifest_*.csv"))]:
+        for p in [RUNS / "run_ft/ft_catalog.csv", RUNS / "run_ft_cnn/ft_catalog.csv"] + \
+                 [Path(x) for x in glob.glob(str(RUNS / "run_dev/manifest_*.csv"))]:
             if p.exists():
                 train |= visit_detector_pairs(p)
+        if not blind or not train:
+            # fail LOUD, not vacuously-pass: without the manifests this check verifies nothing
+            raise FileNotFoundError(f"leakage-audit data missing under {RUNS} (blind={len(blind)} train={len(train)})")
         hit_fields = sorted(k for k, vd in blind.items() if vd & train)
         lk_ok = set(hit_fields) <= {"0", "1"}; ok &= lk_ok
         print(f"    [{'OK' if lk_ok else 'FAIL'}] leakage confined to blind fields {hit_fields} (expect subset of [0,1])")

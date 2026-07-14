@@ -7,17 +7,18 @@
 #SBATCH --mem=128G
 #SBATCH -t 6:00:00
 #SBATCH -J freshnight
-#SBATCH -o %x_%j.log
+#SBATCH -o outputs/logs/%x_%j.log
 set -eo pipefail
 # FRESH full-night end-to-end: real LSST cadence (one real night) + Granvik-realistic NEO injection
 # restricted to the TRAINING RANGE (detection-SNR 2-10, rate 1-8 deg/day -> trail ~6-50 px), the REAL
 # cadence (NO retiming), fresh GPU detect, frozen alert op link, then purity/completeness/wall-time.
-REPO=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN
-RUN=$REPO/ADCNN/pipelines/heliolinc/run_freshnight
-HL=$REPO/ADCNN/pipelines/heliolinc
+REPO="${ADCNN_REPO:-/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN}"
+RUNS="${ADCNN_OUTPUTS:-$REPO/outputs}/runs"   # run data (outputs/ layout)
+RUN=$RUNS/run_freshnight
+HL=$REPO/ADCNN/pipelines/heliolinc            # tracked scripts + frozen op inputs
 # A real held-out night's manifest (real LSST visits/cadence, real diffim FITS, wcs_json-annotated).
 # Default: blind field 2 (held-out night 20250723, off-ecliptic, 12 real visits, 768-panel footprint).
-SRCMAN=${SRCMAN:-$HL/run_blind/manifest_2.csv}
+SRCMAN=${SRCMAN:-$RUNS/run_blind/manifest_2.csv}
 NOBJ=${NOBJ:-600}
 mkdir -p "$RUN"; cd "$REPO"
 ts() { date +%s; }
@@ -57,7 +58,7 @@ T[mask]=$(( $(ts) - t ))
 # 4. same-night link at the FROZEN ALERT OP (op_2v_alert.json: S>=0.80, mfsnr>=5, chi2<=5, rate[1,8])
 t=$(ts)
 python -m ADCNN.linking.link_2visit --dets "$RUN/adcnn_dets_masked_0.csv" \
-  --known "$HL/run_night8731/known.csv" --out "$RUN/tracks.csv" \
+  --known "$RUNS/run_night8731/known.csv" --out "$RUN/tracks.csv" \
   --op-point "$HL/op_2v_alert.json" --npt 2 --min-epochs 2 --seed-2v chord \
   --alerts-out "$RUN/alerts.jsonl" || true
 T[link]=$(( $(ts) - t ))

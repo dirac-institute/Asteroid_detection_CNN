@@ -43,28 +43,22 @@ plots/
 ADCNN/pipelines/heliolinc/heliolinc2/
 external/
 
-# HelioLinC run outputs (multi-GB, regenerable)
+# ALL runtime outputs live under repo-root outputs/ (runs/, logs/, training_runs/,
+# query_snapshots/, attic/). Layout since 2026-07-14; nothing writes into the
+# package tree at runtime.
+outputs/
+
+# Defensive: legacy output locations -- catch anything an old script/checkout still emits
 ADCNN/pipelines/heliolinc/run_*/
 ADCNN/pipelines/heliolinc/NEO_*/
 ADCNN/pipelines/heliolinc/fp_budget*/
 ADCNN/pipelines/heliolinc/rejecter_data/
 ADCNN/pipelines/heliolinc/rb_*.csv
-
-# User scratch + nested unrelated checkouts (LSST tutorial-notebooks etc.)
-mrakovci/
+ADCNN/pipelines/heliolinc/cadence*.csv
+ADCNN/pipelines/heliolinc/field_*.csv
 Evaluation/catalogs_thr0/
 Evaluation/tmp_stream_*/
 
-# Oversized / regenerable data (dets_band_box.csv is 128M -- over GitHub's 100M hard limit)
-ADCNN/pipelines/heliolinc/alert_sweep/
-experiments/
-
-# Butler-query snapshots (regenerable; several are stale post dp2_prep purge)
-ADCNN/pipelines/heliolinc/cadence*.csv
-ADCNN/pipelines/heliolinc/field_*.csv
-
-# Belongs to branch nn-experimentation, not this one
-nn_experimentation/
-
-# Accidental symlink to the user's home dir (the dir-form entry above doesn't match a symlink)
+# User scratch + nested unrelated checkouts (LSST tutorial-notebooks etc.)
+mrakovci/
 mrakovci

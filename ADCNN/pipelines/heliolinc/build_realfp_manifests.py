@@ -6,6 +6,7 @@ pairs. Picks the densest |ecl_lat|>20 deg fields from cadence.csv, resolves each
 and writes run_realfp/manifest_<k>.csv + a pairs summary."""
 from __future__ import annotations
 import argparse
+import os
 from pathlib import Path
 import numpy as np, pandas as pd
 from astropy.coordinates import SkyCoord
@@ -14,12 +15,13 @@ from lsst.daf.butler import Butler
 from lsst.geom import SpherePoint, degrees
 from ADCNN.inference.diffim_io import datastore_uri
 
-REPO = Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
+REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
+OUTPUTS = Path(os.environ.get("ADCNN_OUTPUTS") or REPO / "outputs")  # all runtime OUTPUT goes here
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cadence", default=str(REPO / "ADCNN/pipelines/heliolinc/cadence.csv"))
+    ap.add_argument("--cadence", default=str(OUTPUTS / "query_snapshots/cadence.csv"))
     ap.add_argument("--skymap", default="lsst_cells_v1")
     ap.add_argument("--n-fields", type=int, default=6)
     ap.add_argument("--min-ecl-lat", type=float, default=20.0)
@@ -48,7 +50,7 @@ def main():
     ap.add_argument("--collection", default="LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage4",
                     help="Butler collection serving difference_image (the DP2 stage4 default is being "
                          "decommissioned; DM-53195 d_2025_11_10 is the live replacement)")
-    ap.add_argument("--out-dir", default=str(REPO / "ADCNN/pipelines/heliolinc/run_realfp"))
+    ap.add_argument("--out-dir", default=str(OUTPUTS / "runs/run_realfp"))
     a = ap.parse_args()
     out = Path(a.out_dir); out.mkdir(parents=True, exist_ok=True)
 

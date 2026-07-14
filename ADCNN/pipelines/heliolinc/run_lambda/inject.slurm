@@ -6,10 +6,10 @@
 #SBATCH --mem=64G
 #SBATCH -t 2:00:00
 #SBATCH -J lam_inject
-#SBATCH -o %x_%A_%a.log
+#SBATCH -o outputs/logs/%x_%A_%a.log
 set -eo pipefail
 # Re-time + faint-SNR injection for one off-ecliptic field (array index = field k). Light CPU.
-REPO=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN
+REPO="${ADCNN_REPO:-/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN}"
 RUN=${RUN:?set RUN}
 NOBJ=${NOBJ:-300}
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh

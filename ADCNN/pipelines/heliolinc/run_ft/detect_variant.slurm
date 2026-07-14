@@ -7,13 +7,13 @@
 #SBATCH --mem=128G
 #SBATCH -t 8:00:00
 #SBATCH -J v2_detect
-#SBATCH -o %x_%A_%a.log
+#SBATCH -o outputs/logs/%x_%A_%a.log
 set -eo pipefail
 # ADCNN v2 Phase-3 eval ladder: rerun dev detection with a VARIANT segmentation model.
 # Env: SEGMODEL (scripted .pt), OUTDIR (run_dev/v2_<name>, pre-made with symlinked inject/manifest).
 # Array index = dev field k (0-20). Identical flags to the v1 run EXCEPT --seg-model.
-REPO=/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN
-RUN=$REPO/ADCNN/pipelines/heliolinc/run_dev
+REPO="${ADCNN_REPO:-/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN}"
+RUN="${ADCNN_OUTPUTS:-$REPO/outputs}/runs/run_dev"
 OUT=${OUTDIR:?}; SEG=${SEGMODEL:?}
 source /sdf/data/rubin/user/mrakovci/conda/etc/profile.d/conda.sh
 conda activate asteroid_cnn

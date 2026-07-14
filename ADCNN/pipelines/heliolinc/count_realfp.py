@@ -5,10 +5,12 @@ orbit-residual + collinearity + score floor), counts false 2-tracks, and reports
 PAIR with a Poisson confidence interval, vs the 3-sigma budget 1.35e-3. This replaces the null-MC estimate
 (which overestimates because it breaks the real cross-visit FP correlation)."""
 from __future__ import annotations
-import argparse, glob
+import argparse, glob, os
 from pathlib import Path
 import numpy as np, pandas as pd, sys
-sys.path.insert(0, "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
+REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
+OUTPUTS = Path(os.environ.get("ADCNN_OUTPUTS") or REPO / "outputs")
+sys.path.insert(0, str(REPO))
 from ADCNN.linking.link_2visit import link, physical_check, chord_seed_pairs
 from ADCNN.pipelines.heliolinc.recurrence import add_recurrence
 
@@ -33,7 +35,7 @@ def field_false_tracks(d, S, seed="chord"):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dir", default="/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/ADCNN/pipelines/heliolinc/run_realfp")
+    ap.add_argument("--dir", default=str(OUTPUTS / "runs/run_realfp"))
     ap.add_argument("--scores", nargs="+", type=float, default=[0.80, 0.85, 0.90, 0.95])
     ap.add_argument("--max-arc-min", type=float, default=30.0)
     ap.add_argument("--len-db-min", type=float, default=6.0)

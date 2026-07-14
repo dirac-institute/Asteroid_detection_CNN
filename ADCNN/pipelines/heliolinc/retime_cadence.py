@@ -17,13 +17,15 @@ Outputs retime_map.csv: visit, mjd_retimed (+ the empirical delta-t distribution
 """
 from __future__ import annotations
 import argparse
+import os
 import sqlite3
 from pathlib import Path
 import numpy as np
 import pandas as pd
 
-REPO = Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN")
-DEFAULT_DB = REPO / "ADCNN/pipelines/heliolinc/run_test2/sorcha/baseline_v2.0_1yr.db"
+REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
+OUTPUTS = Path(os.environ.get("ADCNN_OUTPUTS") or REPO / "outputs")
+DEFAULT_DB = OUTPUTS / "runs/run_test2/sorcha/baseline_v2.0_1yr.db"
 FOV_DEG = 1.5          # group observations into ~field pointings for the same-night pair gaps
 DT_MAX_MIN = 60.0      # a same-night PAIR gap is < this (longer = different visit sequence / night)
 

@@ -35,6 +35,7 @@ import pandas as pd
 # Repo root: $ADCNN_REPO if set, else inferred from this file's location (ADCNN/inference/ -> root).
 # Portable across deployments; only override ADCNN_REPO for a relocated checkout.
 REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[2])
+OUTPUTS = Path(os.environ.get("ADCNN_OUTPUTS") or REPO / "outputs")  # all runtime OUTPUT goes here
 sys.path.insert(0, str(REPO))  # so spawned workers can import ADCNN regardless of cwd
 OBSCODE = os.environ.get("OBSCODE", "I11")  # Rubin Observatory / LSST (override via OBSCODE env or --obscode)
 COLFORMAT = "IDCOL 1\nMJDCOL 2\nRACOL 3\nDECCOL 4\nMAGCOL 5\nBANDCOL 6\nOBSCODECOL 7\n"
@@ -222,13 +223,13 @@ def main():
     from ADCNN.config import ACTIVE as _PIPE  # active pipeline (ADCNN_PIPELINE selects; default=current)
     _seg_def = str(_PIPE.seg_model) if _PIPE else str(REPO / "models/current/segmentation_scripted.pt")
     _cnn_def = str(_PIPE.cnn_model) if _PIPE else str(REPO / "models/current/cnn_postproc.pt")
-    ap.add_argument("--manifest", default=str(REPO / "ADCNN/pipelines/heliolinc/run_disco/manifest.csv"))
+    ap.add_argument("--manifest", default=str(OUTPUTS / "runs/run_disco/manifest.csv"))
     ap.add_argument("--seg-model", default=_seg_def, help="stage-1 segmentation (default: active pipeline)")
     ap.add_argument("--cnn", default=_cnn_def, help="focal-cutout CNN model (default: active pipeline)")
     ap.add_argument("--cnn-thr", type=float, default=None, help="CNN operating point (default = val2-calibrated 'threshold' in the cnn_postproc.json sidecar)")
     ap.add_argument("--prefetch", type=int, default=6, help="FITS reads in flight per GPU (bounds memory)")
     ap.add_argument("--n-gpus", type=int, default=0, help="0 = all visible")
-    ap.add_argument("--out", default=str(REPO / "ADCNN/pipelines/heliolinc/run_disco/adcnn_dets.csv"))
+    ap.add_argument("--out", default=str(OUTPUTS / "runs/run_disco/adcnn_dets.csv"))
     ap.add_argument("--limit", type=int, default=0, help="first N panels only (smoke test)")
     ap.add_argument("--inject", default=None, help="inject.csv (objID,visit,detector,x,y,trail_length,beta,mag): add synthetic trails into each panel before detection (test2 injection-recovery)")
     ap.add_argument("--obscode", default=None, help="observatory MPC code carried into the catalogue (default $OBSCODE or I11)")

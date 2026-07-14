@@ -12,12 +12,14 @@ Fallback: if writeable dp2_prep is denied, parquet under <run>/butler_fallback/ 
 """
 from __future__ import annotations
 import argparse
+import os
 from pathlib import Path
 
 RUN = "u/mrakovci/ADCNN/samenight_link_lambda"
 TYPES = ("samenight_lambda_detections", "samenight_lambda_curve", "samenight_lambda_result")
-FALLBACK = Path("/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/"
-                "ADCNN/pipelines/heliolinc/run_lambda/butler_fallback")
+REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
+OUTPUTS = Path(os.environ.get("ADCNN_OUTPUTS") or REPO / "outputs")
+FALLBACK = OUTPUTS / "runs/run_lambda/butler_fallback"
 
 
 def get_butler():
