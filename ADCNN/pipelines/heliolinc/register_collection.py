@@ -8,7 +8,7 @@ reproducible record as a few EMPTY-DIMENSION table datasets (one per type per ru
                                   objID/SNR truth, re-timed mjd, trail geometry) over all fields
   - samenight_lambda_curve      : lambda(S), completeness(S) by SNR bin
   - samenight_lambda_result     : the headline S* (lambda=1.35e-3) + metadata
-Fallback: if writeable dp2_prep is denied, parquet under <run>/butler_fallback/ with the same names.
+Fallback: if the writeable Butler repo is denied, parquet under <run>/butler_fallback/ with the same names.
 """
 from __future__ import annotations
 import argparse
@@ -26,7 +26,7 @@ def get_butler():
     """Return (butler, ok) -- ok False => use disk fallback."""
     try:
         from lsst.daf.butler import Butler
-        return Butler("dp2_prep", writeable=True), True
+        return Butler(os.environ.get("BUTLER_REPO", "main"), writeable=True), True
     except Exception as e:
         print(f"[register] writeable Butler unavailable ({type(e).__name__}: {str(e)[:120]}) -> disk fallback", flush=True)
         return None, False

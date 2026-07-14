@@ -15,17 +15,23 @@ chain (``ADCNN/pipelines/heliolinc/sn_run.slurm``) with three additions:
   * runtime telemetry    -- wall time per stage, per visit, per detector-pass, per night
                             (``runtime_report.json`` + a QA plot).
 
-Stages (mirroring sn_run.slurm): build-manifest (LSST stack env) -> detect (GPU sbatch) ->
-build-known (LSST stack env) -> mask-flags -> link-2visit (-> tracks.csv + ranked alerts.jsonl).
+Stages (the productized night recipe, mirroring sn_run.slurm + the 2026-07 embargo campaign):
+build-manifest (LSST stack env; --tracts or --visits) -> detect (GPU sbatch, resumable) ->
+build-known (LSST stack env; --no-known writes a header-only catalog for post-hoc SkyBoT labelling)
+-> mask-flags -> static-catalog (DRP object tables; NO-coverage night => static veto OFF fail-safe)
+-> link-2visit (frozen alert op + candidate floor 0.5 + static/train/stationarity vetoes, FLAG never
+drop, --report QA package) -> pixel-vet -> mpc-crossmatch (network; failure WARNs, never fails).
 
 Speed contract: the linker's cheap prefilters (chord seeding + partial-chi2 pre-gates) only PRUNE
 candidates; the final orbit-fit chi2 and physical_check gates stay exact -- final measurements and
 gates are reproducible, approximation is for pruning only.
 
     # dry-run one night (prints the exact chain, runs the integrity preflight):
-    python -m ADCNN.pipelines.run_night --pipeline models/current/pipeline.json \
-        --butler-repo dp2_prep --collection LSSTCam/runs/.../DM-XXXXX --night 20250718 \
-        --tracts 8489 --out run_night_20250718 --dry-run
+    ./adcnn night --butler-repo embargo --collection LSSTCam/runs/prompt/.../ApPipe/... \
+        --night 20260628 --visits 2026062800001-2026062800400 --dry-run
+    # DRP re-run of a tract night:
+    ./adcnn night --butler-repo main --collection LSSTCam/runs/DRP/.../DM-51933 \
+        --night 20250718 --tracts 8489
 """
 from __future__ import annotations
 
@@ -38,7 +44,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from ADCNN.config import load_pipeline, REPO
+from ADCNN.config import OUTPUTS, load_pipeline, REPO
 
 HL = REPO / "ADCNN" / "pipelines" / "heliolinc"
 DEFAULT_ALERT_OP = HL / "op_2v_alert.json"
@@ -176,36 +182,53 @@ def _manifest_counts(manifest):
 def run(a):
     pipe = load_pipeline(a.pipeline)
     op_point = a.op_point or (str(DISCOVERY_OP) if a.discovery else str(pipe.alert_op_point or DEFAULT_ALERT_OP))
-    out = Path(a.out)
+    out = Path(a.out) if a.out else OUTPUTS / "runs" / f"run_night_{a.night}"
     out.mkdir(parents=True, exist_ok=True)
     manifest = out / "manifest.csv"
     print(f"[run_night] pipeline={pipe.name} provenance={pipe.provenance}")
-    print(f"  night={a.night} tracts={a.tracts} collection={a.collection}")
+    print(f"  night={a.night} tracts={a.tracts} visits={a.visits} collection={a.collection}")
+    print(f"  out={out}")
     print(f"  op-point={op_point} ({'DISCOVERY' if op_point == str(DISCOVERY_OP) else 'ALERT (default)'})")
 
     preflight(pipe, op_point, discovery=a.discovery)
 
+    # the sbatch detect stage resolves models via the ACTIVE pipeline config -- pin it to the
+    # release we just preflighted so --export=ALL propagates the same choice to the GPU job.
+    os.environ["ADCNN_PIPELINE"] = str(pipe.source)
+    os.environ.setdefault("ADCNN_REPO", str(REPO))
+
     lsst = a.lsst_setup
     tm = _Timer()
+    static_catalog = out / "static_catalog.parquet"
 
     def s_manifest():
         if manifest.exists() and manifest.stat().st_size > 0 and not a.force:
             print("      (manifest exists; reuse)"); return
+        sel = (f"--visits {a.visits}" if a.visits else
+               f"--tracts {a.tracts} --day-start {a.night} --day-end {int(a.night)+1}")
         cmd = (f"bash -c '{lsst}; cd {REPO}; python -m ADCNN.pipelines.heliolinc.build_manifest "
-               f"--tracts {a.tracts} --day-start {a.night} --day-end {int(a.night)+1} "
-               f"--butler-repo {shlex.quote(a.butler_repo)} --collection {shlex.quote(a.collection)} "
-               f"--out {manifest}'")
+               f"{sel} --butler-repo {shlex.quote(a.butler_repo)} "
+               f"--collection {shlex.quote(a.collection)} --out {manifest}'")
         _bash(cmd, a.dry_run)
 
     def s_detect():
-        cmd = (f"RUN={out} sbatch --export=ALL,RUN,SEGMODEL={pipe.seg_model},CNNMODEL={pipe.cnn_model} "
-               f"--wait {HL/'sn_detect.slurm'}   # GPU; resumable; -> {out}/adcnn_dets.csv")
+        dets = out / "adcnn_dets.csv"
+        if dets.exists() and dets.stat().st_size > 0 and not a.force:
+            print("      (adcnn_dets.csv exists; reuse)"); return
+        cmd = (f"cd {REPO} && RUN={out} sbatch --export=ALL,RUN --wait {HL/'sn_detect.slurm'}"
+               f"   # GPU; per-panel .done resume; -> {out}/adcnn_dets.csv")
         _bash(cmd, a.dry_run)
 
     def s_known():
         kn = out / "known.csv"
         if kn.exists() and not a.force:
             print("      (known.csv exists; reuse)"); return
+        if a.no_known:
+            # embargo/prompt recipe: header-only catalog; label post-hoc (SkyBoT / mpc-crossmatch).
+            print("      (--no-known: writing header-only known.csv)")
+            if not a.dry_run:
+                kn.write_text("ObjID,ra,dec,mjd\n")
+            return
         cmd = (f"bash -c '{lsst}; cd {REPO}; python -m ADCNN.pipelines.heliolinc.build_known_catalog "
                f"--manifest {manifest} --butler-repo {shlex.quote(a.butler_repo)} "
                f"--collection {shlex.quote(a.collection)} --out {kn}'")
@@ -216,10 +239,29 @@ def run(a):
                f"--manifest {manifest} --out {out}/adcnn_dets_masked.csv --workers {a.mask_workers}")
         _bash(cmd, a.dry_run)
 
+    def s_static():
+        # bright-static template-footprint catalog (DRP coadd object tables). A night with NO DRP
+        # coverage fail-louds in the builder => static veto OFF fail-safe (link without the catalog).
+        if a.no_static_veto:
+            print("      (--no-static-veto: skipped)"); return
+        if static_catalog.exists() and not a.force:
+            print("      (static_catalog.parquet exists; reuse)"); return
+        cmd = (f"bash -c '{lsst}; cd {REPO}; python -m ADCNN.linking.build_static_catalog "
+               f"--dets {out}/adcnn_dets_masked.csv --out {static_catalog}'")
+        try:
+            _bash(cmd, a.dry_run)
+        except subprocess.CalledProcessError:
+            print("      WARN: static-catalog build failed (no DRP coverage for these tracts?) -- "
+                  "linking WITHOUT the static veto (documented fail-safe).")
+
     def s_link():
+        floor = f" --score-candidate-min {a.candidate_floor}" if a.candidate_floor else ""
+        static = f" --static-catalog {static_catalog}" if static_catalog.exists() and not a.no_static_veto else ""
+        report = "" if a.no_report else " --report"
         cmd = (f"python -m ADCNN.linking.link_2visit --dets {out}/adcnn_dets_masked.csv "
                f"--known {out}/known.csv --out {out}/tracks.csv --op-point {op_point} "
-               f"--npt 2 --min-epochs 2 --seed-2v chord --alerts-out {out}/alerts.jsonl")
+               f"--npt 2 --min-epochs 2 --seed-2v chord{floor}{static} --train-veto{report} "
+               f"--alerts-out {out}/alerts.jsonl")
         _bash(cmd, a.dry_run)
 
     def s_vet():
@@ -230,12 +272,25 @@ def run(a):
                f"--dets {out}/adcnn_dets_masked.csv --in-place")
         _bash(cmd, a.dry_run)
 
+    def s_mpc():
+        # MPC conesearch crossmatch of the ranked alerts (network). Best-effort: WARN, never fail.
+        if a.no_crossmatch:
+            print("      (--no-crossmatch: skipped)"); return
+        cmd = (f"python -m ADCNN.pipelines.heliolinc.mpc_crossmatch --alerts {out}/alerts.jsonl "
+               f"--out {out}/mpc_matches.csv")
+        try:
+            _bash(cmd, a.dry_run)
+        except subprocess.CalledProcessError:
+            print("      WARN: mpc_crossmatch failed (network?) -- alerts stand, label later.")
+
     tm.stage("build_manifest", s_manifest)
     tm.stage("detect", s_detect)
     tm.stage("build_known", s_known)
     tm.stage("mask_flags", s_mask)
+    tm.stage("static_catalog", s_static)
     tm.stage("link_2visit", s_link)
     tm.stage("pixel_vet", s_vet)
+    tm.stage("mpc_crossmatch", s_mpc)
 
     n_visits, n_passes = _manifest_counts(manifest)
     rep = tm.report(n_visits, n_passes)
@@ -260,17 +315,32 @@ def _plot_runtime(out, rep, dry):
             print(f"  (runtime plot deferred: {e})")
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--pipeline", default=None, help="frozen release pipeline.json (default: active/current)")
-    ap.add_argument("--butler-repo", default="dp2_prep")
-    ap.add_argument("--collection", required=True, help="Butler collection (the diffim DRP run)")
+    ap.add_argument("--butler-repo", default=os.environ.get("BUTLER_REPO", "main"),
+                    help="Butler repo: 'main' (DRP diffims) or 'embargo' (prompt processing); "
+                         "default $BUTLER_REPO or main")
+    ap.add_argument("--collection", required=True, help="diffim collection (DRP run or prompt ApPipe)")
     ap.add_argument("--night", required=True, help="day_obs, e.g. 20250718")
-    ap.add_argument("--tracts", required=True, help="tract list/ranges, e.g. 8489 or 8487-8493")
-    ap.add_argument("--out", required=True, help="output run dir")
+    sel = ap.add_mutually_exclusive_group(required=True)
+    sel.add_argument("--tracts", help="tract list/ranges, e.g. 8489 or 8487-8493 (DRP night)")
+    sel.add_argument("--visits", help="visit id list/ranges (prompt/embargo night; from queryDatasets)")
+    ap.add_argument("--out", default=None,
+                    help="output run dir (default: <outputs>/runs/run_night_<night>)")
     ap.add_argument("--op-point", default=None, help="override the link op-point JSON")
     ap.add_argument("--discovery", action="store_true",
                     help="use the discovery op (link_op_point.json, mfsnr>=10) instead of the alert op")
+    ap.add_argument("--candidate-floor", type=float, default=0.5,
+                    help="two-tier CANDIDATE score floor for the linker (--score-candidate-min); "
+                         "the shipped night product uses 0.5; 0 = single-floor op only")
+    ap.add_argument("--no-known", action="store_true",
+                    help="write a header-only known.csv (prompt/embargo recipe: label post-hoc)")
+    ap.add_argument("--no-static-veto", action="store_true",
+                    help="skip the bright-static template-footprint veto stage")
+    ap.add_argument("--no-report", action="store_true",
+                    help="skip the in-run QA report package (overlays + stamps + ALERT_REPORT.md)")
+    ap.add_argument("--no-crossmatch", action="store_true", help="skip the MPC conesearch crossmatch")
     ap.add_argument("--obscode", default="I11")
     ap.add_argument("--mask-workers", type=int, default=64)
     ap.add_argument("--lsst-setup",
@@ -278,7 +348,7 @@ def main():
                             "setup lsst_distrib")
     ap.add_argument("--force", action="store_true", help="rebuild manifest/known even if present")
     ap.add_argument("--dry-run", action="store_true", help="print the chain + run preflight; no compute")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     run(a)
 
 

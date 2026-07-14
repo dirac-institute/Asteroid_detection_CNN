@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import logging
 import pickle
+import os
 import sys
 import time
 import warnings
@@ -30,7 +31,7 @@ warnings.filterwarnings("ignore")
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
-DEF_REPO = "dp2_prep"
+DEF_REPO = os.environ.get("BUTLER_REPO", "main")   # dp2_prep purged 2026-06; live diffims = main DRP
 DEF_DIFFIM_COLLECTION = "LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage4"
 DEF_DIFFIM_TYPE = "difference_image"          # DP2 renamed the AlardLupton output to this.
 DEF_STAGE2 = "LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage2"

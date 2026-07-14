@@ -66,7 +66,7 @@ def main():
         print(f"[realfp] excluding {len(excl)} leakage visits from {a.exclude_visits_from}", flush=True)
 
     STAGE4 = a.collection
-    b = Butler("dp2_prep")
+    b = Butler(os.environ.get("BUTLER_REPO", "main"))
     skymap = b.get("skyMap", skymap=a.skymap, collections="skymaps")
 
     if a.from_diffim_cadence:

@@ -36,14 +36,30 @@ live under `models/v2_D/` (md5s in `v2_D_release.json`); `models/current/` point
 
 ## Single entry point
 
+Everything runs through the repo-root `./adcnn` executable (equivalently
+`python -m ADCNN`, run from the repo root):
+
 ```bash
-python -m ADCNN.pipelines.run_experiment --stage report        # reproduce the headline (CPU)
-python -m ADCNN.pipelines.run_experiment --stages all --dry-run # the full ordered plan
+./adcnn night --collection <DRP-collection> --night <mjd> --tracts <t> [--dry-run]
+                                                                # score one real night end-to-end
+./adcnn experiment --stage report                               # reproduce the headline (CPU)
+./adcnn experiment --stages all --dry-run                       # the full ordered dev plan
+./adcnn train-and-validate --stages calibrate-mflen,threshold-select,freeze \
+    --out models/current_candidate                              # freeze a release (CPU)
 ```
 
-One driver for every stage (`data`, `train-stage1`, `train-stage2`, `calibrate-mflen`,
-`detect`, `alert-eval`, `report`); CPU stages run in-process, GPU/Butler stages print the
-exact `sbatch` command. See **REPRODUCE.md**, **TRAINING_PROTOCOL.md**, **EVALUATION_PROTOCOL.md**.
+Three commands, mapping onto the two top-level pipelines plus the dev driver:
+
+| command | pipeline | what it does |
+|---|---|---|
+| `night` | `ADCNN.pipelines.run_night` | **APPLY** a frozen release to one night: manifest → GPU detect → known catalog → mask → static-veto catalog → 2-visit linking (frozen alert op, FLAG-never-drop vetoes) → pixel vet → MPC crossmatch |
+| `train-and-validate` | `ADCNN.pipelines.train_and_validate` | **DECIDE + FREEZE**: train, re-derive calibrations, regenerate validation curves, select + confirm the operating point, freeze a self-contained release dir |
+| `experiment` | `ADCNN.pipelines.run_experiment` | detector-development driver (`data`, `train-stage1`, `train-stage2`, `calibrate-mflen`, `detect`, `alert-eval`, `report`) |
+
+CPU stages run in-process; GPU/Butler stages print the exact `sbatch` command (submit with
+`--submit` where supported). All runtime output lands under repo-root `outputs/`
+(override with `ADCNN_OUTPUTS`); see `outputs/README.md`. Details:
+**REPRODUCE.md**, **TRAINING_PROTOCOL.md**, **EVALUATION_PROTOCOL.md**.
 
 ### Underlying stage modules (`python -m ADCNN.pipelines.<name>`)
 

@@ -1235,7 +1235,7 @@ def main():
                     "cnn_train(+cnn_val), test — from one deterministic panel partition. See module docstring.",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     # --- Butler / region (needs stage3=template_coadd + stage2=PVI/sources) ---
-    ap.add_argument("--repo", type=str, default="dp2_prep")
+    ap.add_argument("--repo", type=str, default=os.environ.get("BUTLER_REPO", "main"))
     ap.add_argument("--collections", nargs="+",
                     default=["LSSTCam/runs/DRP/DP2/v30_0_6_rc1/DM-53881/stage3",
                              "LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage2"],

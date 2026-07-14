@@ -8,7 +8,7 @@ Sorcha needs but that don't affect the in-FOV apparition set are filled permissi
 rotSkyPos 0 (we keep the footprint orientation neutral). The ephemeris/FOV stage uses ar_ang_fov.
 """
 from __future__ import annotations
-import argparse, sqlite3
+import argparse, os, sqlite3
 import numpy as np, pandas as pd
 from lsst.daf.butler import Butler
 from lsst.sphgeom import LonLat
@@ -20,7 +20,7 @@ def main():
     ap.add_argument("--dec-min", type=float, default=-8.0); ap.add_argument("--dec-max", type=float, default=-2.0)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
-    b = Butler("dp2_prep")
+    b = Butler(os.environ.get("BUTLER_REPO", "main"))
     rows = []
     for r in b.registry.queryDimensionRecords("visit", where="instrument='LSSTCam'"):
         try:

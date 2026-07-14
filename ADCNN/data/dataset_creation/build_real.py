@@ -77,7 +77,7 @@ _SKIP = (Exception, NoWorkFound, UnprocessableDataError,
          UpstreamFailureNoWorkFound)
 
 # DP2 Butler — overridable via CLI.
-DEF_REPO = "dp2_prep"
+DEF_REPO = os.environ.get("BUTLER_REPO", "main")   # dp2_prep purged 2026-06; live diffims = main DRP
 DEF_STAGE3 = "LSSTCam/runs/DRP/DP2/v30_0_6_rc1/DM-53881/stage3"
 DEF_STAGE2 = "LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage2"
 DEF_SKYMAP = "lsst_cells_v2"

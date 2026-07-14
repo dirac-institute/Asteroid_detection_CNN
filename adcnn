@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# adcnn -- top-level entry point for the ADCNN pipelines (thin wrapper over `python -m ADCNN`).
+#
+#     ./adcnn night --collection <coll> --night <mjd> --tracts <t> [--dry-run]
+#     ./adcnn experiment --stage report
+#     ./adcnn train-and-validate --stages calibrate-mflen,threshold-select,freeze --out <dir>
+#
+# It cds to the repo root before exec so that (a) `python -m ADCNN` resolves the package and
+# (b) slurm submissions inherit the right CWD (every `#SBATCH -o outputs/logs/%x...` is
+# relative to the submission directory). Uses whatever `python` is active -- activate the
+# asteroid_cnn conda env first (LSST-stack stages shell out to their own env internally).
+set -euo pipefail
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export ADCNN_REPO="${ADCNN_REPO:-$REPO}"
+cd "$REPO"
+exec python -m ADCNN "$@"

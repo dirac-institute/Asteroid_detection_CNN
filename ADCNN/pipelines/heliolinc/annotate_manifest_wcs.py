@@ -111,8 +111,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True, help="dir with manifest_*.csv")
     ap.add_argument("--collection", required=True)
-    ap.add_argument("--butler-repo", default=os.environ.get("BUTLER_REPO", "dp2_prep"),
-                    help="Butler repo holding the diffim SkyWcs (default $BUTLER_REPO or dp2_prep)")
+    ap.add_argument("--butler-repo", default=os.environ.get("BUTLER_REPO", "main"),
+                    help="Butler repo holding the diffim SkyWcs (default $BUTLER_REPO or main)")
     ap.add_argument("--tol", type=float, default=0.1, help="max validation residual (arcsec)")
     ap.add_argument("--workers", type=int, default=32)
     a = ap.parse_args()

@@ -19,7 +19,7 @@ from ADCNN.inference.diffim_io import datastore_uri
 
 REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
 STAGE4 = os.environ.get("BUTLER_COLLECTION", "LSSTCam/runs/DRP/DP2/v30_0_0/DM-53881/stage4")
-BUTLER_REPO = os.environ.get("BUTLER_REPO", "dp2_prep")
+BUTLER_REPO = os.environ.get("BUTLER_REPO", "main")
 
 
 def parse_tracts(s):
@@ -46,7 +46,7 @@ def main():
     ap.add_argument("--exclude", default=str(REPO / "ADCNN/pipelines/heliolinc/train_visit_detector.csv"),
                     help="CSV of train (visit,detector) to exclude (leakage guard)")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--butler-repo", default=BUTLER_REPO, help="Butler repo (default $BUTLER_REPO or dp2_prep)")
+    ap.add_argument("--butler-repo", default=BUTLER_REPO, help="Butler repo (default $BUTLER_REPO or main)")
     ap.add_argument("--collection", default=STAGE4, help="diffim collection (default $BUTLER_COLLECTION)")
     a = ap.parse_args()
 
