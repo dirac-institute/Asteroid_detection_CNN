@@ -8,7 +8,9 @@
 # It cds to the repo root before exec so that (a) `python -m ADCNN` resolves the package and
 # (b) slurm submissions inherit the right CWD (every `#SBATCH -o outputs/logs/%x...` is
 # relative to the submission directory). Uses whatever `python` is active -- activate the
-# asteroid_cnn conda env first (LSST-stack stages shell out to their own env internally).
+# asteroid_cnn conda env first with `conda activate` (NOT a manual PATH prepend: loadLSST.sh
+# displaces a conda-activated env in the LSST-stack subshells, but a manually prepended bin
+# dir stays in front and shadows the stack python -> ModuleNotFoundError: sqlalchemy).
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export ADCNN_REPO="${ADCNN_REPO:-$REPO}"

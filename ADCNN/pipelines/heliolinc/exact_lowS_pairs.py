@@ -38,8 +38,15 @@ PCHECK = dict(pa_tol_deg=20.0, lin_rms_arcsec=1.0, min_epochs=2, pa_tol_2v_deg=1
 SOLARDAY = 86400.0
 
 
-def _cache_path(d_dir, k, smin):
-    return f"{d_dir}/_nomfsnr_cache/{k}_smin{smin}_v3exact.json"
+def _cache_dirname(len_db_min):
+    """Non-default length floors get their OWN cache dir (standard filenames inside, so
+    threshold_selection --cache-dir reads them unchanged); the frozen floor-6 caches at
+    _nomfsnr_cache/ can never be clobbered by a floor sweep."""
+    return "_nomfsnr_cache" if float(len_db_min) == 6.0 else f"_nomfsnr_cache_len{len_db_min:g}"
+
+
+def _cache_path(d_dir, k, smin, len_db_min=6.0):
+    return f"{d_dir}/{_cache_dirname(len_db_min)}/{k}_smin{smin}_v3exact.json"
 
 
 def field_pairs_exact(ds, exptime_s=30.0):
@@ -126,8 +133,8 @@ def field_pairs_exact(ds, exptime_s=30.0):
     return np.concatenate(out_i), np.concatenate(out_j), n_seed
 
 
-def eval_field_exact(d_dir, k, smin):
-    _, d, recoverable = sw._load_field(d_dir, k, 6.0, 0.3, 2, 1e9)
+def eval_field_exact(d_dir, k, smin, len_db_min=6.0):
+    _, d, recoverable = sw._load_field(d_dir, k, len_db_min, 0.3, 2, 1e9)
     ds = d[d.score >= smin].reset_index(drop=True)
     if not len(ds):
         return [], recoverable, 0
@@ -155,12 +162,12 @@ def eval_field_exact(d_dir, k, smin):
 
 
 def _worker(args):
-    d_dir, k, smin = args
-    cp = _cache_path(d_dir, k, smin)
+    d_dir, k, smin, len_db_min = args
+    cp = _cache_path(d_dir, k, smin, len_db_min)
     if os.path.exists(cp):
         return k, "cached"
     try:
-        rows, recoverable, n_surv = eval_field_exact(d_dir, k, smin)
+        rows, recoverable, n_surv = eval_field_exact(d_dir, k, smin, len_db_min)
         json.dump({"rows": rows, "rec": recoverable, "n_seed": n_surv, "n_capped": 0, "fp_f": 1.0},
                   open(cp + ".tmp", "w"))
         os.replace(cp + ".tmp", cp)
@@ -175,6 +182,9 @@ def main():
                     help="run dir with adcnn_dets_masked_*.csv; fresh caches land in <dir>/_nomfsnr_cache "
                          "(the FROZEN 82-field caches are committed at ADCNN/pipelines/heliolinc/run_lambda/)")
     ap.add_argument("--smin", type=float, default=0.6)
+    ap.add_argument("--len-db-min", type=float, default=6.0,
+                    help="detection length floor applied at load (frozen op: 6.0). Non-default values "
+                         "write to <dir>/_nomfsnr_cache_len<f>/ so the frozen caches stay intact")
     ap.add_argument("--workers", type=int, default=40)
     ap.add_argument("--validate", action="store_true",
                     help="run at smin=0.8 and diff FP/TP counts per field against the v2 cache")
@@ -191,10 +201,10 @@ def main():
             tag = "OK" if (tp == tp2 and fp == fp2) else "MISMATCH"
             print(f"[validate] field {k}: vec tp={tp} fp={fp} | python tp={tp2} fp={fp2} -> {tag}", flush=True)
         return
-    os.makedirs(f"{a.dir}/_nomfsnr_cache", exist_ok=True)
+    os.makedirs(f"{a.dir}/{_cache_dirname(a.len_db_min)}", exist_ok=True)
     from concurrent.futures import ProcessPoolExecutor, as_completed
     with ProcessPoolExecutor(max_workers=a.workers) as ex:
-        for fut in as_completed([ex.submit(_worker, (a.dir, k, a.smin)) for k in ks]):
+        for fut in as_completed([ex.submit(_worker, (a.dir, k, a.smin, a.len_db_min)) for k in ks]):
             k, msg = fut.result()
             print(f"[field {k}] {msg}", flush=True)
     print("DONE", flush=True)
