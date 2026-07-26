@@ -404,7 +404,7 @@ def physical_check(dets, members, exptime_s=30.0, pa_tol_deg=20.0, speed_frac=0.
                    lin_rms_arcsec=1.0, min_epochs=2, epoch_gap_s=120.0, pa_tol_2v_deg=10.0,
                    orbit_check_2v=True, orbit_rate_tol=0.5, score_2v_min=0.0, max_arc_2v_min=None,
                    perp_collinear_2v_arcsec=None, snr_frac_2v=None, chi2_2v_max=None, chi2_sig=None,
-                   mfsnr_min_2v=None, rate_lo_2v=None, rate_hi_2v=10.0):
+                   mfsnr_min_2v=None, rate_lo_2v=None, rate_hi_2v=10.0, out=None):
     """Defensible physical consistency of a candidate track (rejects chance/trail-angle-coincidence
     false links that pass position clustering). Requires:
       1. >= min_epochs DISTINCT time epochs (merge sub-epoch_gap snaps — back-to-back snaps are one).
@@ -481,6 +481,8 @@ def physical_check(dets, members, exptime_s=30.0, pa_tol_deg=20.0, speed_frac=0.
     # AND-cuts admit): ~2.5x more completeness at the SAME false rate (measured on real DP2 FP), no ML.
     if two_visit and chi2_2v_max is not None:
         c2, ci = pair_chi2(g, exptime_s, chi2_sig)
+        if out is not None:      # expose the numeric gate statistic (the return is a display string)
+            out["chi2"] = float(c2)
         if not ci["bound"]:
             return False, f"2v no bound orbit", n_ep
         if not np.isfinite(c2) or c2 > chi2_2v_max:   # NaN must REJECT (a>max comparison is False for NaN)
@@ -1126,6 +1128,7 @@ def main():
             # runs once per candidate either way), more memory (results held before claiming).
             evald = []
             for members in cand:
+                st = {}
                 ok, info, n_ep = physical_check(
                     dn, members, a.exptime, pa_tol_deg=a.pa_tol, lin_rms_arcsec=a.max_rms,
                     min_epochs=a.min_epochs, epoch_gap_s=a.epoch_gap_s, pa_tol_2v_deg=a.pa_tol_2v,
@@ -1133,9 +1136,10 @@ def main():
                     orbit_rate_tol=a.orbit_rate_tol, perp_collinear_2v_arcsec=None, snr_frac_2v=None,
                     chi2_2v_max=(a.chi2_2v_max if a.chi2_2v_max and a.chi2_2v_max > 0 else None),
                     mfsnr_min_2v=(a.mfsnr_min_2v if a.mfsnr_min_2v and a.mfsnr_min_2v > 0 else None),
-                    rate_lo_2v=a.rate_lo_2v, rate_hi_2v=a.rate_hi_2v)
+                    rate_lo_2v=a.rate_lo_2v, rate_hi_2v=a.rate_hi_2v, out=st)
                 if ok:
-                    evald.append((-len(members), float((info or {}).get("chi2", np.inf)), members))
+                    # 3+visit candidates carry no pair chi2; they sort first on length anyway.
+                    evald.append((-len(members), float(st.get("chi2", np.inf)), members))
             evald.sort(key=lambda t: (t[0], t[1]))     # longest first, then best chi2
             cand = [m for _l, _c, m in evald]
             print(f"[trail-link] claim-order=quality: {len(cand)} candidates passed, "
