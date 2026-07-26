@@ -313,13 +313,27 @@ def _rank_class(a):
     return 0
 
 
-def write_alerts(alerts, path, *, append=False, top_n=None):
+def write_alerts(alerts, path, *, append=False, top_n=None, rank_by="priority"):
     """Write/append alert dicts to a JSONL file (one compact json object per line), ranked by
     (demotion class, priorityScore desc) so the headline is line 1 and no veto-flagged alert
     outranks a clean one. `top_n` caps the emitted count (per-night follow-up budget) AFTER the
-    ordering, so demoted alerts are cut first; the cut is logged, never silent."""
-    ranked = sorted(alerts, key=lambda a: (_rank_class(a), -a.get("priorityScore", 0.0),
-                                           a.get("priority", 9)))
+    ordering, so demoted alerts are cut first; the cut is logged, never silent.
+
+    ``rank_by='chi2'`` orders instead by the 2-visit orbit-fit chi2 (best geometry first) within
+    the same demotion classes. MEASURED on real night 20260630: in an 11,150-alert low-threshold
+    stream the four validated production alerts present sit at ranks 3771/8687/9352/9942 under
+    the default priority ordering (which is dominated by the weakest member's CNN score at that
+    volume) but at 22/56/126/260 -- top 2.3% -- under chi2. Use it for the QA stream; the frozen
+    science product keeps 'priority'."""
+    if rank_by == "chi2":
+        def _key(a):
+            c = (a.get("orbit") or {}).get("chi2")
+            return (_rank_class(a), float(c) if c is not None else float("inf"),
+                    -a.get("priorityScore", 0.0))
+    else:
+        def _key(a):
+            return (_rank_class(a), -a.get("priorityScore", 0.0), a.get("priority", 9))
+    ranked = sorted(alerts, key=_key)
     if top_n is not None and len(ranked) > top_n:
         print(f"[alerts] top-N cap: emitting {top_n} of {len(ranked)} alerts", flush=True)
         ranked = ranked[:top_n]

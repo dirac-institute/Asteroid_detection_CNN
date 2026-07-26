@@ -287,17 +287,31 @@ def run(a):
         sd = out / "stream"
         sd.mkdir(parents=True, exist_ok=True)
         static = f" --static-catalog {static_catalog}" if static_catalog.exists() and not a.no_static_veto else ""
-        _bash(f"python -m ADCNN.linking.link_2visit --dets {out}/adcnn_dets_masked.csv "
-              f"--known {out}/known.csv --out {sd}/tracks.csv --op-point {stream_op} "
-              f"--npt 2 --min-epochs 2 --seed-2v chord{static} --train-veto "
-              f"--alerts-out {sd}/alerts.jsonl", a.dry_run)
-        _bash(f"python -m ADCNN.qa.alert_cutouts --alerts {sd}/alerts.jsonl "
-              f"--dets {out}/adcnn_dets_masked.csv --out {sd}/cutouts.npz "
-              f"--stamp-px {a.stream_stamp_px} --workers {a.stream_workers} "
-              f"--limit {a.stream_top_n}", a.dry_run)
+        # per-substage resume: a re-run after an interrupted night must not redo the ~45 min link
+        # or the S3 cutout pass. --force redoes everything (same convention as manifest/known).
+        if a.force or not (sd / "alerts.jsonl").exists():
+            # claim-order=quality + rank-by=chi2 are what make a LOW-THRESHOLD stream trustworthy:
+            # at 11k alerts the seeding-order claim loses validated alerts to spurious pairs, and
+            # the CNN-score ordering buries the survivors near the bottom (both measured on 20260630).
+            _bash(f"python -m ADCNN.linking.link_2visit --dets {out}/adcnn_dets_masked.csv "
+                  f"--known {out}/known.csv --out {sd}/tracks.csv --op-point {stream_op} "
+                  f"--npt 2 --min-epochs 2 --seed-2v chord{static} --train-veto "
+                  f"--claim-order quality --rank-by chi2 "
+                  f"--alerts-out {sd}/alerts.jsonl", a.dry_run)
+        else:
+            print(f"      (stream alerts.jsonl exists -- reusing; --force to relink)")
+        if a.force or not (sd / "cutouts.npz").exists():
+            _bash(f"python -m ADCNN.qa.alert_cutouts --alerts {sd}/alerts.jsonl "
+                  f"--dets {out}/adcnn_dets_masked.csv --out {sd}/cutouts.npz "
+                  f"--stamp-px {a.stream_stamp_px} --workers {a.stream_workers} "
+                  f"--limit {a.stream_top_n}", a.dry_run)
+        else:
+            print(f"      (stream cutouts.npz exists -- reusing; --force to re-cut)")
         _bash(f"python -m ADCNN.qa.alert_sheets --alerts {sd}/alerts.jsonl "
               f"--cutouts {sd}/cutouts.npz --out-dir {sd}/sheets "
               f"--per-sheet {a.stream_per_sheet} --limit {a.stream_top_n}", a.dry_run)
+        _bash(f"python -m ADCNN.qa.stream_summary --alerts {sd}/alerts.jsonl "
+              f"--out {sd}/stream_summary.json", a.dry_run)
 
     def s_mpc():
         # MPC conesearch crossmatch of the ranked alerts (network). Best-effort: WARN, never fail.

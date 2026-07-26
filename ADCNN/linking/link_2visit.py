@@ -815,6 +815,18 @@ def main():
     ap.add_argument("--mfsnr-min-2v", type=float, default=10.0, help="2-visit photometric purity floor: fainter member's matched-filter TRAIL SNR >= this. CADENCE-DEPENDENT DIAL: at the realistic ~34-min WFD pair gap the residual chance-FP need this floor to reach 3sigma -> keep ~10. At RAPID cadence (deep-drilling/short dt, sparse FP) the geometric chi2 alone carries purity -> lower to ~5 to recover the fast FAINT movers (mf_snr ~ point_SNR*sqrt(PSF/trail_area) is low for long trails, so a high floor rejects exactly them). 0 to disable")
     ap.add_argument("--rate-lo-2v", type=float, default=1.0, help="2-visit NEO apparent-rate band low (deg/day)")
     ap.add_argument("--rate-hi-2v", type=float, default=8.0, help="2-visit NEO apparent-rate band high (deg/day)")
+    ap.add_argument("--claim-order", choices=["seed", "quality"], default="seed",
+                    help="which candidate claims a shared detection when tracks overlap. 'seed' "
+                         "(default, frozen behaviour): longest-first, ties broken by SEEDING order. "
+                         "'quality': longest-first, ties broken by best orbit-fit chi2 -- matters in a "
+                         "low-threshold stream, where a spurious pair can otherwise claim a member "
+                         "before the good pair is reached (measured: 8 of 12 production alerts lost "
+                         "from an 11k-alert stream on night 20260630)")
+    ap.add_argument("--rank-by", choices=["priority", "chi2"], default="priority",
+                    help="alert stream ordering. 'priority' (default, frozen): tier + weakest-member "
+                         "CNN score. 'chi2': best orbit-fit geometry first -- at stream volume the "
+                         "CNN-score ordering buries validated alerts (ranks 3771-9942 of 11150 vs "
+                         "22-260 by chi2 on night 20260630)")
     ap.add_argument("--seed-2v", choices=["chord"], default="chord", help="2-visit seeding (position-chord pairs + trail verify). Only 'chord' is supported; the inferior trail-velocity 'cluster' path was removed")
     ap.add_argument("--pos-tol-3v", type=float, default=0.05, help="3+visit cluster radius (deg); 0.05 ~doubles 3v recall vs 0.017 at zero purity cost (physical_check is the gate)")
     ap.add_argument("--rate-min", type=float, default=0.3, help="chord seeder min apparent rate (deg/day)")
@@ -1103,6 +1115,31 @@ def main():
                         wide = prefilter_2v_pairs(dn, wide, a.chi2_2v_max, exptime_s=a.exptime)
                     cand += extend_to_triplets(dn, wide, pos_tol_arcsec=a.promote_tol_arcsec)
         cand.sort(key=len, reverse=True)   # 3+visit (longer) first; a triplet's dets aren't re-reported as pairs
+        if a.claim_order == "quality":
+            # Two-pass claim: evaluate EVERY candidate, then let the best-fitting one claim its
+            # detections. The single-pass path below sorts by length only, so among 2-visit pairs
+            # (all length 2, stable sort) the SEEDING order decides who claims a detection. That is
+            # harmless at the frozen op (few survivors) and wrong in a low-threshold stream, where a
+            # spurious pair can claim a member before the good pair is reached: MEASURED on night
+            # 20260630, only 4 of the 12 production alerts survived into an 11,150-alert stream, the
+            # other 8 having had a member claimed by another pairing. Same compute (physical_check
+            # runs once per candidate either way), more memory (results held before claiming).
+            evald = []
+            for members in cand:
+                ok, info, n_ep = physical_check(
+                    dn, members, a.exptime, pa_tol_deg=a.pa_tol, lin_rms_arcsec=a.max_rms,
+                    min_epochs=a.min_epochs, epoch_gap_s=a.epoch_gap_s, pa_tol_2v_deg=a.pa_tol_2v,
+                    score_2v_min=0.0, max_arc_2v_min=a.max_arc_2v_min,
+                    orbit_rate_tol=a.orbit_rate_tol, perp_collinear_2v_arcsec=None, snr_frac_2v=None,
+                    chi2_2v_max=(a.chi2_2v_max if a.chi2_2v_max and a.chi2_2v_max > 0 else None),
+                    mfsnr_min_2v=(a.mfsnr_min_2v if a.mfsnr_min_2v and a.mfsnr_min_2v > 0 else None),
+                    rate_lo_2v=a.rate_lo_2v, rate_hi_2v=a.rate_hi_2v)
+                if ok:
+                    evald.append((-len(members), float((info or {}).get("chi2", np.inf)), members))
+            evald.sort(key=lambda t: (t[0], t[1]))     # longest first, then best chi2
+            cand = [m for _l, _c, m in evald]
+            print(f"[trail-link] claim-order=quality: {len(cand)} candidates passed, "
+                  f"claiming best-chi2 first", flush=True)
         npass = 0; used = set()
         for members in cand:
             # NB: purity is carried by the chi2 gate; the independent AND-threshold discriminators
@@ -1200,7 +1237,8 @@ def main():
         # then geometric/detector/photometric quality); stationarity-vetoed alerts are DEMOTED after the
         # clean ones (published, never dropped). Publish ALL by default; --cap-alerts opts in to
         # truncating at the --alerts-top-n follow-up budget.
-        write_alerts(alerts, apath, top_n=(a.alerts_top_n if a.cap_alerts else None))
+        write_alerts(alerts, apath, top_n=(a.alerts_top_n if a.cap_alerts else None),
+                     rank_by=a.rank_by)
         n2new = sum(1 for al in alerts if al["tier"] == "2visit" and al["status"] == "NEW")
         nveto = sum(1 for al in alerts if (al.get("stationarity") or {}).get("vetoStationary"))
         nsv = sum(1 for al in alerts if (al.get("staticVeto") or {}).get("nStaticMembers", 0) >= 1)

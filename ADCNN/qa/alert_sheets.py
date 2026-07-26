@@ -24,6 +24,7 @@ import argparse, html, json, os, sys
 import numpy as np
 
 VMIN, VMAX = -2.0, 6.0          # sigma stretch: saturates at 6 sigma so sub-5sigma trails show
+EP_PER_BLOCK = 2                # epochs drawn per alert block (the 2-visit product; 3v shows first 2)
 
 
 def _classify(al):
@@ -32,7 +33,7 @@ def _classify(al):
     return classify(al)[0].replace("-FLAGGED", "")
 
 
-def render(alerts_path, cutouts_npz, out_dir, per_sheet=50, limit=None, dpi=110, cols_max=4):
+def render(alerts_path, cutouts_npz, out_dir, per_sheet=48, limit=None, dpi=110, grid_cols=6):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -56,20 +57,29 @@ def render(alerts_path, cutouts_npz, out_dir, per_sheet=50, limit=None, dpi=110,
     for s in range(n_sheets):
         lo, hi = s * per_sheet, min((s + 1) * per_sheet, len(alerts))
         block = alerts[lo:hi]
-        ncol = min(cols_max, max(len(al["epochs"]) for al in block))
-        fig, axs = plt.subplots(len(block), ncol,
-                                figsize=(2.05 * ncol, 2.25 * len(block)), squeeze=False)
-        for r, al in enumerate(block):
-            rank = lo + r
+        # GRID of per-alert blocks (each block = that alert's 2 epochs side by side). One alert per
+        # ROW would make a 50-alert sheet ~12000 px tall -- unscannable; a grid keeps every sheet a
+        # single viewable page.
+        nbx = grid_cols
+        nby = int(np.ceil(len(block) / nbx))
+        fig, axs = plt.subplots(nby, nbx * EP_PER_BLOCK,
+                                figsize=(1.32 * nbx * EP_PER_BLOCK, 1.55 * nby), squeeze=False)
+        for ax in axs.ravel():
+            ax.set_xticks([]); ax.set_yticks([]); ax.axis("off")
+        for i, al in enumerate(block):
+            rank = lo + i
+            by, bx = divmod(i, nbx)
             m = al.get("motion") or {}
-            for c in range(ncol):
-                ax = axs[r][c]
-                ax.set_xticks([]); ax.set_yticks([])
+            for c in range(EP_PER_BLOCK):
+                ax = axs[by][bx * EP_PER_BLOCK + c]
                 if c >= len(al["epochs"]):
-                    ax.axis("off"); continue
+                    continue
+                ax.axis("on"); ax.set_xticks([]); ax.set_yticks([])
+                for sp in ax.spines.values():
+                    sp.set_color("#666"); sp.set_linewidth(0.4)
                 idx = by_alert.get(rank, {}).get(c)
                 if idx is None:
-                    ax.text(0.5, 0.5, "no pixels", ha="center", va="center", fontsize=6)
+                    ax.text(0.5, 0.5, "no pixels", ha="center", va="center", fontsize=5)
                     continue
                 st = stamps[idx].astype(np.float32)
                 ax.imshow(st, origin="lower", cmap="gray",
@@ -83,18 +93,18 @@ def render(alerts_path, cutouts_npz, out_dir, per_sheet=50, limit=None, dpi=110,
                 ax.plot([ctr, ctr], [ctr + g, ctr + g + arm], color="#ff4040", lw=0.7)
                 ax.set_xlim(-0.5, k - 0.5); ax.set_ylim(-0.5, k - 0.5)
                 ep = al["epochs"][c]
-                if c == 0:
-                    ax.set_ylabel(f"#{rank}", fontsize=7, rotation=0, labelpad=13, va="center")
-                ax.set_title(f"v{ep['visit']} snr{ep.get('snr', float('nan')):.1f} "
-                             f"s{ep.get('score', float('nan')):.2f}", fontsize=5.5, pad=1.5)
-            # per-row summary in the last used cell's right margin
-            axs[r][min(len(al["epochs"]), ncol) - 1].text(
-                1.03, 0.5, f"{_classify(al)}\n{m.get('rate_degday', float('nan')):.2f}°/d\n"
-                           f"PA {m.get('pa_deg', float('nan')):.0f}°",
-                transform=axs[r][min(len(al["epochs"]), ncol) - 1].transAxes,
-                fontsize=5.5, va="center", ha="left")
-        fig.suptitle(f"alerts {lo}–{hi - 1} of {len(alerts)}  (rank order, best first)", fontsize=9)
-        fig.tight_layout(rect=[0, 0, 0.95, 0.985])
+                ax.set_title(f"snr{ep.get('snr', float('nan')):.1f} "
+                             f"s{ep.get('score', float('nan')):.2f}", fontsize=4.6, pad=1.0)
+            # one caption per block, under its left stamp: rank, class, rate. Everything the eye
+            # needs to triage without cross-referencing the table.
+            cl = _classify(al)
+            axs[by][bx * EP_PER_BLOCK].set_xlabel(
+                f"#{rank} {cl if cl != 'CLEAN' else ''} {m.get('rate_degday', float('nan')):.1f}°/d",
+                fontsize=5.0, labelpad=1.2,
+                color="#202020" if cl == "CLEAN" else "#c05000")
+        fig.suptitle(f"alerts {lo}–{hi - 1} of {len(alerts)}   (rank order, best first; "
+                     f"each pair = one alert's two epochs)", fontsize=8)
+        fig.tight_layout(rect=[0, 0, 1, 0.985], h_pad=0.55, w_pad=0.12)
         png = os.path.join(out_dir, f"sheet_{s:04d}.png")
         fig.savefig(png, dpi=dpi); plt.close(fig)
         manifest[os.path.basename(png)] = [a["alertId"] for a in block]
@@ -139,11 +149,13 @@ def main(argv=None):
     ap.add_argument("--alerts", required=True)
     ap.add_argument("--cutouts", required=True, help="npz from ADCNN.qa.alert_cutouts")
     ap.add_argument("--out-dir", required=True)
-    ap.add_argument("--per-sheet", type=int, default=50)
+    ap.add_argument("--per-sheet", type=int, default=48, help="alerts per contact sheet")
+    ap.add_argument("--grid-cols", type=int, default=6, help="alert BLOCKS across a sheet")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--dpi", type=int, default=110)
     a = ap.parse_args(argv)
-    render(a.alerts, a.cutouts, a.out_dir, per_sheet=a.per_sheet, limit=a.limit, dpi=a.dpi)
+    render(a.alerts, a.cutouts, a.out_dir, per_sheet=a.per_sheet, limit=a.limit, dpi=a.dpi,
+           grid_cols=a.grid_cols)
 
 
 if __name__ == "__main__":
