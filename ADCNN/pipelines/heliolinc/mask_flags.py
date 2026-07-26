@@ -16,8 +16,17 @@ import os
 import warnings
 for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ.setdefault(_v, "1")
+import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
+
+# invoked BY PATH from the night/calibration slurm scripts, so sys.path[0] is this directory and
+# `import ADCNN` fails -- in this process AND in every pool worker, where _panel_flags imports
+# ADCNN.inference.diffim_io to read pixels. Repo idiom.
+_REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
+if str(_REPO) not in sys.path:
+    sys.path.insert(0, str(_REPO))
+
 import numpy as np
 import pandas as pd
 
