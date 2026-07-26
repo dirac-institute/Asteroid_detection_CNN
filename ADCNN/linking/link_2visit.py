@@ -912,7 +912,11 @@ def main():
                  "pa_tol_2v": "--pa-tol-2v", "max_rms": "--max-rms", "pos_tol_3v": "--pos-tol-3v",
                  "max_arc_2v_min": "--max-arc-2v-min", "promote_3v": "--promote-3v",
                  "promote_tol_arcsec": "--promote-tol-arcsec", "alerts_top_n": "--alerts-top-n",
-                 "seed_3v_arc_min": "--seed-3v-arc-min", "promote_from": "--promote-from"}
+                 "seed_3v_arc_min": "--seed-3v-arc-min", "promote_from": "--promote-from",
+                 # len_db_min used to live ONLY as a CLI default, so the trail-length floor was the
+                 # one op parameter an op-point file could not state. Additive: the frozen alert op
+                 # carries no such key, so its behaviour is byte-unchanged (floor stays 6.0).
+                 "len_db_min": "--len-db-min"}
         _applied = [f"{k}={_op[k]}" for k, fl in _flag.items()
                     if k in _op and fl not in sys.argv and (setattr(a, k, _op[k]) or True)]
         if _applied:

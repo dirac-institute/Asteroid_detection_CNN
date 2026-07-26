@@ -18,6 +18,6 @@ cd "$REPO"
 source ADCNN/pipelines/heliolinc/pipeline_config.sh   # S3 env for embargo manifests (harmless for posix)
 python ADCNN/pipelines/heliolinc/probe_seg_response.py \
   --panels "${PANELS:-150}" --trails-per-panel "${TRAILS:-24}" \
-  ${RUN:+--run "$RUN"} \
+  ${RUN:+--run "$RUN"} ${CNN:+--cnn "$CNN"} \
   --out "${OUT:-outputs/runs/run_probe_seg}"
 echo "PROBE SLURM DONE"

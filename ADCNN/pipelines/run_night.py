@@ -182,6 +182,7 @@ def _manifest_counts(manifest):
 def run(a):
     pipe = load_pipeline(a.pipeline)
     op_point = a.op_point or (str(DISCOVERY_OP) if a.discovery else str(pipe.alert_op_point or DEFAULT_ALERT_OP))
+    stream_op = a.stream_op_point or str(REPO / "ADCNN/pipelines/heliolinc/op_2v_stream.json")
     out = Path(a.out) if a.out else OUTPUTS / "runs" / f"run_night_{a.night}"
     out.mkdir(parents=True, exist_ok=True)
     manifest = out / "manifest.csv"
@@ -272,6 +273,32 @@ def run(a):
                f"--dets {out}/adcnn_dets_masked.csv --in-place")
         _bash(cmd, a.dry_run)
 
+    def s_stream():
+        """Low-threshold ALERT STREAM: a SECOND, additive linking pass at the stream op-point,
+        ranked and rendered to browsable contact sheets for nightly visual QA.
+
+        Deliberately separate from the frozen alert product above: that one stays byte-for-byte
+        the validated science output, this one trades purity for volume (~10k/night) so the night
+        can be eyeballed for systematics and the cut chosen later, downstream, on the ranked list.
+        Images go through the panel-ordered cutout cache (ADCNN.qa.alert_cutouts), so pixel I/O
+        is O(panels) not O(alerts) -- the only way 10k alerts is affordable."""
+        if a.no_stream:
+            print("      (--no-stream: skipped)"); return
+        sd = out / "stream"
+        sd.mkdir(parents=True, exist_ok=True)
+        static = f" --static-catalog {static_catalog}" if static_catalog.exists() and not a.no_static_veto else ""
+        _bash(f"python -m ADCNN.linking.link_2visit --dets {out}/adcnn_dets_masked.csv "
+              f"--known {out}/known.csv --out {sd}/tracks.csv --op-point {stream_op} "
+              f"--npt 2 --min-epochs 2 --seed-2v chord{static} --train-veto "
+              f"--alerts-out {sd}/alerts.jsonl", a.dry_run)
+        _bash(f"python -m ADCNN.qa.alert_cutouts --alerts {sd}/alerts.jsonl "
+              f"--dets {out}/adcnn_dets_masked.csv --out {sd}/cutouts.npz "
+              f"--stamp-px {a.stream_stamp_px} --workers {a.stream_workers} "
+              f"--limit {a.stream_top_n}", a.dry_run)
+        _bash(f"python -m ADCNN.qa.alert_sheets --alerts {sd}/alerts.jsonl "
+              f"--cutouts {sd}/cutouts.npz --out-dir {sd}/sheets "
+              f"--per-sheet {a.stream_per_sheet} --limit {a.stream_top_n}", a.dry_run)
+
     def s_mpc():
         # MPC conesearch crossmatch of the ranked alerts (network). Best-effort: WARN, never fail.
         if a.no_crossmatch:
@@ -291,6 +318,7 @@ def run(a):
     tm.stage("link_2visit", s_link)
     tm.stage("pixel_vet", s_vet)
     tm.stage("mpc_crossmatch", s_mpc)
+    tm.stage("alert_stream", s_stream)
 
     n_visits, n_passes = _manifest_counts(manifest)
     rep = tm.report(n_visits, n_passes)
@@ -341,6 +369,16 @@ def main(argv=None):
     ap.add_argument("--no-report", action="store_true",
                     help="skip the in-run QA report package (overlays + stamps + ALERT_REPORT.md)")
     ap.add_argument("--no-crossmatch", action="store_true", help="skip the MPC conesearch crossmatch")
+    ap.add_argument("--no-stream", action="store_true",
+                    help="skip the low-threshold alert stream (the ~10k/night ranked QA product)")
+    ap.add_argument("--stream-op-point", default=None,
+                    help="stream linking op-point JSON (default: ADCNN/pipelines/heliolinc/op_2v_stream.json)")
+    ap.add_argument("--stream-top-n", type=int, default=10000,
+                    help="how many top-ranked stream alerts get cutouts + sheets (linking keeps ALL; "
+                         "this only bounds the image render)")
+    ap.add_argument("--stream-per-sheet", type=int, default=50)
+    ap.add_argument("--stream-stamp-px", type=int, default=96, help="cutout size in px (96 = 19.2 arcsec)")
+    ap.add_argument("--stream-workers", type=int, default=16)
     ap.add_argument("--obscode", default="I11")
     ap.add_argument("--mask-workers", type=int, default=64)
     ap.add_argument("--lsst-setup",

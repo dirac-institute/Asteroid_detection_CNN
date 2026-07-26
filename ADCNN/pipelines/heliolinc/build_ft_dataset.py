@@ -68,8 +68,8 @@ def stage_catalog(a):
             x = rng.uniform(EDGE, 4072 - EDGE, n_tr)
             y = rng.uniform(EDGE, 4000 - EDGE, n_tr)
             beta = rng.uniform(0, 360, n_tr)
-            length = np.exp(rng.uniform(np.log(6.0), np.log(50.0), n_tr))
-            snr = np.exp(rng.uniform(np.log(2.0), np.log(30.0), n_tr))
+            length = np.exp(rng.uniform(np.log(a.len_min), np.log(a.len_max), n_tr))
+            snr = np.exp(rng.uniform(np.log(a.snr_min), np.log(a.snr_max), n_tr))
             mag = np.clip(_mag_for_snr(snr, a.m5, length), 18.0, 27.0)
             for i in range(n_tr):
                 rows_all.append(dict(split=split, field=int(r.field), visit=int(r.visit),
@@ -214,6 +214,10 @@ def main():
     ap.add_argument("--trails-min", type=int, default=15)
     ap.add_argument("--trails-max", type=int, default=30)
     ap.add_argument("--m5", type=float, default=24.0)
+    ap.add_argument("--len-min", type=float, default=6.0, help="trail length log-uniform range (px)")
+    ap.add_argument("--len-max", type=float, default=50.0)
+    ap.add_argument("--snr-min", type=float, default=2.0, help="snr_target log-uniform range")
+    ap.add_argument("--snr-max", type=float, default=30.0)
     ap.add_argument("--seed", type=int, default=7000)
     ap.add_argument("--exclude-catalog", default=None,
                     help="csv with visit,detector to EXCLUDE (leakage-clean stage-2 set disjoint from stage-1)")

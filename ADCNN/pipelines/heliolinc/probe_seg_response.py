@@ -67,6 +67,8 @@ def main():
     ap.add_argument("--m5", type=float, default=24.0)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--cnn-thr", type=float, default=0.01)
+    ap.add_argument("--cnn", default=None,
+                    help="override stage-2 CNN weights (default: active pipeline) -- for A/B probes of candidate models")
     ap.add_argument("--device", default=None, help="cuda|cpu (default: cuda if available)")
     a = ap.parse_args()
 
@@ -82,7 +84,7 @@ def main():
     from ADCNN.utils.helpers import draw_one_line
 
     dev = torch.device(a.device or ("cuda" if torch.cuda.is_available() else "cpu"))
-    seg_ckpt = str(PIPE.seg_model); cnn_pt = str(PIPE.cnn_model)
+    seg_ckpt = str(PIPE.seg_model); cnn_pt = str(a.cnn or PIPE.cnn_model)
     pname = getattr(PIPE, "name", "?")
     print(f"[probe] pipeline={pname} seg={seg_ckpt} cnn={cnn_pt} device={dev}", flush=True)
     model = torch.jit.load(seg_ckpt, map_location=dev).eval()
