@@ -11,9 +11,17 @@ to a real orbit through the real sky (the field is only a realistic-FP substrate
 the images are real, the orbit geometry is synthetic-but-self-consistent.
 """
 from __future__ import annotations
-import argparse, json, warnings
+import argparse, json, os, sys, warnings
 warnings.filterwarnings("ignore")
 from pathlib import Path
+
+# invoked BY PATH from the inject slurm (`python ADCNN/pipelines/heliolinc/sim_orbits.py`), so
+# sys.path[0] is this directory and `import ADCNN` fails -- which matters since read_panels reads
+# pixels through ADCNN.inference.diffim_io (added by the Butler-IO consolidation). Repo idiom.
+_REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
+if str(_REPO) not in sys.path:
+    sys.path.insert(0, str(_REPO))
+
 import numpy as np, pandas as pd
 from astropy.io import fits
 from astropy.wcs import WCS
@@ -64,6 +72,7 @@ def read_panels(manifest):
     m = pd.read_csv(manifest)
     panels = []
     nbad = 0
+    first_err = None
     for _, r in m.iterrows():
         try:
             wj = _wcs_from_json(getattr(r, "wcs_json", None))
@@ -81,11 +90,14 @@ def read_panels(manifest):
                 nbad += 1; continue
             panels.append(dict(visit=int(r.visit), detector=int(r.detector), mjd=float(mjd),
                                wcs=w, nx=nx, ny=ny, cra=float(c[0]), cdec=float(c[1])))
-        except Exception:
+        except Exception as e:
             nbad += 1
+            if first_err is None:                 # a silent `continue` here hid a ModuleNotFoundError
+                first_err = f"{type(e).__name__}: {str(e)[:160]}"
             continue
     if nbad:
-        print(f"[orbits] WARNING: {nbad}/{len(m)} panels skipped (unreadable or no celestial WCS)", flush=True)
+        print(f"[orbits] WARNING: {nbad}/{len(m)} panels skipped (unreadable or no celestial WCS)"
+              f"{' | first failure: ' + first_err if first_err else ''}", flush=True)
     if not panels:
         raise SystemExit("[orbits] FATAL: 0 usable panels -- no celestial WCS? (annotate_manifest_wcs.py)")
     print(f"[orbits] {len(panels)}/{len(m)} manifest panels usable", flush=True)

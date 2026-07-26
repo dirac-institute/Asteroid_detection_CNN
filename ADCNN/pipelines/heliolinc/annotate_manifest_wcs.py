@@ -23,8 +23,15 @@ Usage (stack env):  python annotate_manifest_wcs.py --run run_blind --collection
 import os
 for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
     os.environ[_v] = "1"
-import argparse, json, glob
+import argparse, json, glob, sys
 from multiprocessing import Pool
+from pathlib import Path
+
+# run as a PATH (`python ADCNN/pipelines/heliolinc/annotate_manifest_wcs.py`) sys.path[0] is this
+# directory, so neither this process nor its Pool workers can `import ADCNN`. Repo idiom.
+_REPO = Path(os.environ.get("ADCNN_REPO") or Path(__file__).resolve().parents[3])
+if str(_REPO) not in sys.path:
+    sys.path.insert(0, str(_REPO))
 
 import numpy as np
 import pandas as pd
@@ -96,12 +103,16 @@ def _init(collection, tol, butler_repo):
 def _annotate_row(task):
     """Worker: one panel -> (idx, wcs_json|None, residual, err|None)."""
     i, visit, detector, fits_path = task
-    from astropy.io import fits as afits
     try:
         w = _B.get("difference_image.wcs", instrument="LSSTCam", visit=visit,
                    detector=detector, collections=_COLL)
-        hdr1 = afits.getheader(fits_path, 1)
-        cards, res = _cards_from_skywcs(w, int(hdr1["NAXIS1"]), int(hdr1["NAXIS2"]), _TOL)
+        # open_diffim (not astropy.io.fits) so S3 datastores work: an embargo path is
+        # s3://embargo@rubin-summit-users/..., whose profile@bucket form astropy rejects
+        # outright ("Invalid bucket name"), which failed EVERY panel of a prompt-processing night.
+        from ADCNN.inference.diffim_io import open_diffim
+        with open_diffim(fits_path, memmap=True) as h:
+            hdr1 = h[1].header
+            cards, res = _cards_from_skywcs(w, int(hdr1["NAXIS1"]), int(hdr1["NAXIS2"]), _TOL)
         return i, json.dumps(cards), res, None
     except Exception as e:
         return i, None, 0.0, f"{type(e).__name__}: {str(e)[:140]}"
