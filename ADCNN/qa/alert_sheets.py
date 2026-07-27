@@ -23,7 +23,19 @@ import argparse, html, json, os, sys
 
 import numpy as np
 
-VMIN, VMAX = -2.0, 6.0          # sigma stretch: saturates at 6 sigma so sub-5sigma trails show
+VMIN, VMAX = -2.0, 6.0    # sigma stretch: saturates at 6 sigma so sub-5sigma trails show
+
+
+def _num(d, key, default=float("nan")):
+    """dict.get(k, default) returns None when the key EXISTS and is null -- which some alert
+    fields are -- and None then blows up an f-string format spec. Coerce to a float always."""
+    v = d.get(key, default) if isinstance(d, dict) else default
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return float("nan")
+
+
 EP_PER_BLOCK = 2                # epochs drawn per alert block (the 2-visit product; 3v shows first 2)
 
 
@@ -93,13 +105,13 @@ def render(alerts_path, cutouts_npz, out_dir, per_sheet=48, limit=None, dpi=110,
                 ax.plot([ctr, ctr], [ctr + g, ctr + g + arm], color="#ff4040", lw=0.7)
                 ax.set_xlim(-0.5, k - 0.5); ax.set_ylim(-0.5, k - 0.5)
                 ep = al["epochs"][c]
-                ax.set_title(f"snr{ep.get('snr', float('nan')):.1f} "
-                             f"s{ep.get('score', float('nan')):.2f}", fontsize=4.6, pad=1.0)
+                ax.set_title(f"snr{_num(ep, 'snr'):.1f} "
+                             f"s{_num(ep, 'score'):.2f}", fontsize=4.6, pad=1.0)
             # one caption per block, under its left stamp: rank, class, rate. Everything the eye
             # needs to triage without cross-referencing the table.
             cl = _classify(al)
             axs[by][bx * EP_PER_BLOCK].set_xlabel(
-                f"#{rank} {cl if cl != 'CLEAN' else ''} {m.get('rate_degday', float('nan')):.1f}°/d",
+                f"#{rank} {cl if cl != 'CLEAN' else ''} {_num(m, 'rate_degday'):.1f}°/d",
                 fontsize=5.0, labelpad=1.2,
                 color="#202020" if cl == "CLEAN" else "#c05000")
         fig.suptitle(f"alerts {lo}–{hi - 1} of {len(alerts)}   (rank order, best first; "
@@ -120,9 +132,9 @@ def render(alerts_path, cutouts_npz, out_dir, per_sheet=48, limit=None, dpi=110,
         m = al.get("motion") or {}
         rows.append(f"<tr><td>{rank}</td><td>{html.escape(str(al['alertId']))}</td>"
                     f"<td>{_classify(al)}</td><td>{al.get('confidenceTier', '')}</td>"
-                    f"<td>{al.get('priorityScore', float('nan')):.3f}</td>"
-                    f"<td>{m.get('rate_degday', float('nan')):.2f}</td>"
-                    f"<td>{m.get('pa_deg', float('nan')):.0f}</td></tr>")
+                    f"<td>{_num(al, 'priorityScore'):.3f}</td>"
+                    f"<td>{_num(m, 'rate_degday'):.2f}</td>"
+                    f"<td>{_num(m, 'pa_deg'):.0f}</td></tr>")
     imgs = "\n".join(f'<h3 id="s{i}">{n}</h3><img src="{n}" loading="lazy" style="max-width:100%">'
                      for i, n in enumerate(sorted(manifest)))
     with open(os.path.join(out_dir, "index.html"), "w") as f:

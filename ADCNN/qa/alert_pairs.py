@@ -33,6 +33,17 @@ import argparse, json, os, sys
 import numpy as np
 
 VMIN, VMAX = -2.0, 6.0
+
+
+def _num(d, key, default=float("nan")):
+    """dict.get(k, default) returns None when the key EXISTS and is null -- which some alert
+    fields are -- and None then blows up an f-string format spec. Coerce to a float always."""
+    v = d.get(key, default) if isinstance(d, dict) else default
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return float("nan")
+
 PIXSCALE = 0.2
 EPCOL = ["#ff3b30", "#38d6ff", "#ffd23b", "#8cff6b"]      # per-epoch colour
 
@@ -125,9 +136,9 @@ def render(alerts_path, cutouts_npz, out_dir, top_n=None, dpi=120, workers=1, _s
                 _trail_outline(ax, zends[k], EPCOL[i % len(EPCOL)], lw=1.3, pad=3.5)
             for sp in ax.spines.values():
                 sp.set_color(EPCOL[i % len(EPCOL)]); sp.set_linewidth(1.6)
-            ax.set_title(f"epoch {i}  v{ep['visit']}\nsnr {ep.get('snr', float('nan')):.1f}  "
-                         f"score {ep.get('score', float('nan')):.2f}  "
-                         f"len {float(ep.get('trail_len_px') or 0):.0f}px",
+            ax.set_title(f"epoch {i}  v{ep['visit']}\nsnr {_num(ep, 'snr'):.1f}  "
+                         f"score {_num(ep, 'score'):.2f}  "
+                         f"len {_num(ep, 'trail_len_px', 0.0):.0f}px",
                          fontsize=6.8, color=EPCOL[i % len(EPCOL)], pad=2.5)
 
         # ---- wide view: both positions, outlined, joined -------------------------------------
@@ -187,8 +198,8 @@ def render(alerts_path, cutouts_npz, out_dir, top_n=None, dpi=120, workers=1, _s
         o = al.get("orbit") or {}
         pr_t = f"P(real) {pr:.3f}   " if isinstance(pr, float) else ""
         fig.suptitle(f"rank {rank}   {al['alertId']}   [{cls}]   {pr_t}"
-                     f"{m.get('rate_degday', float('nan')):.2f}°/d   PA {m.get('pa_deg', float('nan')):.0f}°   "
-                     f"chi2 {o.get('chi2', float('nan')):.1f}   arc {al.get('arcMin', float('nan')):.0f} min",
+                     f"{_num(m, 'rate_degday'):.2f}°/d   PA {_num(m, 'pa_deg'):.0f}°   "
+                     f"chi2 {_num(o, 'chi2'):.1f}   arc {_num(al, 'arcMin'):.0f} min",
                      fontsize=8, y=0.99)
         fig.tight_layout(rect=[0, 0, 1, 0.90])
         pstr = f"p{pr:.2f}" if isinstance(pr, float) else "pNA"

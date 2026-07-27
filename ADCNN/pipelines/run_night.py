@@ -323,13 +323,16 @@ def run(a):
         # per-substage resume: a re-run after an interrupted night must not redo the ~45 min link
         # or the S3 cutout pass. --force redoes everything (same convention as manifest/known).
         if a.force or not (sd / "alerts.jsonl").exists():
-            # claim-order=quality + rank-by=chi2 are what make a LOW-THRESHOLD stream trustworthy:
-            # at 11k alerts the seeding-order claim loses validated alerts to spurious pairs, and
-            # the CNN-score ordering buries the survivors near the bottom (both measured on 20260630).
+            # claim-order + rank-by are what make a LOW-THRESHOLD stream trustworthy: at 11k alerts
+            # the seeding-order claim loses real pairs to spurious ones. Which PRIORITY to claim by
+            # was settled against INJECTED TRUTH on the calibration night, not against the 12 frozen
+            # science alerts -- that proxy preferred chi2 (11/12 vs 9/12 preserved) but truth prefers
+            # P(real): 987 vs 936 real pairs recovered of 5,226 pairable, at higher purity too
+            # (8.39% vs 8.02%). The proxy is not truth; none of those 12 has an MPC match.
             _bash(f"python -m ADCNN.linking.link_2visit --dets {out}/adcnn_dets_masked.csv "
                   f"--known {out}/known.csv --out {sd}/tracks.csv --op-point {stream_op} "
                   f"--npt 2 --min-epochs 2 --seed-2v chord{static} --train-veto "
-                  f"--claim-order quality --rank-by chi2 "
+                  f"--claim-order preal --rank-by chi2 "
                   f"--alerts-out {sd}/alerts.jsonl", a.dry_run)
         else:
             print(f"      (stream alerts.jsonl exists -- reusing; --force to relink)")

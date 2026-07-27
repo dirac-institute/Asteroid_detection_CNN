@@ -817,13 +817,18 @@ def main():
     ap.add_argument("--mfsnr-min-2v", type=float, default=10.0, help="2-visit photometric purity floor: fainter member's matched-filter TRAIL SNR >= this. CADENCE-DEPENDENT DIAL: at the realistic ~34-min WFD pair gap the residual chance-FP need this floor to reach 3sigma -> keep ~10. At RAPID cadence (deep-drilling/short dt, sparse FP) the geometric chi2 alone carries purity -> lower to ~5 to recover the fast FAINT movers (mf_snr ~ point_SNR*sqrt(PSF/trail_area) is low for long trails, so a high floor rejects exactly them). 0 to disable")
     ap.add_argument("--rate-lo-2v", type=float, default=1.0, help="2-visit NEO apparent-rate band low (deg/day)")
     ap.add_argument("--rate-hi-2v", type=float, default=8.0, help="2-visit NEO apparent-rate band high (deg/day)")
-    ap.add_argument("--claim-order", choices=["seed", "quality"], default="seed",
+    ap.add_argument("--claim-order", choices=["seed", "quality", "preal"], default="seed",
                     help="which candidate claims a shared detection when tracks overlap. 'seed' "
                          "(default, frozen behaviour): longest-first, ties broken by SEEDING order. "
                          "'quality': longest-first, ties broken by best orbit-fit chi2 -- matters in a "
                          "low-threshold stream, where a spurious pair can otherwise claim a member "
                          "before the good pair is reached (measured: 8 of 12 production alerts lost "
-                         "from an 11k-alert stream on night 20260630)")
+                         "from an 11k-alert stream on night 20260630). 'preal' breaks ties by the "
+                         "CALIBRATED P(real) instead of chi2 -- chi2 alone let a veto-flagged pair "
+                         "steal a member from a validated alert")
+    ap.add_argument("--preal-model", default=None,
+                    help="calibrated reality model for --claim-order preal "
+                         "(default ADCNN/calibration/alert_ranking_model.json)")
     ap.add_argument("--rank-by", choices=["priority", "chi2"], default="priority",
                     help="alert stream ordering. 'priority' (default, frozen): tier + weakest-member "
                          "CNN score. 'chi2': best orbit-fit geometry first -- at stream volume the "
@@ -1117,7 +1122,15 @@ def main():
                         wide = prefilter_2v_pairs(dn, wide, a.chi2_2v_max, exptime_s=a.exptime)
                     cand += extend_to_triplets(dn, wide, pos_tol_arcsec=a.promote_tol_arcsec)
         cand.sort(key=len, reverse=True)   # 3+visit (longer) first; a triplet's dets aren't re-reported as pairs
-        if a.claim_order == "quality":
+        _PR_COEF = _PR_DOM = None
+        _p_real = None
+        if a.claim_order == "preal":
+            from ADCNN.qa.rerank_alerts import p_real as _p_real, DEFAULT_MODEL as _PR_MODEL
+            _m = json.load(open(a.preal_model or _PR_MODEL))
+            _PR_COEF, _PR_DOM = _m["coef"], _m.get("domain")
+            print(f"[trail-link] claim priority = calibrated P(real) "
+                  f"(model fit on night {_m.get('night')})", flush=True)
+        if a.claim_order in ("quality", "preal"):
             # Two-pass claim: evaluate EVERY candidate, then let the best-fitting one claim its
             # detections. The single-pass path below sorts by length only, so among 2-visit pairs
             # (all length 2, stable sort) the SEEDING order decides who claims a detection. That is
@@ -1139,11 +1152,26 @@ def main():
                     rate_lo_2v=a.rate_lo_2v, rate_hi_2v=a.rate_hi_2v, out=st)
                 if ok:
                     # 3+visit candidates carry no pair chi2; they sort first on length anyway.
-                    evald.append((-len(members), float(st.get("chi2", np.inf)), members))
-            evald.sort(key=lambda t: (t[0], t[1]))     # longest first, then best chi2
+                    c2 = float(st.get("chi2", np.inf))
+                    if a.claim_order == "preal":
+                        # Claim by the CALIBRATED reality probability, not chi2 alone. Measured on
+                        # 20260630: ordering by chi2 let a VETO-FLAGGED pair (final rank 8627) claim
+                        # a member of validated science alert 2v_61221_000007 purely because its
+                        # geometry scored better, orphaning the real pair -- its other member then
+                        # appeared in no alert at all. chi2 is one term of the evidence, not the
+                        # evidence; P(real) weighs it against the CNN score and mf_snr as fitted.
+                        g_ = dn.iloc[members]
+                        _al = {"vetting": {"score_min": float(g_.score.min()) if "score" in g_ else None,
+                                           "mfsnr_min": float(g_.mf_snr.min()) if "mf_snr" in g_ else None},
+                               "orbit": {"chi2": c2}}
+                        pr = _p_real(_al, _PR_COEF, _PR_DOM) if _PR_COEF else None
+                        evald.append((-len(members), -(pr if pr is not None else -1.0), members))
+                    else:
+                        evald.append((-len(members), c2, members))
+            evald.sort(key=lambda t: (t[0], t[1]))     # longest first, then best quality
             cand = [m for _l, _c, m in evald]
-            print(f"[trail-link] claim-order=quality: {len(cand)} candidates passed, "
-                  f"claiming best-chi2 first", flush=True)
+            print(f"[trail-link] claim-order={a.claim_order}: {len(cand)} candidates passed, claiming "
+                  f"{'highest-P(real)' if a.claim_order == 'preal' else 'best-chi2'} first", flush=True)
         npass = 0; used = set()
         for members in cand:
             # NB: purity is carried by the chi2 gate; the independent AND-threshold discriminators
