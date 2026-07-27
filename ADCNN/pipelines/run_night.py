@@ -239,6 +239,21 @@ def run(a):
         cmd = (f"python -m ADCNN.pipelines.heliolinc.mask_flags --dets {out}/adcnn_dets.csv "
                f"--manifest {manifest} --out {out}/adcnn_dets_masked.csv --workers {a.mask_workers}")
         _bash(cmd, a.dry_run)
+        # adcnn_dets_masked.csv is a STRICT superset of adcnn_dets.csv (identical rows, +21 mask
+        # columns) and is what every downstream stage reads, so keeping both stores the night's
+        # detections twice (~100 MB/night). Drop the raw file only after verifying the row counts
+        # match -- and drop its .done marker with it, or a later re-run would resume against a
+        # catalog that no longer exists and silently produce nothing.
+        raw, msk = out / "adcnn_dets.csv", out / "adcnn_dets_masked.csv"
+        if a.keep_raw_dets or a.dry_run or not (raw.exists() and msk.exists()):
+            return
+        nr = sum(1 for _ in open(raw)); nm = sum(1 for _ in open(msk))
+        if nr == nm:
+            raw.unlink()
+            (out / "adcnn_dets.csv.done").unlink(missing_ok=True)
+            print(f"      raw dets removed (superseded by masked, {nm - 1} rows; --keep-raw-dets to retain)")
+        else:
+            print(f"      WARN raw/masked row mismatch ({nr} vs {nm}) -- keeping raw dets")
 
     def s_static():
         # bright-static template-footprint catalog (DRP coadd object tables). A night with NO DRP
@@ -247,8 +262,13 @@ def run(a):
             print("      (--no-static-veto: skipped)"); return
         if static_catalog.exists() and not a.force:
             print("      (static_catalog.parquet exists; reuse)"); return
+        # Prune at BUILD time to the magnitudes the veto can ever use. The veto matches statics
+        # brighter than --static-mag-max (20.0); on 20260630 that is 6.2% of the 9.5M-row coadd
+        # catalog, so writing it whole stores ~210 MB/night of rows nothing will ever read. The
+        # default keeps a magnitude of margin so the veto cut can be raised without a rebuild.
         cmd = (f"bash -c '{lsst}; cd {REPO}; python -m ADCNN.linking.build_static_catalog "
-               f"--dets {out}/adcnn_dets_masked.csv --out {static_catalog}'")
+               f"--dets {out}/adcnn_dets_masked.csv --out {static_catalog} "
+               f"--mag-max {a.static_catalog_mag_max}'")
         try:
             _bash(cmd, a.dry_run)
         except subprocess.CalledProcessError:
@@ -319,6 +339,15 @@ def run(a):
               f"--top-n {a.stream_pairs_top_n}", a.dry_run)
         _bash(f"python -m ADCNN.qa.stream_summary --alerts {sd}/alerts.jsonl "
               f"--out {sd}/stream_summary.json", a.dry_run)
+        # The cutout cache is ~1.1 GB/night and is pure intermediate: it exists so re-ranking and
+        # re-rendering cost no pixel IO. Once the images are written it is regenerable in ~25 min
+        # from the dets catalog, so it is not worth keeping by default.
+        cz = sd / "cutouts.npz"
+        if not a.keep_cutouts and not a.dry_run and cz.exists():
+            mb = cz.stat().st_size / 1e6
+            cz.unlink()
+            print(f"      cutout cache removed ({mb:.0f} MB, regenerable; --keep-cutouts to retain "
+                  f"for fast re-ranking)")
 
     def s_mpc():
         # MPC conesearch crossmatch of the ranked alerts (network). Best-effort: WARN, never fail.
@@ -398,8 +427,19 @@ def main(argv=None):
                     help="how many top-ranked stream alerts get cutouts + sheets (linking keeps ALL; "
                          "this only bounds the image render)")
     ap.add_argument("--stream-per-sheet", type=int, default=48)
-    ap.add_argument("--stream-pairs-top-n", type=int, default=2000,
-                    help="top-ranked alerts that get their own pair+wide-view image file")
+    ap.add_argument("--stream-pairs-top-n", type=int, default=500,
+                    help="top-ranked alerts that get their own pair+wide-view image file. 500 covers "
+                         "everything above P(real)~0.2 on a typical night (0630: only 107 alerts reach "
+                         "0.5); the contact sheets still cover ALL of them, so nothing is unseen")
+    ap.add_argument("--keep-raw-dets", action="store_true",
+                    help="keep adcnn_dets.csv after masking (default: drop it, the masked file is a "
+                         "strict superset)")
+    ap.add_argument("--keep-cutouts", action="store_true",
+                    help="keep the ~1.1 GB stream cutout cache (default: drop it after rendering; "
+                         "keep it if you plan to re-rank and re-render without re-reading pixels)")
+    ap.add_argument("--static-catalog-mag-max", type=float, default=21.0,
+                    help="magnitude cut applied when BUILDING the static catalog; the veto only uses "
+                         "sources brighter than --static-mag-max (20), so this keeps 1 mag of margin")
     ap.add_argument("--no-rerank", action="store_true",
                     help="skip the calibrated P(real) re-ranking of the stream")
     ap.add_argument("--stream-stamp-px", type=int, default=96, help="cutout size in px (96 = 19.2 arcsec)")
