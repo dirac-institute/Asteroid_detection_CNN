@@ -1,0 +1,65 @@
+{
+  "n_alerts": 11663,
+  "n_real": 936,
+  "alerts": "/sdf/data/rubin/user/mrakovci/Projects/Asteroid_detection_CNN/outputs/runs/run_calib_0630/alerts.jsonl",
+  "auc": {
+    "score": 0.9842,
+    "chi2 (neg)": 0.8455,
+    "mfsnr": 0.9751,
+    "priorityScore": 0.9842,
+    "CV score+chi2": 0.9861,
+    "CV score+chi2+mfsnr": 0.989
+  },
+  "corr_within_real": -0.2429577025933323,
+  "corr_within_false": -0.014521934432207714,
+  "coef": {
+    "intercept": 4.499408745417964,
+    "log_score": 11.524859202642743,
+    "log_chi2": -1.0405235989866453,
+    "log_mfsnr": 1.2193466566894096
+  },
+  "completeness": {
+    "100": {
+      "score": 10.5,
+      "chi2": 6.9,
+      "priorityScore": 10.4,
+      "CV score+chi2": 10.6,
+      "CV all3": 9.6
+    },
+    "250": {
+      "score": 26.1,
+      "chi2": 16.2,
+      "priorityScore": 26.1,
+      "CV score+chi2": 26.4,
+      "CV all3": 25.4
+    },
+    "500": {
+      "score": 51.0,
+      "chi2": 27.2,
+      "priorityScore": 51.0,
+      "CV score+chi2": 52.4,
+      "CV all3": 51.3
+    },
+    "1000": {
+      "score": 88.9,
+      "chi2": 44.0,
+      "priorityScore": 89.0,
+      "CV score+chi2": 90.6,
+      "CV all3": 90.8
+    },
+    "2000": {
+      "score": 96.9,
+      "chi2": 63.5,
+      "priorityScore": 97.0,
+      "CV score+chi2": 97.2,
+      "CV all3": 98.0
+    },
+    "5000": {
+      "score": 98.9,
+      "chi2": 87.8,
+      "priorityScore": 98.9,
+      "CV score+chi2": 98.9,
+      "CV all3": 99.6
+    }
+  }
+}
