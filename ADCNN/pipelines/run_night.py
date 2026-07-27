@@ -236,6 +236,13 @@ def run(a):
         _bash(cmd, a.dry_run)
 
     def s_mask():
+        # Reuse like every other stage. This is REQUIRED now that the raw dets are dropped once
+        # masking succeeds: without it a second run of the chain re-invokes mask_flags against a
+        # file its own predecessor deleted, so re-running a completed night fails instead of
+        # resuming at the linking stage.
+        msk = out / "adcnn_dets_masked.csv"
+        if msk.exists() and msk.stat().st_size > 0 and not a.force:
+            print("      (adcnn_dets_masked.csv exists; reuse)"); return
         cmd = (f"python -m ADCNN.pipelines.heliolinc.mask_flags --dets {out}/adcnn_dets.csv "
                f"--manifest {manifest} --out {out}/adcnn_dets_masked.csv --workers {a.mask_workers}")
         _bash(cmd, a.dry_run)
@@ -244,16 +251,22 @@ def run(a):
         # detections twice (~100 MB/night). Drop the raw file only after verifying the row counts
         # match -- and drop its .done marker with it, or a later re-run would resume against a
         # catalog that no longer exists and silently produce nothing.
+        # Best-effort: this is a disk saving, never a reason to fail a night that has already been
+        # detected and masked. (It DID fail one: an unguarded unlink() raced a concurrent chain and
+        # took down the run after 57 min of GPU.) Everything here is wrapped and missing_ok.
         raw, msk = out / "adcnn_dets.csv", out / "adcnn_dets_masked.csv"
         if a.keep_raw_dets or a.dry_run or not (raw.exists() and msk.exists()):
             return
-        nr = sum(1 for _ in open(raw)); nm = sum(1 for _ in open(msk))
-        if nr == nm:
-            raw.unlink()
+        try:
+            nr = sum(1 for _ in open(raw)); nm = sum(1 for _ in open(msk))
+            if nr != nm:
+                print(f"      WARN raw/masked row mismatch ({nr} vs {nm}) -- keeping raw dets")
+                return
+            raw.unlink(missing_ok=True)
             (out / "adcnn_dets.csv.done").unlink(missing_ok=True)
             print(f"      raw dets removed (superseded by masked, {nm - 1} rows; --keep-raw-dets to retain)")
-        else:
-            print(f"      WARN raw/masked row mismatch ({nr} vs {nm}) -- keeping raw dets")
+        except OSError as e:
+            print(f"      WARN could not remove raw dets ({e}) -- harmless, continuing")
 
     def s_static():
         # bright-static template-footprint catalog (DRP coadd object tables). A night with NO DRP
