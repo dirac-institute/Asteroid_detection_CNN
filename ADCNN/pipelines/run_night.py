@@ -307,9 +307,16 @@ def run(a):
                   f"--limit {a.stream_top_n}", a.dry_run)
         else:
             print(f"      (stream cutouts.npz exists -- reusing; --force to re-cut)")
+        # rank by the CALIBRATED P(real) before rendering, so the images are produced in the order
+        # a human should look at them (post-hoc: no re-link, no re-cut -- see ADCNN/qa/rerank_alerts.py)
+        if not a.no_rerank:
+            _bash(f"python -m ADCNN.qa.rerank_alerts --alerts {sd}/alerts.jsonl", a.dry_run)
         _bash(f"python -m ADCNN.qa.alert_sheets --alerts {sd}/alerts.jsonl "
               f"--cutouts {sd}/cutouts.npz --out-dir {sd}/sheets "
               f"--per-sheet {a.stream_per_sheet} --limit {a.stream_top_n}", a.dry_run)
+        _bash(f"python -m ADCNN.qa.alert_pairs --alerts {sd}/alerts.jsonl "
+              f"--cutouts {sd}/cutouts.npz --out-dir {sd}/pairs "
+              f"--top-n {a.stream_pairs_top_n}", a.dry_run)
         _bash(f"python -m ADCNN.qa.stream_summary --alerts {sd}/alerts.jsonl "
               f"--out {sd}/stream_summary.json", a.dry_run)
 
@@ -390,7 +397,11 @@ def main(argv=None):
     ap.add_argument("--stream-top-n", type=int, default=10000,
                     help="how many top-ranked stream alerts get cutouts + sheets (linking keeps ALL; "
                          "this only bounds the image render)")
-    ap.add_argument("--stream-per-sheet", type=int, default=50)
+    ap.add_argument("--stream-per-sheet", type=int, default=48)
+    ap.add_argument("--stream-pairs-top-n", type=int, default=2000,
+                    help="top-ranked alerts that get their own pair+wide-view image file")
+    ap.add_argument("--no-rerank", action="store_true",
+                    help="skip the calibrated P(real) re-ranking of the stream")
     ap.add_argument("--stream-stamp-px", type=int, default=96, help="cutout size in px (96 = 19.2 arcsec)")
     ap.add_argument("--stream-workers", type=int, default=16)
     ap.add_argument("--obscode", default="I11")

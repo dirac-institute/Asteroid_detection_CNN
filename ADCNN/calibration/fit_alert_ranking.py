@@ -91,21 +91,42 @@ def main(argv=None):
     ap.add_argument("--inject", required=True, help="inject.csv used for that night")
     ap.add_argument("--out", default=None)
     ap.add_argument("--folds", type=int, default=5)
+    ap.add_argument("--relabel", action="store_true", help="redo the truth match instead of reusing the cached labels")
+    ap.add_argument("--clip-pct", type=float, default=1.0, help="percentile clip defining the model domain")
     a = ap.parse_args(argv)
 
-    alerts = [json.loads(l) for l in open(a.alerts)] if os.path.getsize(a.alerts) else []
-    if not alerts:
-        raise SystemExit("no alerts")
-    inj = pd.read_csv(a.inject)
-    d = label_alerts(alerts, inj)
+    cache = Path(a.alerts).with_suffix(".labelled.csv")
+    if cache.exists() and not a.relabel:
+        d = pd.read_csv(cache)
+        print(f"[fit] reusing labels {cache} (--relabel to redo the ~6 min truth match)", flush=True)
+    else:
+        alerts = [json.loads(l) for l in open(a.alerts)] if os.path.getsize(a.alerts) else []
+        if not alerts:
+            raise SystemExit("no alerts")
+        inj = pd.read_csv(a.inject)
+        d = label_alerts(alerts, inj)
+        d.to_csv(cache, index=False)
     d = d[np.isfinite(d.chi2) & np.isfinite(d.score_min)].reset_index(drop=True)
+
+    # CLIP features to their robust support before fitting. mf_snr carries a known numerics
+    # blowup (degenerate panel MAD sigma -> values to ~1e9 even inside this labelled set), and a
+    # handful of such points both skew the fit and, at inference, drive P(real)->1 on corrupt
+    # panels through log(). The model is only meaningful over the range it is supported on.
+    dom = {}
+    for col in ("score_min", "chi2", "mfsnr_min"):
+        lo, hi = np.nanpercentile(d[col], [a.clip_pct, 100 - a.clip_pct])
+        n_out = int((d[col] < lo).sum() + (d[col] > hi).sum())
+        d[col] = d[col].clip(lo, hi)
+        dom[col] = [float(lo), float(hi)]
+        print(f"[fit] domain {col:10s} [{lo:.4g}, {hi:.4g}]  ({n_out} values clipped)", flush=True)
     y = d.real.to_numpy()
     print(f"[fit] {len(d)} labelled 2v alerts | real {int(y.sum())} ({100*y.mean():.2f}%) "
           f"| false {int((~y).sum())} (this night's own residual population)", flush=True)
     if y.sum() < 30:
         print("[fit] WARNING: very few real pairs -- fit will be unstable", flush=True)
 
-    res = {"n_alerts": len(d), "n_real": int(y.sum()), "alerts": os.path.abspath(a.alerts), "auc": {}}
+    res = {"n_alerts": len(d), "n_real": int(y.sum()), "alerts": os.path.abspath(a.alerts),
+           "domain": dom, "clip_pct": a.clip_pct, "auc": {}}
     ls = np.log(np.clip(d.score_min.to_numpy(), 1e-6, None))
     lc = np.log(np.clip(d.chi2.to_numpy(), 1e-6, None))
     lm = np.log(np.clip(d.mfsnr_min.to_numpy(), 1e-3, None))

@@ -1,0 +1,87 @@
+{
+  "_comment": "Calibrated alert-reality model: logit P(real) = intercept + b*log(score_min) + c*log(chi2) + d*log(mfsnr_min). Fit on night 20260630's OWN false-positive population (pair-consistent injections into that night's repeat-pointing regions; 11,663 labelled 2-visit alerts, 936 real / 10,727 false), cross-validated by pointing group. See ADCNN/calibration/ALERT_RANKING.md.",
+  "_provenance": "ADCNN/calibration/night_pair_injection.py -> detect --inject -> link_2visit(op_2v_stream) -> fit_alert_ranking.py",
+  "_caveat": "Positives are SYNTHETIC (add_trails Gaussian-PSF renders); the null is real but the signal is not. Re-fit per night before treating as universal.",
+  "night": "20260630",
+  "features": [
+    "log(score_min)",
+    "log(chi2)",
+    "log(mfsnr_min)"
+  ],
+  "coef": {
+    "intercept": 0.2920656775586195,
+    "log_score": 9.669736143228532,
+    "log_chi2": -0.9578506567750229,
+    "log_mfsnr": 3.5830264817909616
+  },
+  "auc_cv": {
+    "score": 0.9842,
+    "chi2 (neg)": 0.8455,
+    "mfsnr": 0.9751,
+    "priorityScore": 0.9842,
+    "CV score+chi2": 0.9861,
+    "CV score+chi2+mfsnr": 0.991
+  },
+  "n_labelled": 11663,
+  "n_real": 936,
+  "domain": {
+    "score_min": [
+      0.500585,
+      0.9886257479999999
+    ],
+    "chi2": [
+      1.2168742906897914,
+      29.53995092781373
+    ],
+    "mfsnr_min": [
+      1.4285401439999998,
+      10.540602539999993
+    ]
+  },
+  "_domain_note": "Features are CLIPPED to this range before evaluating the model, and were clipped the same way when fitting. A logistic fit is only meaningful over its support; mf_snr in particular carries a numerics blowup (degenerate panel MAD sigma -> values to ~1e9 present even inside the labelled set) which both skewed the unclipped fit and, at inference, drove P(real)->1 on corrupt panels through log(). Clipping fixed both: AUC 0.9890 -> 0.9910.",
+  "clip_pct": 1.0,
+  "completeness_at_budget": {
+    "100": {
+      "score": 10.5,
+      "chi2": 6.6,
+      "priorityScore": 10.4,
+      "CV score+chi2": 10.6,
+      "CV all3": 10.6
+    },
+    "250": {
+      "score": 26.1,
+      "chi2": 16.2,
+      "priorityScore": 26.1,
+      "CV score+chi2": 26.4,
+      "CV all3": 26.6
+    },
+    "500": {
+      "score": 51.0,
+      "chi2": 27.2,
+      "priorityScore": 51.0,
+      "CV score+chi2": 52.4,
+      "CV all3": 52.4
+    },
+    "1000": {
+      "score": 88.9,
+      "chi2": 44.0,
+      "priorityScore": 89.0,
+      "CV score+chi2": 90.6,
+      "CV all3": 91.1
+    },
+    "2000": {
+      "score": 96.9,
+      "chi2": 63.5,
+      "priorityScore": 97.0,
+      "CV score+chi2": 97.2,
+      "CV all3": 98.3
+    },
+    "5000": {
+      "score": 98.9,
+      "chi2": 87.8,
+      "priorityScore": 98.9,
+      "CV score+chi2": 98.9,
+      "CV all3": 99.6
+    }
+  }
+}
