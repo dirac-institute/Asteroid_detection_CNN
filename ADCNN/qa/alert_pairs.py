@@ -62,7 +62,11 @@ def _orientation_ray(ax, cx, cy, ang_deg, half_len, colour, lw=1.0):
     ax.plot([cx - dx, cx + dx], [cy - dy, cy + dy], color=colour, lw=lw, ls=(0, (3, 2)), alpha=0.9)
 
 
-def render(alerts_path, cutouts_npz, out_dir, top_n=None, dpi=120):
+def render(alerts_path, cutouts_npz, out_dir, top_n=None, dpi=120, workers=1, _slice=None):
+    """Render per-alert figures. `workers`>1 splits the alert list across processes; each loads the
+    cutout cache itself (~1.3 GB resident per worker -- an npz decompresses whole arrays on first
+    access, so there is nothing cheaper to share) and writes its own files, which is worth it at
+    10k alerts: ~0.4 s per figure is over an hour serially."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -74,6 +78,20 @@ def render(alerts_path, cutouts_npz, out_dir, top_n=None, dpi=120):
     if not alerts:
         print("[pairs] 0 alerts", flush=True)
         return
+    if workers > 1 and _slice is None:
+        import multiprocessing as mp
+        from concurrent.futures import ProcessPoolExecutor
+        n = len(alerts)
+        step = (n + workers - 1) // workers
+        chunks = [(i, min(i + step, n)) for i in range(0, n, step)]
+        print(f"[pairs] {n} alerts over {len(chunks)} workers", flush=True)
+        with ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context("spawn")) as ex:
+            futs = [ex.submit(render, alerts_path, cutouts_npz, out_dir, top_n, dpi, 1, c)
+                    for c in chunks]
+            done = sum(f.result() or 0 for f in futs)
+        print(f"[pairs] wrote {done} per-alert images -> {out_dir}", flush=True)
+        return done
+    lo, hi = _slice if _slice else (0, len(alerts))
     z = np.load(cutouts_npz)
     stamps, a_ix, e_ix = z["stamps"], z["alert"], z["epoch"]
     zends = z["zoom_ends"] if "zoom_ends" in z.files else None
@@ -85,7 +103,8 @@ def render(alerts_path, cutouts_npz, out_dir, top_n=None, dpi=120):
 
     os.makedirs(out_dir, exist_ok=True)
     written = 0
-    for rank, al in enumerate(alerts):
+    for rank in range(lo, hi):
+        al = alerts[rank]
         eps = al["epochs"]
         n = len(eps)
         cls = classify(al)[0]
@@ -176,9 +195,11 @@ def render(alerts_path, cutouts_npz, out_dir, top_n=None, dpi=120):
         png = os.path.join(out_dir, f"alert_{rank:05d}_{pstr}_{al['alertId']}_{cls.split('-')[0]}.png")
         fig.savefig(png, dpi=dpi); plt.close(fig)
         written += 1
-        if written % 100 == 0:
+        if _slice is None and written % 200 == 0:
             print(f"[pairs] {written}/{len(alerts)}", flush=True)
-    print(f"[pairs] wrote {written} per-alert images -> {out_dir}", flush=True)
+    if _slice is None:
+        print(f"[pairs] wrote {written} per-alert images -> {out_dir}", flush=True)
+    return written
 
 
 def main(argv=None):
@@ -188,8 +209,10 @@ def main(argv=None):
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--top-n", type=int, default=2000, help="how many top-ranked alerts get a file")
     ap.add_argument("--dpi", type=int, default=120)
+    ap.add_argument("--workers", type=int, default=12,
+                    help="processes rendering figures in parallel (~1.3 GB resident each)")
     a = ap.parse_args(argv)
-    render(a.alerts, a.cutouts, a.out_dir, top_n=a.top_n, dpi=a.dpi)
+    render(a.alerts, a.cutouts, a.out_dir, top_n=a.top_n, dpi=a.dpi, workers=a.workers)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,9 @@
 #!/bin/bash
-#SBATCH --partition=ampere
-#SBATCH --account=kipac:kipac
-#SBATCH --gres=gpu:a100:4
+#SBATCH --partition=ada
+#SBATCH --account=rubin:commissioning   # NOT kipac:kipac: kipac holds only a PREEMPTABLE
+                                        # qos on the GPU partitions, and 20260629 detection
+                                        # was evicted ~2 min in, twice, as a bare CANCELLED
+#SBATCH --gres=gpu:l40s:4
 #SBATCH --exclude=sdfampere017
 #SBATCH -c 32
 #SBATCH --mem=128G
