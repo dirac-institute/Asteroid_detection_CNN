@@ -427,10 +427,11 @@ def main(argv=None):
                     help="how many top-ranked stream alerts get cutouts + sheets (linking keeps ALL; "
                          "this only bounds the image render)")
     ap.add_argument("--stream-per-sheet", type=int, default=48)
-    ap.add_argument("--stream-pairs-top-n", type=int, default=500,
-                    help="top-ranked alerts that get their own pair+wide-view image file. 500 covers "
-                         "everything above P(real)~0.2 on a typical night (0630: only 107 alerts reach "
-                         "0.5); the contact sheets still cover ALL of them, so nothing is unseen")
+    ap.add_argument("--stream-pairs-top-n", type=int, default=10000,
+                    help="alerts that get their OWN pair+wide-view image file (rank order). The "
+                         "default matches the nightly alert budget, i.e. one image per alert -- "
+                         "~2 GB/night at ~200 kB each. Lower it only to save disk: the contact "
+                         "sheets image every alert regardless, so nothing becomes unviewable")
     ap.add_argument("--keep-raw-dets", action="store_true",
                     help="keep adcnn_dets.csv after masking (default: drop it, the masked file is a "
                          "strict superset)")

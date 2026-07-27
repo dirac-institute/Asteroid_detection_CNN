@@ -5,7 +5,9 @@
 #SBATCH --exclude=sdfampere017
 #SBATCH -c 32
 #SBATCH --mem=128G
-#SBATCH -t 8:00:00
+#SBATCH -t 24:00:00   # a FULL-CADENCE night is ~15k panels ~= 11 h on 4 GPUs; the old
+                      # 8 h wall killed 20260629 at ~70%% (per-shard .done makes a resubmit
+                      # resume, but the wall should not be the thing that ends the job)
 #SBATCH -J sn_detect
 #SBATCH -o outputs/logs/%x_%j.log
 #SBATCH --requeue
