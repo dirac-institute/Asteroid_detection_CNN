@@ -219,6 +219,49 @@ def run(a):
         cmd = (f"cd {REPO} && RUN={out} sbatch --export=ALL,RUN --wait {HL/'sn_detect.slurm'}"
                f"   # GPU; per-panel .done resume; -> {out}/adcnn_dets.csv")
         _bash(cmd, a.dry_run)
+        if not a.dry_run:
+            _check_detect_coverage()
+
+    def _check_detect_coverage():
+        """Fail loud if detection silently skipped panels.
+
+        A per-GPU shard that dies -- e.g. `CUDA error: uncorrectable ECC error`, which hit THREE
+        different ada nodes in one night -- does NOT fail the slurm job. Its panels are simply
+        absent, the job reports COMPLETED, and the night proceeds with a quarter of the sky
+        missing and nothing in the exit status to say so. Only the absent progress heartbeats
+        gave it away. The .done files are the authoritative record of panels actually processed
+        (a panel with zero detections never appears in the dets CSV), so compare those against
+        the manifest and write the residual manifest so a top-up run is one sbatch away."""
+        import csv as _csv
+        want = set()
+        with open(manifest) as fh:
+            for r in _csv.DictReader(fh):
+                want.add((int(r["visit"]), int(r["detector"])))
+        got = set()
+        for dn in list(out.glob("_shard_adcnn_dets_*.csv.done")) + list(out.glob("adcnn_dets.csv.done")):
+            for line in open(dn):
+                p = line.strip().split(",")
+                if len(p) == 2:
+                    got.add((int(p[0]), int(p[1])))
+        missing = want - got
+        if not missing:
+            print(f"      detect coverage OK: {len(got)}/{len(want)} panels")
+            return
+        resid = out / "manifest_residual.csv"
+        with open(manifest) as fh, open(resid, "w", newline="") as fo:
+            rd = _csv.DictReader(fh)
+            w = _csv.DictWriter(fo, fieldnames=rd.fieldnames)
+            w.writeheader()
+            for r in rd:
+                if (int(r["visit"]), int(r["detector"])) in missing:
+                    w.writerow(r)
+        raise IntegrityError(
+            f"detection covered only {len(got)}/{len(want)} panels -- {len(missing)} MISSING "
+            f"(a GPU shard almost certainly died; check the detect log for 'ECC' or an empty "
+            f"[gpuN] heartbeat stream). Residual manifest written to {resid}; top up with:\n"
+            f"  RUN=<a fresh dir with that manifest> sbatch --exclude=<bad nodes> "
+            f"{HL/'sn_detect.slurm'}\n"
+            f"then re-run this night (the dets are merged by the reuse path).")
 
     def s_known():
         kn = out / "known.csv"
