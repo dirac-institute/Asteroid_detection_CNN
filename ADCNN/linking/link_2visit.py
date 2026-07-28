@@ -222,7 +222,8 @@ def auto_2v_window_min(dets, *, pointing_tol_deg=1.0, margin=1.15, lo=40.0, hi=7
                  f"x{margin:g} -> {win:.0f}min (clamp[{lo:.0f},{hi:.0f}])")
 
 
-def chord_seed_pairs(dets, *, max_arc_min=40.0, rate_min=0.3, rate_max=10.0, max_visit_pairs=None):
+def chord_seed_pairs(dets, *, max_arc_min=40.0, rate_min=0.3, rate_max=10.0, max_visit_pairs=None,
+                     max_visit_sep_deg=2.0):
     """Seed 2-visit candidate pairs by the POSITION CHORD, not the noisy trail-velocity. For each pair of
     adjacent same-night visits (gap <= max_arc_min) enumerate detection pairs whose sky separation is
     consistent with a rate_min..rate_max deg/day mover, via a k-d tree. Returns [i,j] member-index lists
@@ -251,8 +252,26 @@ def chord_seed_pairs(dets, *, max_arc_min=40.0, rate_min=0.3, rate_max=10.0, max
             dt = vmjd[uv[bi]] - vmjd[uv[ai]]
             if 0 < dt <= max_arc_min / 1440.0:
                 vpairs.append((dt, uv[ai], uv[bi]))
+    # Keep only pairs that actually SHARE SKY. A 2-visit tracklet requires the same field revisited;
+    # two visits that never overlap cannot contain the same object, so pairing them is pure cost.
+    # This must happen BEFORE the cap: on a full-cadence night the telescope slews through a
+    # sequence, so the smallest-time-gap pairs are consecutive exposures of DIFFERENT pointings,
+    # and a nearest-in-time cap keeps exactly those while discarding the real ~40-min revisits.
+    # MEASURED on 20260629 (165 visits): 8,003 in-window pairs capped to 200 nearest-in-time gave
+    # 14 alerts from 2.7M detections; the genuine same-pointing revisits had all been dropped.
+    if max_visit_sep_deg is not None and len(vpairs) > 1:
+        ctr = {v: (float(np.median(ra[vis == v])), float(np.median(dec[vis == v]))) for v in uv}
+        kept = []
+        for dt, a_, b_ in vpairs:
+            (r1, d1), (r2, d2) = ctr[a_], ctr[b_]
+            if np.hypot((r1 - r2) * np.cos(np.radians(0.5 * (d1 + d2))), d1 - d2) <= max_visit_sep_deg:
+                kept.append((dt, a_, b_))
+        if len(kept) != len(vpairs):
+            print(f"[chord-seed] co-pointed filter: {len(vpairs)} in-window visit-pairs -> {len(kept)} "
+                  f"sharing sky (<= {max_visit_sep_deg}deg)", flush=True)
+        vpairs = kept
     if max_visit_pairs is not None and len(vpairs) > max_visit_pairs:
-        vpairs.sort(key=lambda t: t[0])   # smallest time-gap first = the genuine same-night tracklets
+        vpairs.sort(key=lambda t: t[0])   # smallest time-gap first, among CO-POINTED pairs
         print(f"[chord-seed] dense cadence: capping {len(vpairs)} visit-pairs -> {max_visit_pairs} "
               f"(nearest-in-time)", flush=True)
         vpairs = vpairs[:max_visit_pairs]
@@ -844,6 +863,14 @@ def main():
     ap.add_argument("--tol-day", type=float, default=0.02)
     ap.add_argument("--op-point", default=os.environ.get("LINK_OP_POINT"),
                     help="JSON op-point config (link_op_point.json): sets the calibrated 2v/3v params; any CLI flag overrides its value")
+    ap.add_argument("--max-visit-sep-deg", type=float, default=2.0,
+                    help="only pair visits whose field centres are within this angle -- i.e. that "
+                         "actually share sky. Two visits that never overlap cannot hold the same "
+                         "object. Critical on a full-cadence night, where the telescope slews "
+                         "through a sequence so the SMALLEST-time-gap pairs are consecutive "
+                         "exposures of DIFFERENT pointings: on 20260629 (165 visits) the "
+                         "nearest-in-time cap kept exactly those and produced 14 alerts from 2.7M "
+                         "detections. 0 disables")
     ap.add_argument("--max-visit-pairs", type=int, default=200,
                     help="cap on same-night visit PAIRS the 2-visit chord seeder enumerates (O(V^2)); guards against a deep-drilling night (~100 visits -> ~5000 pairs). Keeps the nearest-in-time pairs and warns when it triggers")
     ap.add_argument("--promote-3v", action=argparse.BooleanOptionalAction, default=True,
@@ -1064,7 +1091,8 @@ def main():
         if a.min_epochs <= 2:
             cpairs = chord_seed_pairs(dn, max_arc_min=(a.max_arc_2v_min or 1e9),
                                       rate_min=a.rate_min, rate_max=a.rate_max,
-                                      max_visit_pairs=a.max_visit_pairs)
+                                      max_visit_pairs=a.max_visit_pairs,
+                                      max_visit_sep_deg=a.max_visit_sep_deg)
             # SEED-EXCLUSION static veto: a static-static pair is a repeating-artifact self-link --
             # never seed it. Single-static pairs stay (annotated + demoted at the alert, not dropped).
             if static_cfg is not None:
@@ -1107,7 +1135,8 @@ def main():
                 if a.seed_3v_arc_min and a.seed_3v_arc_min > (a.max_arc_2v_min or 0):
                     wide = chord_seed_pairs(dn, max_arc_min=a.seed_3v_arc_min,
                                             rate_min=a.rate_min, rate_max=a.rate_max,
-                                            max_visit_pairs=a.max_visit_pairs)
+                                            max_visit_pairs=a.max_visit_pairs,
+                                            max_visit_sep_deg=a.max_visit_sep_deg)
                     # same seed-exclusion as the main 2v path: a triplet built ON a static-static
                     # pair is bogus by construction (2/3 members are repeating artifacts); a real
                     # 3-visit mover keeps 2 other constituent pairs to seed the same triplet.
