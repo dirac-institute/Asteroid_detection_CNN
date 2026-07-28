@@ -483,11 +483,11 @@ def main(argv=None):
                     help="skip the low-threshold alert stream (the ~10k/night ranked QA product)")
     ap.add_argument("--stream-op-point", default=None,
                     help="stream linking op-point JSON (default: ADCNN/pipelines/heliolinc/op_2v_stream.json)")
-    ap.add_argument("--stream-top-n", type=int, default=10000,
+    ap.add_argument("--stream-top-n", type=int, default=20000,
                     help="how many top-ranked stream alerts get cutouts + sheets (linking keeps ALL; "
                          "this only bounds the image render)")
     ap.add_argument("--stream-per-sheet", type=int, default=48)
-    ap.add_argument("--stream-pairs-top-n", type=int, default=10000,
+    ap.add_argument("--stream-pairs-top-n", type=int, default=20000,
                     help="alerts that get their OWN pair+wide-view image file (rank order). The "
                          "default matches the nightly alert budget, i.e. one image per alert -- "
                          "~2 GB/night at ~200 kB each. Lower it only to save disk: the contact "
