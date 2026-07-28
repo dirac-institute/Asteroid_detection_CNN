@@ -397,7 +397,8 @@ def run(a):
               f"--cutouts {sd}/cutouts.npz --out-dir {sd}/pairs "
               f"--top-n {a.stream_pairs_top_n}", a.dry_run)
         _bash(f"python -m ADCNN.qa.stream_summary --alerts {sd}/alerts.jsonl "
-              f"--out {sd}/stream_summary.json", a.dry_run)
+              f"--out {sd}/stream_summary.json"
+              + (f" --static-catalog {static_catalog}" if static_catalog.exists() else ""), a.dry_run)
         # The cutout cache is ~1.1 GB/night and is pure intermediate: it exists so re-ranking and
         # re-rendering cost no pixel IO. Once the images are written it is regenerable in ~25 min
         # from the dets catalog, so it is not worth keeping by default.
