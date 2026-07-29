@@ -237,15 +237,33 @@ def run(a):
         with open(manifest) as fh:
             for r in _csv.DictReader(fh):
                 want.add((int(r["visit"]), int(r["detector"])))
-        got = set()
-        for dn in list(out.glob("_shard_adcnn_dets_*.csv.done")) + list(out.glob("adcnn_dets.csv.done")):
-            for line in open(dn):
-                p = line.strip().split(",")
-                if len(p) == 2:
-                    got.add((int(p[0]), int(p[1])))
+        # Panels actually PROCESSED. The .done markers are authoritative (a panel with zero
+        # detections is processed but contributes no rows) -- but detect_night DELETES them when it
+        # assembles the shards into adcnn_dets.csv, so on a completed night they are gone and we
+        # must fall back to the panels present in the dets catalogue. That fallback under-counts by
+        # the genuinely-empty panels, hence the tolerance below rather than demanding 100%.
+        got, src = set(), "none"
+        dn_files = list(out.glob("_shard_adcnn_dets_*.csv.done")) + list(out.glob("adcnn_dets.csv.done"))
+        if dn_files:
+            for dn in dn_files:
+                for line in open(dn):
+                    p = line.strip().split(",")
+                    if len(p) == 2:
+                        got.add((int(p[0]), int(p[1])))
+            src = f"{len(dn_files)} .done marker file(s)"
+        else:
+            dets = out / "adcnn_dets.csv"
+            if dets.exists():
+                import csv as _c2
+                with open(dets) as fh:
+                    for r in _c2.DictReader(fh):
+                        got.add((int(r["visit"]), int(r["detector"])))
+                src = "adcnn_dets.csv (markers already cleaned up)"
         missing = want - got
-        if not missing:
-            print(f"      detect coverage OK: {len(got)}/{len(want)} panels")
+        frac = len(missing) / max(len(want), 1)
+        if frac <= a.detect_miss_tol:
+            print(f"      detect coverage OK: {len(got)}/{len(want)} panels via {src} "
+                  f"({len(missing)} absent, {100*frac:.1f}% <= {100*a.detect_miss_tol:.0f}% tol)")
             return
         resid = out / "manifest_residual.csv"
         with open(manifest) as fh, open(resid, "w", newline="") as fo:
@@ -256,12 +274,12 @@ def run(a):
                 if (int(r["visit"]), int(r["detector"])) in missing:
                     w.writerow(r)
         raise IntegrityError(
-            f"detection covered only {len(got)}/{len(want)} panels -- {len(missing)} MISSING "
-            f"(a GPU shard almost certainly died; check the detect log for 'ECC' or an empty "
-            f"[gpuN] heartbeat stream). Residual manifest written to {resid}; top up with:\n"
-            f"  RUN=<a fresh dir with that manifest> sbatch --exclude=<bad nodes> "
-            f"{HL/'sn_detect.slurm'}\n"
-            f"then re-run this night (the dets are merged by the reuse path).")
+            f"detection covered {len(got)}/{len(want)} panels via {src} -- {len(missing)} MISSING "
+            f"({100*frac:.1f}%). One shard per 4 GPUs is 25%: check the detect log for 'ECC' or a "
+            f"[gpuN] with no heartbeats. Residual manifest ({len(missing)} panels) -> {resid}\n"
+            f"  top up:  ADCNN_REPO=$PWD RUN=<fresh dir holding that manifest> "
+            f"sbatch --exclude=<bad nodes> {HL/'sn_detect.slurm'}\n"
+            f"  then merge its adcnn_dets.csv into this night's and re-run.")
 
     def s_known():
         kn = out / "known.csv"
@@ -492,6 +510,11 @@ def main(argv=None):
                          "default matches the nightly alert budget, i.e. one image per alert -- "
                          "~2 GB/night at ~200 kB each. Lower it only to save disk: the contact "
                          "sheets image every alert regardless, so nothing becomes unviewable")
+    ap.add_argument("--detect-miss-tol", type=float, default=0.05,
+                    help="fraction of manifest panels allowed to be absent after detection before "
+                         "failing. Some absence is normal when coverage is inferred from the dets "
+                         "catalogue (panels with zero detections leave no rows); a dead GPU shard "
+                         "loses 1/n_gpus = 25%%, far above this")
     ap.add_argument("--keep-raw-dets", action="store_true",
                     help="keep adcnn_dets.csv after masking (default: drop it, the masked file is a "
                          "strict superset)")
