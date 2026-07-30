@@ -7,10 +7,13 @@
 #
 # Three things this adds over calling ./adcnn night by hand:
 #
-#  1. PER-NIGHT STREAM OP. The op is cadence-dependent: a full-cadence night has ~33 linkable
-#     pointing groups at ~42 min gaps against a sparse night's ~4 at ~20 min, and chance links
-#     scale as dt^2, so one fixed op gives wildly different volume AND runtime (the sparse op did
-#     not finish a single pointing group of 20260629 in 42 minutes). >=100 visits => full-cadence op.
+#  1. PER-NIGHT STREAM OP, chosen by PANEL COUNT. The op is cadence-dependent: a full-cadence
+#     night has ~33 linkable pointing groups at ~42 min gaps against a sparse night's ~4 at ~20
+#     min, and chance links scale as dt^2, so one fixed op gives wildly different volume AND
+#     runtime (the sparse op did not finish a single pointing group of 20260629 in 42 minutes).
+#     Selecting on VISIT count was wrong: 20260710 has only 88 visits but 8,870 panels and 2.24M
+#     detections -- 5x night 20260630 -- and the sparse op it was handed ran >10 h without
+#     finishing. Seeding cost goes as detection density, which tracks panels, not visits.
 #
 #  2. AUTOMATIC RESIDUAL TOP-UP. A per-GPU shard that dies does not fail the slurm job -- it just
 #     omits its panels, and the job reports COMPLETED. `uncorrectable ECC error` hit FIVE separate
@@ -40,7 +43,7 @@ LOGDIR=outputs/logs; mkdir -p $LOGDIR
 BADNODES=$LOGDIR/bad_gpu_nodes.txt; touch $BADNODES
 SUMMARY=$LOGDIR/campaign_$(date +%Y%m%d_%H%M%S).log
 
-jq_get() { python -c "import json,sys;d=json.load(open('$SPEC'))['$1'];print(d['$2'] if '$2'!='visits' else ','.join(str(v) for v in d['visits']))" 2>/dev/null; }
+jq_get() { python -c "import json,sys;d=json.load(open('$SPEC'))['$1'];print(d.get('$2','') if '$2'!='visits' else ','.join(str(v) for v in d['visits']))" 2>/dev/null; }
 excl() { tr '\n' ',' < $BADNODES | sed 's/,$//'; }
 
 # Re-detect the panels a dead shard skipped, then fold them into the night's catalogue.
@@ -75,9 +78,10 @@ for N in "${NIGHTS[@]}"; do
   COLL=$(jq_get "$N" collection); VIS=$(jq_get "$N" visits); NV=$(jq_get "$N" n)
   if [ -z "$COLL" ] || [ -z "$VIS" ]; then
     echo "[$N] SKIP: not in $SPEC" | tee -a $SUMMARY; continue; fi
-  if [ "$NV" -ge 100 ]; then OP=ADCNN/pipelines/heliolinc/op_2v_stream_fullcadence.json
+  NP=$(jq_get "$N" panels)
+  if [ "${NP:-0}" -ge 3000 ]; then OP=ADCNN/pipelines/heliolinc/op_2v_stream_fullcadence.json
   else OP=ADCNN/pipelines/heliolinc/op_2v_stream.json; fi
-  echo "[$N] $NV visits -> $(basename $OP)" | tee -a $SUMMARY
+  echo "[$N] $NV visits, ${NP:-?} panels -> $(basename $OP)" | tee -a $SUMMARY
   t0=$SECONDS
   for try in $(seq 1 $ATTEMPTS); do
     ./adcnn night --butler-repo embargo --collection "$COLL" --night "$N" --no-known \
