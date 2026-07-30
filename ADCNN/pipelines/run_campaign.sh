@@ -1,20 +1,29 @@
 #!/bin/bash
-# Process a list of nights end-to-end, one after another, unattended.
+# Process a list of nights end-to-end, unattended, surviving dead GPU shards.
 #
-# Each night is an independent `./adcnn night` run: manifest -> detect (GPU) -> mask -> static
-# catalogue -> frozen science link -> pixel vet -> MPC -> alert stream (link, P(real) re-rank,
-# cutouts, per-alert images, contact sheets, summary).
+# Each night is one `./adcnn night`: manifest -> detect (GPU) -> mask -> static catalogue ->
+# frozen science link -> pixel vet -> MPC -> alert stream (link, P(real) re-rank, cutouts,
+# per-alert images, sheets, summary).
 #
-# Two things this wrapper adds over calling ./adcnn night by hand:
-#   * per-night STREAM OP. The stream op is cadence-dependent -- a full-cadence night has ~33
-#     linkable pointing groups at ~42 min gaps against a sparse night's ~4 at ~20 min, and chance
-#     links scale as dt^2, so one fixed op gives wildly different volume and runtime. Nights are
-#     classified by visit count and given the matching op.
-#   * it never stops the campaign on one night's failure. A night that dies (dead GPU shard, no
-#     DRP coverage, whatever) is logged and skipped; the rest still run.
+# Three things this adds over calling ./adcnn night by hand:
 #
-# Detection dominates: ~24 panels/min on 4 GPUs, so a 15k-panel night is ~10 h. Expect days, not
-# hours, for a full campaign. Everything is resumable -- re-running skips completed stages.
+#  1. PER-NIGHT STREAM OP. The op is cadence-dependent: a full-cadence night has ~33 linkable
+#     pointing groups at ~42 min gaps against a sparse night's ~4 at ~20 min, and chance links
+#     scale as dt^2, so one fixed op gives wildly different volume AND runtime (the sparse op did
+#     not finish a single pointing group of 20260629 in 42 minutes). >=100 visits => full-cadence op.
+#
+#  2. AUTOMATIC RESIDUAL TOP-UP. A per-GPU shard that dies does not fail the slurm job -- it just
+#     omits its panels, and the job reports COMPLETED. `uncorrectable ECC error` hit FIVE separate
+#     ada nodes during one campaign (20260706 lost two shards in one job), so this is the common
+#     case, not the exception. run_night's coverage guard turns that into a loud failure plus a
+#     manifest_residual.csv; this loop re-detects exactly those panels into a side directory,
+#     merges, and retries -- up to --attempts times -- instead of halting the night.
+#
+#  3. BAD-NODE AVOIDANCE. Nodes whose detect log shows an ECC fault are accumulated into a
+#     persistent exclude list, so later passes stop landing on known-faulty hardware.
+#
+# Detection dominates: ~24 panels/min on 4 GPUs, so a 15k-panel night is ~10 h, and a night that
+# loses a shard needs ~1.3 passes. Expect days for a full campaign. Everything is resumable.
 #
 # Usage:  bash ADCNN/pipelines/run_campaign.sh 20260705 20260706 ...
 set -uo pipefail
@@ -26,29 +35,66 @@ adcnn_activate || { echo "conda env failed"; exit 1; }
 NIGHTS=("$@")
 [ ${#NIGHTS[@]} -eq 0 ] && { echo "usage: $0 <night> [night ...]"; exit 1; }
 SPEC=${CAMPAIGN_SPEC:-/tmp/campaign_nights.json}
+ATTEMPTS=${ATTEMPTS:-3}
 LOGDIR=outputs/logs; mkdir -p $LOGDIR
+BADNODES=$LOGDIR/bad_gpu_nodes.txt; touch $BADNODES
 SUMMARY=$LOGDIR/campaign_$(date +%Y%m%d_%H%M%S).log
 
-echo "campaign: ${NIGHTS[*]}" | tee -a $SUMMARY
+jq_get() { python -c "import json,sys;d=json.load(open('$SPEC'))['$1'];print(d['$2'] if '$2'!='visits' else ','.join(str(v) for v in d['visits']))" 2>/dev/null; }
+excl() { tr '\n' ',' < $BADNODES | sed 's/,$//'; }
+
+# Re-detect the panels a dead shard skipped, then fold them into the night's catalogue.
+topup() {
+  local N=$1 R=outputs/runs/run_night_$N
+  local RES=$R/manifest_residual.csv
+  [ -s "$RES" ] || return 1
+  local NP; NP=$(( $(wc -l < "$RES") - 1 ))
+  local F=${R}_fill$(date +%s)
+  mkdir -p "$F"; cp "$RES" "$F/manifest.csv"
+  local E; E=$(excl)
+  echo "    top-up: $NP panels -> $(basename $F) ${E:+(excluding $E)}" | tee -a $SUMMARY
+  ADCNN_REPO=$REPO RUN=$PWD/$F sbatch ${E:+--exclude=$E} --wait \
+      --export=ALL,RUN,ADCNN_REPO ADCNN/pipelines/heliolinc/sn_detect.slurm \
+      >> $LOGDIR/campaign_night_$N.log 2>&1
+  # any node that threw ECC in this pass is remembered so later passes avoid it
+  for L in $LOGDIR/sn_detect_*.log; do
+    if grep -qi "uncorrectable ECC" "$L" 2>/dev/null; then
+      grep -oE "sdfada[0-9]+" "$L" 2>/dev/null | sort -u >> $BADNODES
+    fi
+  done
+  sort -u -o $BADNODES $BADNODES
+  [ -s "$F/adcnn_dets.csv" ] || { echo "    top-up produced nothing" | tee -a $SUMMARY; return 1; }
+  python -m ADCNN.pipelines.heliolinc.merge_dets --out "$R/adcnn_dets.csv" \
+      "$R/adcnn_dets.csv" "$F/adcnn_dets.csv" >> $LOGDIR/campaign_night_$N.log 2>&1
+  rm -f "$R/adcnn_dets_masked.csv"     # force re-mask over the enlarged catalogue
+  return 0
+}
+
+echo "campaign: ${NIGHTS[*]}  (attempts=$ATTEMPTS)" | tee -a $SUMMARY
 for N in "${NIGHTS[@]}"; do
-  COLL=$(python -c "import json;print(json.load(open('$SPEC'))['$N']['collection'])" 2>/dev/null)
-  VIS=$(python -c "import json;d=json.load(open('$SPEC'))['$N'];print(','.join(str(v) for v in d['visits']))" 2>/dev/null)
-  NV=$(python -c "import json;print(json.load(open('$SPEC'))['$N']['n'])" 2>/dev/null)
+  COLL=$(jq_get "$N" collection); VIS=$(jq_get "$N" visits); NV=$(jq_get "$N" n)
   if [ -z "$COLL" ] || [ -z "$VIS" ]; then
-    echo "[$N] SKIP: no collection/visits in $SPEC" | tee -a $SUMMARY; continue
-  fi
-  # >=100 visits => the telescope slewed through a sequence: many co-pointed groups, wide gaps,
-  # high density. Anything looser than the full-cadence op does not finish in reasonable time.
+    echo "[$N] SKIP: not in $SPEC" | tee -a $SUMMARY; continue; fi
   if [ "$NV" -ge 100 ]; then OP=ADCNN/pipelines/heliolinc/op_2v_stream_fullcadence.json
   else OP=ADCNN/pipelines/heliolinc/op_2v_stream.json; fi
   echo "[$N] $NV visits -> $(basename $OP)" | tee -a $SUMMARY
   t0=$SECONDS
-  ./adcnn night --butler-repo embargo --collection "$COLL" --night "$N" --no-known \
-      --visits "$VIS" --stream-op-point "$OP" > $LOGDIR/campaign_night_$N.log 2>&1
-  rc=$?
+  for try in $(seq 1 $ATTEMPTS); do
+    ./adcnn night --butler-repo embargo --collection "$COLL" --night "$N" --no-known \
+        --visits "$VIS" --stream-op-point "$OP" >> $LOGDIR/campaign_night_$N.log 2>&1
+    rc=$?
+    [ $rc -eq 0 ] && break
+    if grep -q "MISSING" $LOGDIR/campaign_night_$N.log 2>/dev/null && [ $try -lt $ATTEMPTS ]; then
+      echo "[$N] attempt $try: detection incomplete, topping up" | tee -a $SUMMARY
+      topup "$N" || break
+    else
+      break
+    fi
+  done
   A=$(wc -l < outputs/runs/run_night_$N/stream/alerts.jsonl 2>/dev/null || echo 0)
   P=$(ls outputs/runs/run_night_$N/stream/pairs 2>/dev/null | wc -l)
   echo "[$N] rc=$rc  $((SECONDS-t0))s  alerts=$A  images=$P" | tee -a $SUMMARY
   [ $rc -ne 0 ] && echo "[$N] see $LOGDIR/campaign_night_$N.log" | tee -a $SUMMARY
 done
 echo "campaign done -> $SUMMARY" | tee -a $SUMMARY
+echo "known-bad GPU nodes: $(tr '\n' ' ' < $BADNODES)" | tee -a $SUMMARY
