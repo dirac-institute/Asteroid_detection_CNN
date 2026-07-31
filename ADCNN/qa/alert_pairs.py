@@ -73,6 +73,29 @@ def _orientation_ray(ax, cx, cy, ang_deg, half_len, colour, lw=1.0):
     ax.plot([cx - dx, cx + dx], [cy - dy, cy + dy], color=colour, lw=lw, ls=(0, (3, 2)), alpha=0.9)
 
 
+def _assert_cache_matches(alerts_path, cutouts_npz, n_alerts):
+    """Refuse to render from a cutout cache built for a DIFFERENT alerts.jsonl.
+
+    The cache is keyed by alert INDEX (position in alerts.jsonl), so if the night is re-linked or
+    re-ranked and the cache is not rebuilt, index i addresses a different physical alert than it
+    did -- every image would be captioned with another object's numbers, silently. Night 20260629
+    sat in exactly that state: a 6,821-alert cache against an 11,293-alert file.
+    """
+    meta = os.path.splitext(cutouts_npz)[0] + "_meta.json"
+    if not os.path.exists(meta):
+        print(f"[pairs] WARN no {os.path.basename(meta)}; cannot verify the cache matches "
+              f"{os.path.basename(alerts_path)}", flush=True)
+        return
+    m = json.load(open(meta))
+    if m.get("n_alerts") != n_alerts:
+        raise SystemExit(
+            f"cutout cache is STALE: {cutouts_npz} was built for {m.get('n_alerts')} alerts but "
+            f"{alerts_path} now has {n_alerts}. The cache is indexed by alert position, so "
+            f"rendering would caption every image with the wrong alert. Rebuild it:\n"
+            f"  python -m ADCNN.qa.alert_cutouts --alerts {alerts_path} --dets <masked dets> "
+            f"--out {cutouts_npz}")
+
+
 def render(alerts_path, cutouts_npz, out_dir, top_n=None, dpi=120, workers=1, _slice=None):
     """Render per-alert figures. `workers`>1 splits the alert list across processes; each loads the
     cutout cache itself (~1.3 GB resident per worker -- an npz decompresses whole arrays on first
@@ -103,6 +126,7 @@ def render(alerts_path, cutouts_npz, out_dir, top_n=None, dpi=120, workers=1, _s
         print(f"[pairs] wrote {done} per-alert images -> {out_dir}", flush=True)
         return done
     lo, hi = _slice if _slice else (0, len(alerts))
+    _assert_cache_matches(alerts_path, cutouts_npz, len(alerts))
     z = np.load(cutouts_npz)
     stamps, a_ix, e_ix = z["stamps"], z["alert"], z["epoch"]
     zends = z["zoom_ends"] if "zoom_ends" in z.files else None
@@ -113,6 +137,19 @@ def render(alerts_path, cutouts_npz, out_dir, top_n=None, dpi=120, workers=1, _s
     wi = {int(w_al[i]): i for i in range(len(w_al))}
 
     os.makedirs(out_dir, exist_ok=True)
+    # Clear stale renders FIRST. alertIds are assigned sequentially per link run and are NOT
+    # stable across runs (the repo rule is that cross-run identity is by member position only),
+    # so a file left behind by a previous link names an alert that no longer exists -- and its
+    # name COLLIDES with a different physical object in the current run. Night 20260630
+    # accumulated 19,935 files for 10,912 alerts this way, 9,128 of them duplicate ids from a
+    # superseded link, which is worse than useless to anyone browsing by filename.
+    if _slice is None:
+        import glob as _glob
+        stale = _glob.glob(os.path.join(out_dir, "alert_*.png"))
+        for f in stale:
+            os.remove(f)
+        if stale:
+            print(f"[pairs] cleared {len(stale)} stale render(s) from {out_dir}", flush=True)
     written = 0
     for rank in range(lo, hi):
         al = alerts[rank]

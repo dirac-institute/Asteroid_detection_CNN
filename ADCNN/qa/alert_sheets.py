@@ -45,6 +45,29 @@ def _classify(al):
     return classify(al)[0].replace("-FLAGGED", "")
 
 
+def _assert_cache_matches(alerts_path, cutouts_npz, n_alerts):
+    """Refuse to render from a cutout cache built for a DIFFERENT alerts.jsonl.
+
+    The cache is keyed by alert INDEX (position in alerts.jsonl), so if the night is re-linked or
+    re-ranked and the cache is not rebuilt, index i addresses a different physical alert than it
+    did -- every image would be captioned with another object's numbers, silently. Night 20260629
+    sat in exactly that state: a 6,821-alert cache against an 11,293-alert file.
+    """
+    meta = os.path.splitext(cutouts_npz)[0] + "_meta.json"
+    if not os.path.exists(meta):
+        print(f"[pairs] WARN no {os.path.basename(meta)}; cannot verify the cache matches "
+              f"{os.path.basename(alerts_path)}", flush=True)
+        return
+    m = json.load(open(meta))
+    if m.get("n_alerts") != n_alerts:
+        raise SystemExit(
+            f"cutout cache is STALE: {cutouts_npz} was built for {m.get('n_alerts')} alerts but "
+            f"{alerts_path} now has {n_alerts}. The cache is indexed by alert position, so "
+            f"rendering would caption every image with the wrong alert. Rebuild it:\n"
+            f"  python -m ADCNN.qa.alert_cutouts --alerts {alerts_path} --dets <masked dets> "
+            f"--out {cutouts_npz}")
+
+
 def render(alerts_path, cutouts_npz, out_dir, per_sheet=48, limit=None, dpi=110, grid_cols=6):
     import matplotlib
     matplotlib.use("Agg")
@@ -57,6 +80,7 @@ def render(alerts_path, cutouts_npz, out_dir, per_sheet=48, limit=None, dpi=110,
         print("[sheets] 0 alerts -- nothing to render", flush=True)
         return
 
+    _assert_cache_matches(alerts_path, cutouts_npz, len(alerts))
     z = np.load(cutouts_npz)
     stamps, a_ix, e_ix = z["stamps"], z["alert"], z["epoch"]
     by_alert = {}
