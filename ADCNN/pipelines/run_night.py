@@ -222,7 +222,7 @@ def run(a):
         if not a.dry_run:
             _check_detect_coverage()
 
-    def _check_detect_coverage():
+    def _check_detect_coverage(source_csv=None):
         """Fail loud if detection silently skipped panels.
 
         A per-GPU shard that dies -- e.g. `CUDA error: uncorrectable ECC error`, which hit THREE
@@ -243,7 +243,8 @@ def run(a):
         # must fall back to the panels present in the dets catalogue. That fallback under-counts by
         # the genuinely-empty panels, hence the tolerance below rather than demanding 100%.
         got, src = set(), "none"
-        dn_files = list(out.glob("_shard_adcnn_dets_*.csv.done")) + list(out.glob("adcnn_dets.csv.done"))
+        dn_files = [] if source_csv else (
+            list(out.glob("_shard_adcnn_dets_*.csv.done")) + list(out.glob("adcnn_dets.csv.done")))
         if dn_files:
             for dn in dn_files:
                 for line in open(dn):
@@ -252,7 +253,7 @@ def run(a):
                         got.add((int(p[0]), int(p[1])))
             src = f"{len(dn_files)} .done marker file(s)"
         else:
-            dets = out / "adcnn_dets.csv"
+            dets = Path(source_csv) if source_csv else (out / "adcnn_dets.csv")
             if dets.exists():
                 import csv as _c2
                 with open(dets) as fh:
@@ -303,7 +304,14 @@ def run(a):
         # resuming at the linking stage.
         msk = out / "adcnn_dets_masked.csv"
         if msk.exists() and msk.stat().st_size > 0 and not a.force:
-            print("      (adcnn_dets_masked.csv exists; reuse)"); return
+            print("      (adcnn_dets_masked.csv exists; reuse)")
+            # Re-verify coverage on the REUSE path too. s_detect's guard only runs when detection
+            # actually runs; a night whose detection was cut short by a dead shard, then re-entered
+            # later, would skip detect AND mask on the stale files and link an incomplete night
+            # silently. That happened to 20260705 (25% missing) and 20260706 (50%): both reported
+            # rc=0 and produced alerts from half a night.
+            _check_detect_coverage(source_csv=msk)
+            return
         cmd = (f"python -m ADCNN.pipelines.heliolinc.mask_flags --dets {out}/adcnn_dets.csv "
                f"--manifest {manifest} --out {out}/adcnn_dets_masked.csv --workers {a.mask_workers}")
         _bash(cmd, a.dry_run)
