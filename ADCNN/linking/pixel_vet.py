@@ -321,7 +321,14 @@ def main():
                     help="cap on covering visits stacked per endpoint (closest-in-time first)")
     ap.add_argument("--confident-fpp-max", type=float, default=0.01,
                     help="max fpp.perAlertShare for the `confident` bit")
-    ap.add_argument("--max-panels", type=int, default=5, help="panel LRU cache size (~200 MB each)")
+    ap.add_argument("--max-panels", type=int, default=48,
+                    help="panel LRU cache size. Each resident panel is ~0.2 GB, so 48 is ~9 GB -- "
+                         "trivial on a 500 GB node. PROFILED: one alert costs ~14 panel loads and "
+                         "19.4 s, essentially all of it decompressing whole 4072x4000 tile-"
+                         "compressed planes to read a ~20x20 px capsule. A bigger cache only helps "
+                         "when consecutive alerts reuse panels, so pair it with --panel-order; the "
+                         "real fix is reading just the capsule's tiles via HDU.section, which needs "
+                         "the panel store to hold open handles rather than materialised arrays")
     a = ap.parse_args()
 
     out_path = a.alerts if a.in_place else a.out
