@@ -186,6 +186,21 @@ def run(a):
     out = Path(a.out) if a.out else OUTPUTS / "runs" / f"run_night_{a.night}"
     out.mkdir(parents=True, exist_ok=True)
     manifest = out / "manifest.csv"
+
+    # Idempotent re-entry. A night is done only when night_status finds every artifact present AND
+    # mutually consistent (not merely "the output file exists", which cannot tell a truncated link
+    # or a stale image set from a finished one). Skip a verified-complete night; otherwise proceed
+    # and let each stage's own reuse guard skip the parts that are already good.
+    from ADCNN.pipelines.night_status import status as _night_status, mark_complete as _mark_complete
+    if not a.force:
+        _s = _night_status(str(out))
+        if _s["complete"]:
+            print(f"[run_night] {a.night} already COMPLETE (all artifacts consistent); "
+                  f"nothing to do. --force to rebuild."); return
+        if _s["first_missing"]:
+            print(f"[run_night] {a.night} incomplete -> resuming from '{_s['first_missing']}' "
+                  f"({_s['detail']})")
+
     print(f"[run_night] pipeline={pipe.name} provenance={pipe.provenance}")
     print(f"  night={a.night} tracts={a.tracts} visits={a.visits} collection={a.collection}")
     print(f"  out={out}")
@@ -391,7 +406,12 @@ def run(a):
         static = f" --static-catalog {static_catalog}" if static_catalog.exists() and not a.no_static_veto else ""
         # per-substage resume: a re-run after an interrupted night must not redo the ~45 min link
         # or the S3 cutout pass. --force redoes everything (same convention as manifest/known).
-        if a.force or not (sd / "alerts.jsonl").exists():
+        ap = sd / "alerts.jsonl"
+        # Re-link when the alerts file is MISSING OR EMPTY, not merely absent. A link that died
+        # after writing tracks.csv but before alerts.jsonl (20260705/06) left a tracks file and no
+        # alerts, and an `exists`-only guard on a later stage would then render from nothing. The
+        # cutout cache and sheets/pairs are downstream of this, so a truncated link must re-run.
+        if a.force or not (ap.exists() and ap.stat().st_size > 0):
             # claim-order + rank-by are what make a LOW-THRESHOLD stream trustworthy: at 11k alerts
             # the seeding-order claim loses real pairs to spurious ones. Which PRIORITY to claim by
             # was settled against INJECTED TRUTH on the calibration night, not against the 12 frozen
@@ -464,7 +484,21 @@ def run(a):
     print(f"  runtime_report.json -> per-visit {rep['per_visit_seconds']}s, "
           f"per-detector-pass {rep['per_detector_pass_seconds']}s, night {rep['per_night_seconds']}s")
     _plot_runtime(out, rep, a.dry_run)
-    print(f"[run_night] done -> {out}/ (tracks.csv + alerts.jsonl + runtime_report.json)")
+
+    # Sentinel: write .complete ONLY if every artifact now verifies, so re-entry is a cheap stat
+    # and a half-finished night is never mistaken for done. If it does not verify, say what is
+    # still missing rather than claiming success -- the campaign driver reads this to decide.
+    if not a.dry_run and not a.no_stream:
+        fin = _night_status(str(out))
+        if fin["complete"]:
+            _mark_complete(str(out))
+            print(f"[run_night] {a.night} COMPLETE -> {out}/ (.complete written)")
+        else:
+            print(f"[run_night] {a.night} finished stages but NOT complete: "
+                  f"still needs '{fin['first_missing']}' ({fin['detail']}). "
+                  f"Re-run to resume; not marking complete.")
+    else:
+        print(f"[run_night] done -> {out}/ (tracks.csv + alerts.jsonl + runtime_report.json)")
     return rep
 
 

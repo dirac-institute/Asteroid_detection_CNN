@@ -81,24 +81,29 @@ for N in "${NIGHTS[@]}"; do
   NP=$(jq_get "$N" panels)
   if [ "${NP:-0}" -ge 3000 ]; then OP=ADCNN/pipelines/heliolinc/op_2v_stream_fullcadence.json
   else OP=ADCNN/pipelines/heliolinc/op_2v_stream.json; fi
+  # Skip a night that already VERIFIES complete (sentinel-cheap; consistency, not file-exists).
+  if [ -f outputs/runs/run_night_$N/.complete ]; then
+    echo "[$N] already complete -- skip" | tee -a $SUMMARY; continue; fi
   echo "[$N] $NV visits, ${NP:-?} panels -> $(basename $OP)" | tee -a $SUMMARY
   t0=$SECONDS
   for try in $(seq 1 $ATTEMPTS); do
     ./adcnn night --butler-repo embargo --collection "$COLL" --night "$N" --no-known \
         --visits "$VIS" --stream-op-point "$OP" >> $LOGDIR/campaign_night_$N.log 2>&1
-    rc=$?
-    [ $rc -eq 0 ] && break
+    # Truth is the artifact verifier, not the exit code: run_night writes .complete only when every
+    # artifact is present AND consistent. A missing sentinel means resume, whatever rc says.
+    if [ -f outputs/runs/run_night_$N/.complete ]; then rc=0; break; fi
+    rc=1
     if grep -q "MISSING" $LOGDIR/campaign_night_$N.log 2>/dev/null && [ $try -lt $ATTEMPTS ]; then
       echo "[$N] attempt $try: detection incomplete, topping up" | tee -a $SUMMARY
-      topup "$N" || break
-    else
-      break
+      topup "$N" || true                 # re-enter the loop even if top-up is a no-op; it may be a
+                                         # non-detect gap (link/images) that a plain re-run fixes
+    elif [ $try -lt $ATTEMPTS ]; then
+      echo "[$N] attempt $try: incomplete, re-running to resume" | tee -a $SUMMARY
     fi
   done
-  A=$(wc -l < outputs/runs/run_night_$N/stream/alerts.jsonl 2>/dev/null || echo 0)
-  P=$(ls outputs/runs/run_night_$N/stream/pairs 2>/dev/null | wc -l)
-  echo "[$N] rc=$rc  $((SECONDS-t0))s  alerts=$A  images=$P" | tee -a $SUMMARY
-  [ $rc -ne 0 ] && echo "[$N] see $LOGDIR/campaign_night_$N.log" | tee -a $SUMMARY
+  echo "[$N] rc=$rc  $((SECONDS-t0))s  $(python -m ADCNN.pipelines.night_status \
+        outputs/runs/run_night_$N 2>/dev/null | head -1)" | tee -a $SUMMARY
+  [ $rc -ne 0 ] && echo "[$N] NOT complete -- see $LOGDIR/campaign_night_$N.log" | tee -a $SUMMARY
 done
 echo "campaign done -> $SUMMARY" | tee -a $SUMMARY
 echo "known-bad GPU nodes: $(tr '\n' ' ' < $BADNODES)" | tee -a $SUMMARY
