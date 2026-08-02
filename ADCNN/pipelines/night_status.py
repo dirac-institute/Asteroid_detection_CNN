@@ -27,6 +27,9 @@ import argparse, glob, json, os, re, sys
 from pathlib import Path
 
 MISS_TOL = 0.05
+IMAGE_CAP = 20000            # run_night renders the top --stream-pairs-top-n alerts (default 20000);
+                            # a night with MORE alerts images only the top IMAGE_CAP, so the
+                            # verifier must require images for min(n_alerts, IMAGE_CAP), not all n.
 STAGES = ["detect", "link", "images", "sheets", "summary"]
 _IMG_RE = re.compile(r"^alert_\d+_p[\d.NA]+_(.+)_[A-Z']+\.png$")
 
@@ -69,15 +72,17 @@ def status(run_dir):
     n = len(ids)
     st["detail"]["link"] = f"{n} alerts"
 
-    # images: one file per alertId, no dup, no orphan
+    # images: one file per alertId for the TOP min(n, IMAGE_CAP) ranked alerts (alerts.jsonl is
+    # rank-ordered), no dup, no orphan. Beyond the cap is intentionally un-rendered, not missing.
+    want_img = set(ids[:min(n, IMAGE_CAP)])
     imgs = glob.glob(str(sd / "pairs" / "alert_*.png"))
     fids = [m.group(1) for m in (_IMG_RE.match(os.path.basename(p)) for p in imgs) if m]
-    idset, fidset = set(ids), set(fids)
+    fidset = set(fids)
     dup = len(fids) - len(fidset)
-    missing_imgs = idset - fidset
-    orphan = fidset - idset
-    st["detail"]["images"] = (f"{len(imgs)} files, {dup} dup, {len(missing_imgs)} missing, "
-                              f"{len(orphan)} orphan")
+    missing_imgs = want_img - fidset
+    orphan = fidset - set(ids)                        # a file naming an alert not in the stream
+    st["detail"]["images"] = (f"{len(imgs)} files, top {len(want_img)} expected, {dup} dup, "
+                              f"{len(missing_imgs)} missing, {len(orphan)} orphan")
     if dup or missing_imgs or orphan:
         st["first_missing"] = "images"; return st
 
