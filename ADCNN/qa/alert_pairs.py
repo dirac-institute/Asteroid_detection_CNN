@@ -112,6 +112,20 @@ def render(alerts_path, cutouts_npz, out_dir, top_n=None, dpi=120, workers=1, _s
     if not alerts:
         print("[pairs] 0 alerts", flush=True)
         return
+    # Clear stale renders once, in the OWNING call, before any work. alertIds are assigned
+    # sequentially per link run and are NOT stable across runs (cross-run identity is member
+    # position only), so a file left by a previous link names an alert that no longer exists and
+    # its name COLLIDES with a different object now. This MUST run before the parallel fan-out:
+    # the parent returns right after spawning workers, so a clear placed after that (as it was)
+    # never ran in --workers mode -- 20260713 kept 15,615 files for 8,273 alerts that way.
+    if _slice is None:
+        import glob as _glob
+        os.makedirs(out_dir, exist_ok=True)
+        stale = _glob.glob(os.path.join(out_dir, "alert_*.png"))
+        for f in stale:
+            os.remove(f)
+        if stale:
+            print(f"[pairs] cleared {len(stale)} stale render(s) from {out_dir}", flush=True)
     if workers > 1 and _slice is None:
         import multiprocessing as mp
         from concurrent.futures import ProcessPoolExecutor
@@ -137,19 +151,6 @@ def render(alerts_path, cutouts_npz, out_dir, top_n=None, dpi=120, workers=1, _s
     wi = {int(w_al[i]): i for i in range(len(w_al))}
 
     os.makedirs(out_dir, exist_ok=True)
-    # Clear stale renders FIRST. alertIds are assigned sequentially per link run and are NOT
-    # stable across runs (the repo rule is that cross-run identity is by member position only),
-    # so a file left behind by a previous link names an alert that no longer exists -- and its
-    # name COLLIDES with a different physical object in the current run. Night 20260630
-    # accumulated 19,935 files for 10,912 alerts this way, 9,128 of them duplicate ids from a
-    # superseded link, which is worse than useless to anyone browsing by filename.
-    if _slice is None:
-        import glob as _glob
-        stale = _glob.glob(os.path.join(out_dir, "alert_*.png"))
-        for f in stale:
-            os.remove(f)
-        if stale:
-            print(f"[pairs] cleared {len(stale)} stale render(s) from {out_dir}", flush=True)
     written = 0
     for rank in range(lo, hi):
         al = alerts[rank]
