@@ -216,6 +216,7 @@ def run(a):
     lsst = a.lsst_setup
     tm = _Timer()
     static_catalog = out / "static_catalog.parquet"
+    bright_refcat = out / "bright_refcat.parquet"
 
     def s_manifest():
         if manifest.exists() and manifest.stat().st_size > 0 and not a.force:
@@ -372,6 +373,26 @@ def run(a):
             print("      WARN: static-catalog build failed (no DRP coverage for these tracts?) -- "
                   "linking WITHOUT the static veto (documented fail-safe).")
 
+    def s_refcat():
+        """ALL-SKY bright-star refcat -> the product's bright-star PROXIMITY veto (the primary ring
+        lever). Unlike the coadd static catalog this is all-sky, so it works on nights with no DRP
+        coverage -- which is most of them. DEPTH IS THE POINT: the residual dipole/RINGS in the
+        delivered product sit on mag 19-21 stars, so a shallow (mag<19) refcat catches 0% of them.
+        Measured 20260706 with an offset null: mag<21 @2.5" removes 55.8% of the product at 2.7%
+        cost to real movers (~20:1). Best-effort: a failure just leaves the veto off (fail-safe)."""
+        if a.no_refcat:
+            print("      (--no-refcat: skipped)"); return
+        if bright_refcat.exists() and not a.force:
+            print("      (bright_refcat.parquet exists; reuse)"); return
+        cmd = (f"bash -c '{lsst}; cd {REPO}; BUTLER_REPO=embargo python -m ADCNN.linking.build_static_refcat "
+               f"--dets {out}/adcnn_dets_masked.csv --out {bright_refcat} "
+               f"--refcat the_monster_20250219 --mag-max {a.refcat_mag_max}'")
+        try:
+            _bash(cmd, a.dry_run)
+        except subprocess.CalledProcessError:
+            print("      WARN: refcat build failed -- product runs WITHOUT the bright-star proximity "
+                  "veto (rings will survive; documented fail-safe).")
+
     def s_link():
         floor = f" --score-candidate-min {a.candidate_floor}" if a.candidate_floor else ""
         static = f" --static-catalog {static_catalog}" if static_catalog.exists() and not a.no_static_veto else ""
@@ -471,6 +492,7 @@ def run(a):
     tm.stage("build_known", s_known)
     tm.stage("mask_flags", s_mask)
     tm.stage("static_catalog", s_static)
+    tm.stage("bright_refcat", s_refcat)
     tm.stage("link_2visit", s_link)
     tm.stage("pixel_vet", s_vet)
     tm.stage("mpc_crossmatch", s_mpc)
@@ -534,6 +556,13 @@ def main(argv=None):
                          "the shipped night product uses 0.5; 0 = single-floor op only")
     ap.add_argument("--no-known", action="store_true",
                     help="write a header-only known.csv (prompt/embargo recipe: label post-hoc)")
+    ap.add_argument("--no-refcat", action="store_true",
+                    help="skip building the all-sky bright-star refcat; the product then runs WITHOUT "
+                         "the bright-star proximity veto (the primary ring lever) -- rings will survive")
+    ap.add_argument("--refcat-mag-max", type=float, default=21.0,
+                    help="depth of the all-sky refcat for the proximity veto. 21 (the_monster is "
+                         "complete to G~21) is REQUIRED: the residual product rings sit on mag 19-21 "
+                         "stars, so the old mag<19 catalog caught 0%% of them (measured 20260706)")
     ap.add_argument("--no-static-veto", action="store_true",
                     help="skip the bright-static template-footprint veto stage")
     ap.add_argument("--no-report", action="store_true",

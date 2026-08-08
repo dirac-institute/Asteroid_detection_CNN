@@ -63,6 +63,11 @@ _COLMAP = {
     "elongation": "elongation",
     "max_p": "nn_pmax",         # peak NN segmentation probability
     "score": "score",           # stage-2 cutout-CNN score (operating cut applied before emit)
+    # DETECTION-TIME morphology (bright-star diffim dipole/RING measure, DMTN-007): computed on the
+    # diffim stamp while it is in memory (no extra IO), so linking can refuse ring seeds pre-link
+    # instead of a post-link QA stamp pass. See panel_to_catalog_rows + ADCNN.qa.alert_morphology.
+    "m_elong": "m_elong", "m_dipole": "m_dipole", "m_neg_ratio": "m_neg_ratio",
+    "m_neg_blob": "m_neg_blob", "is_dipole": "is_dipole",
 }
 CATALOG_COLUMNS = list(_COLMAP.values())
 _ROUTING_KEYS = ("image_id", "visit", "detector", "band")  # joined from panels.csv for HelioLinC
@@ -138,7 +143,28 @@ def panel_to_catalog_rows(pid: int, prob, img, agg, rl, cnn,
     if "mf_length" in cand.columns:   # de-bias the ends-bloom -> physical trail length (see MF_LEN_*)
         cand["mf_length_raw"] = cand["mf_length"]   # preserve RAW (pre-debias) for model-specific MF_LEN recalibration
         cand["mf_length"] = np.clip((cand["mf_length"] - MF_LEN_OFFSET) / MF_LEN_SLOPE, 0.0, None)
+    _attach_dipole_morphology(cand, img)             # DETECTION-TIME ring flag (no extra pixel IO)
     return cand[[c for c in _COLMAP if c in cand.columns]].rename(columns=_COLMAP)
+
+
+# DMTN-007 dipole/RING morphology at DETECTION time -----------------------------------------------
+# The stage-1 image (diffim) is already in memory here, so the per-detection dipole measure costs no
+# extra pixel IO. Emitting it as a catalog column lets the LINKER refuse ring seeds pre-link (rings
+# never form tracklets) instead of the old post-link QA stamp pass (ADCNN.qa.alert_morphology on the
+# alert cutouts). ONE flag definition (alert_morphology.ripple_flag) is shared by both paths.
+_MORPH_K = 96          # stamp size for the feature (matches the QA mosaic stamp; _features uses win=28)
+
+def _attach_dipole_morphology(cand: pd.DataFrame, img) -> None:
+    from ADCNN.qa.alert_morphology import _features, ripple_flag
+    from ADCNN.inference.cnn_postproc import _cutout
+    xs = cand["x_centroid"].to_numpy(); ys = cand["y_centroid"].to_numpy()
+    E = np.empty(len(xs)); D = np.empty(len(xs)); SN = np.empty(len(xs))
+    NR = np.empty(len(xs)); NB = np.empty(len(xs))
+    for i in range(len(xs)):
+        e, d, _nd, pk, nr, nb = _features(_cutout(img, xs[i], ys[i], _MORPH_K))
+        E[i], D[i], SN[i], NR[i], NB[i] = e, d, pk, nr, nb
+    cand["m_elong"] = E; cand["m_dipole"] = D; cand["m_neg_ratio"] = NR; cand["m_neg_blob"] = NB
+    cand["is_dipole"] = ripple_flag(E, D, SN, NR, NB)
 
 
 def _attach_routing_keys(cat: pd.DataFrame, panels_csv) -> pd.DataFrame:

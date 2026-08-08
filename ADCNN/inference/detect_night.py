@@ -180,7 +180,14 @@ def run_shard(gpu_id, rows, seg_ckpt, cnn_model, thr, prefetch, out_csv, n_worke
                 ra0=sky0[:, 0], dec0=sky0[:, 1], ra1=sky1[:, 0], dec1=sky1[:, 1],
                 beta=cand["beta"].to_numpy(),
                 beta_nn=cand.get("beta_nn", pd.Series(np.nan, index=cand.index)).to_numpy(),
-                nn_pmax=cand["nn_pmax"].to_numpy()))
+                nn_pmax=cand["nn_pmax"].to_numpy(),
+                # DETECTION-TIME dipole/RING morphology (catalog.panel_to_catalog_rows): lets the
+                # linker refuse ring seeds pre-link. NaN/absent for older catalogs (backward-safe).
+                m_elong=cand.get("m_elong", pd.Series(np.nan, index=cand.index)).to_numpy(),
+                m_dipole=cand.get("m_dipole", pd.Series(np.nan, index=cand.index)).to_numpy(),
+                m_neg_ratio=cand.get("m_neg_ratio", pd.Series(np.nan, index=cand.index)).to_numpy(),
+                m_neg_blob=cand.get("m_neg_blob", pd.Series(np.nan, index=cand.index)).to_numpy(),
+                is_dipole=cand.get("is_dipole", pd.Series(False, index=cand.index)).to_numpy()))
             out.to_csv(out_csv, mode="a", header=write_header, index=False)
             write_header = False; n_det += len(out)
         donef.write(f'{int(r["visit"])},{int(r["detector"])}\n'); donef.flush()
