@@ -69,6 +69,42 @@ def trail_velocity(d, exptime_s):
 # [|dSNR|/min], dpa_tm [deg trail-vs-motion PA], dspeed [frac trail-vs-motion speed].
 CHI2_SIG_2V = dict(perp=0.127, resid=0.133, dsnr=0.558, dpa_tm=4.869, dspeed=0.237)
 
+# TRAIL-PA MEASUREMENT PRECISION vs TRAIL LENGTH -- measured against INJECTED truth (2,181 recovered
+# injections over 30 real 20260706 panels, lengths 6-30 px; outputs/runs/pa_precision/measure_pa.py):
+#     L px :    6     8    10    13    17    22    30
+#     sigma: 17.06  8.99  8.17  5.82  3.42  2.93  2.28   (deg, robust 1.4826*MAD of measured-true PA)
+# The single fixed dpa_tm sigma above (4.869 deg) corresponds to L ~= 15 px and is therefore wrong in
+# BOTH directions: at L=6 the true scatter is 3.5x larger, so a real short-trailed (slow) mover has its
+# PA chi2 term inflated ~12x and is rejected for a MEASUREMENT limit rather than for being a bad link;
+# at L=30 the true scatter is 2.1x SMALLER, so chance links with sloppy PA are judged ~4.6x too
+# leniently. Scaling the sigma with the (worse-measured) member's trail length fixes both ends.
+# NOTE this could not be measured from a linked stream: there the dpa spread is ~33 deg at every length,
+# which is just 1.4826*MAD of a UNIFORM [0,90] -- i.e. chance links, not PA precision. Truth is required.
+_PA_L = np.array([6.0, 8.0, 10.0, 13.0, 17.0, 22.0, 30.0])
+_PA_S = np.array([17.06, 8.99, 8.17, 5.82, 3.42, 2.93, 2.28])
+
+
+def sigma_dpa(len_px):
+    """Trail-PA sigma (deg) for a trail of `len_px`, interpolated from the injection measurement.
+
+    *** REFUTED AS A chi2 SIGMA -- OFF BY DEFAULT (ADCNN_PA_SCALED_SIGMA=1 to enable, study only). ***
+    Injection-recovery on 1,699 synthetic movers (20260706, rates 1.2-7.0 deg/day) MEASURED the effect
+    of substituting these values into the chi2 and it is a LOSS on both axes:
+        rate deg/day :  1.2   1.8   2.5   3.5   5.0   7.0    ALL
+        C fixed sigma:  0.0%  4.3%  4.2%  6.1%  5.3%  2.1%   3.5%
+        C scaled     :  0.0%  4.3%  4.2%  4.9%  3.1%  1.0%   2.9%
+    -- no gain at the slow/short-trail end (the PA term was never the binding constraint there), and a
+    REAL completeness loss at the fast end, with purity also worse (alerts per recovered true mover
+    408 -> 487). WHY the physical argument failed: this function measures the SINGLE-EPOCH trail-PA
+    MEASUREMENT precision, but the chi2 term scores trail-PA vs CHORD-motion-PA agreement, whose
+    variance additionally contains the centroid error propagated into the chord direction and any real
+    trail/motion mismatch. The shipped fixed 4.869 deg was calibrated on that PAIR-LEVEL statistic; the
+    2.28 deg measured here for a 30px trail is only one of its terms, so scaling by it under-estimates
+    the true scatter and wrongly rejects real fast movers. Kept for reference and for anyone tempted to
+    re-derive the same idea: the measurement is sound, the SUBSTITUTION is not.
+    """
+    return float(np.interp(float(len_px), _PA_L, _PA_S))
+
 # admissible-region summary keys (orbit_check.orbit_ok): [lo,hi] ranges of the bound, plausible 2-point
 # orbit FAMILY the gate accepted. Reported in tracks.csv and the alert orbit block INSTEAD of the old
 # argmin (a, e) point estimate, which is degenerate for a same-night 2-point arc (resid flat in rho;
@@ -113,7 +149,14 @@ def pair_chi2(g, exptime_s=30.0, sig=None):
     s = g.mf_snr.to_numpy() if "mf_snr" in g.columns else np.array([1.0, 1.0])
     dsnr = abs(s[0] - s[-1]) / max(min(s), 1e-3)
     f = dict(perp=perp, resid=resid, dsnr=dsnr, dpa_tm=dpa_tm, dspeed=dspeed)
-    chi2 = float(sum((f[k] / sig[k])**2 for k in sig))
+    # PA term: divide by the sigma the SHORTER (worse-measured) member's trail actually supports, not a
+    # single fixed value -- see sigma_dpa(). Opt out with ADCNN_PA_FIXED_SIGMA=1 to reproduce the old chi2.
+    _sig = dict(sig)
+    if os.environ.get("ADCNN_PA_SCALED_SIGMA") and "len_db" in g.columns:
+        _Lmin = float(np.nanmin(g.len_db.to_numpy())) if np.isfinite(g.len_db.to_numpy()).any() else np.nan
+        if np.isfinite(_Lmin):
+            _sig["dpa_tm"] = sigma_dpa(_Lmin)
+    chi2 = float(sum((f[k] / _sig[k])**2 for k in _sig))
     return chi2, dict(bound=bool(of.get("bound", False)), a=float(of.get("a", np.nan)),
                       e=float(of.get("e", np.nan)),
                       **{k: of.get(k, np.nan) for k in ADM_KEYS}, **f)
@@ -223,7 +266,7 @@ def auto_2v_window_min(dets, *, pointing_tol_deg=1.0, margin=1.15, lo=40.0, hi=7
 
 
 def chord_seed_pairs(dets, *, max_arc_min=40.0, rate_min=0.3, rate_max=10.0, max_visit_pairs=None,
-                     max_visit_sep_deg=2.0):
+                     max_visit_sep_deg=2.0, fast=False):
     """Seed 2-visit candidate pairs by the POSITION CHORD, not the noisy trail-velocity. For each pair of
     adjacent same-night visits (gap <= max_arc_min) enumerate detection pairs whose sky separation is
     consistent with a rate_min..rate_max deg/day mover, via a k-d tree. Returns [i,j] member-index lists
@@ -275,21 +318,90 @@ def chord_seed_pairs(dets, *, max_arc_min=40.0, rate_min=0.3, rate_max=10.0, max
         print(f"[chord-seed] dense cadence: capping {len(vpairs)} visit-pairs -> {max_visit_pairs} "
               f"(nearest-in-time)", flush=True)
         vpairs = vpairs[:max_visit_pairs]
-    for dt, a_, b_ in vpairs:
+    import time as _time
+    _t0 = _time.time(); _last = _t0
+    for _vp, (dt, a_, b_) in enumerate(vpairs):
+        if _time.time() - _last > 20:                        # heartbeat: which visit-pair, cumulative pairs
+            print(f"[chord-seed] visit-pair {_vp+1}/{len(vpairs)} | {len(pairs)} seed pairs so far "
+                  f"({_time.time()-_t0:.0f}s)", flush=True)
+            _last = _time.time()
         ia, ib = idx_by[a_], idx_by[b_]
         if not len(ia) or not len(ib):
             continue
         tree = cKDTree(radec_to_unit(ra[ib], dec[ib]))       # 3-D unit-sphere: correct across RA=0 + poles
         dmin, dmax = rate_min * dt, rate_max * dt             # deg (angular)
         qmax = _chord_radius(dmax)
-        for i in ia:
-            cd = float(np.cos(np.radians(dec[i])))
-            for jp in tree.query_ball_point(radec_to_unit(ra[i], dec[i]), qmax):
-                j = int(ib[jp])
-                dra = (ra[j] - ra[i] + 180.0) % 360.0 - 180.0
-                if np.hypot(dra * cd, dec[j] - dec[i]) >= dmin:   # rate floor (RA-wrap-safe)
-                    pairs.append([int(i), j])
+        if fast:
+            # EXACT vectorized seeding: one C-level batched ball query over ALL of `ia` instead of a
+            # per-detection Python query, and a vectorized rate-floor filter. Same [i,j] pairs as the
+            # loop below (validated set- AND order-identical); the KD query is deterministic per tree.
+            nbrs = tree.query_ball_point(radec_to_unit(ra[ia], dec[ia]), qmax, return_sorted=True)
+            for k in range(len(ia)):
+                js = nbrs[k]
+                if not len(js):
+                    continue
+                js = np.asarray(js, dtype=int)
+                jj = ib[js]
+                dra = (ra[jj] - ra[ia[k]] + 180.0) % 360.0 - 180.0
+                keep = jj[np.hypot(dra * np.cos(np.radians(dec[ia[k]])), dec[jj] - dec[ia[k]]) >= dmin]
+                ik = int(ia[k])
+                pairs.extend([ik, int(j)] for j in keep)
+        else:
+            for i in ia:
+                cd = float(np.cos(np.radians(dec[i])))
+                for jp in tree.query_ball_point(radec_to_unit(ra[i], dec[i]), qmax):
+                    j = int(ib[jp])
+                    dra = (ra[j] - ra[i] + 180.0) % 360.0 - 180.0
+                    if np.hypot(dra * cd, dec[j] - dec[i]) >= dmin:   # rate floor (RA-wrap-safe)
+                        pairs.append([int(i), j])
     return pairs
+
+
+# ---- parallel physical_check for the claim stage (--fast-link) --------------------------------
+# physical_check is a pure function of (dets, members, params); the claim stage runs it once per
+# candidate and (in the two-pass preal/quality path) again to build the alert. --fast-link computes
+# it ONCE, in a process pool, and reuses the cached result for both passes -- EXACT (identical result
+# object per candidate), just parallel across cores. dets is shared read-only via the pool initializer
+# (pickled once per worker), so only the small member-index list crosses per task.
+_PC_DETS = None
+_PC_KW = None
+
+def _pc_init(dets, kw):
+    global _PC_DETS, _PC_KW
+    _PC_DETS = dets; _PC_KW = kw
+
+def _pc_call(members):
+    st = {}
+    ok, info, n_ep = physical_check(_PC_DETS, members, out=st, **_PC_KW)
+    return ok, info, n_ep, float(st.get("chi2", np.inf))   # chi2 for the preal/quality claim sort
+
+def _physical_check_all(dets, cand, kw, workers):
+    """Return [(ok, info, n_ep, chi2), ...] aligned with `cand`, computed in parallel (ordered). Falls
+    back to serial for tiny lists or workers<=1. EXACT: same physical_check(dets, members, **kw)."""
+    if workers is None or workers <= 1 or len(cand) < 256:
+        out = []
+        for m in cand:
+            st = {}
+            ok, info, n_ep = physical_check(dets, m, out=st, **kw)
+            out.append((ok, info, n_ep, float(st.get("chi2", np.inf))))
+        return out
+    import multiprocessing as mp, time
+    from concurrent.futures import ProcessPoolExecutor
+    ctx = mp.get_context("fork")   # fork: dets already in memory, no re-pickle of the big frame
+    chunk = max(1, len(cand) // (workers * 8))
+    print(f"[claim] physical_check on {len(cand)} candidates, {workers} workers...", flush=True)
+    res = [None] * len(cand); t0 = time.time(); last = t0
+    with ProcessPoolExecutor(max_workers=workers, mp_context=ctx,
+                             initializer=_pc_init, initargs=(dets, kw)) as ex:
+        for i, r in enumerate(ex.map(_pc_call, cand, chunksize=chunk)):   # ordered
+            res[i] = r
+            if time.time() - last > 20:
+                rate = (i + 1) / (time.time() - t0); eta = (len(cand) - i - 1) / max(rate, 1e-9)
+                print(f"[claim] physical_check {i+1}/{len(cand)} ({100*(i+1)/len(cand):.0f}%) "
+                      f"{rate:.0f}/s ETA {eta/60:.1f}m", flush=True)
+                last = time.time()
+    print(f"[claim] physical_check done ({time.time()-t0:.0f}s)", flush=True)
+    return res
 
 
 def prefilter_2v_pairs(dets, pairs, chi2_max, exptime_s=30.0):
@@ -336,8 +448,17 @@ def prefilter_2v_pairs(dets, pairs, chi2_max, exptime_s=30.0):
                                                                      0.0)), 0.0))
     smn = np.minimum(mfs[I], mfs[J])
     dsnr = (np.maximum(mfs[I], mfs[J]) - smn) / np.maximum(smn, 1e-3)
+    # PA sigma must match pair_chi2's length-scaled value EXACTLY, or this "only prunes what the full
+    # chi2 would reject" prefilter would start dropping pairs the full chi2 accepts (a real recall loss).
+    if os.environ.get("ADCNN_PA_SCALED_SIGMA") and "len_db" in d.columns:
+        _L = d.len_db.to_numpy()
+        _Lmin = np.fmin(_L[I], _L[J])
+        _sig_pa = np.interp(_Lmin, _PA_L, _PA_S)
+        _sig_pa = np.where(np.isfinite(_Lmin), _sig_pa, CHI2_SIG_2V["dpa_tm"])
+    else:
+        _sig_pa = CHI2_SIG_2V["dpa_tm"]
     partial = ((perp / CHI2_SIG_2V["perp"]) ** 2 + (dsnr / CHI2_SIG_2V["dsnr"]) ** 2 +
-               (dpa_tm / CHI2_SIG_2V["dpa_tm"]) ** 2 + (dspeed / CHI2_SIG_2V["dspeed"]) ** 2)
+               (dpa_tm / _sig_pa) ** 2 + (dspeed / CHI2_SIG_2V["dspeed"]) ** 2)
     keep = partial <= float(chi2_max)
     kept = [[int(a_), int(b_)] for a_, b_ in P2[keep]]
     longer = [p for p in pairs if len(p) != 2]
@@ -369,7 +490,48 @@ def _jf(x, nd=2):
     return round(x, nd) if np.isfinite(x) else None
 
 
-def extend_to_triplets(dets, pairs, *, pos_tol_arcsec=5.0):
+# ---- parallel triplet extension for --fast-link -------------------------------------------------
+# extend_to_triplets is a per-pair loop with a KD query per (pair, visit) -- ~15M serial queries on a
+# dense night's ~150k prefilter survivors (the "~47-min hang" the docstring warns about). Each pair is
+# independent, so --fast-link runs it in a fork pool. State (arrays + per-visit KD trees) is inherited
+# via fork (no pickling). Ordered map -> byte-identical triplet list vs the serial loop below.
+_ET = None
+
+def _et_init(state):
+    global _ET
+    _ET = state
+
+def _et_one(pr):
+    mjd, ra, dec, vis, uv, idx_by, vmjd, trees, tol_chord = _ET
+    i, j = pr
+    if mjd[i] > mjd[j]:
+        i, j = j, i
+    ti, tj = mjd[i], mjd[j]; dt = tj - ti
+    if dt <= 0:
+        return None
+    cdi = np.cos(np.radians(dec[i]))
+    vx = (((ra[j] - ra[i] + 180.0) % 360.0 - 180.0)) * cdi / dt
+    vy = (dec[j] - dec[i]) / dt
+    extra = []
+    for v in uv:
+        if v == vis[i] or v == vis[j]:
+            continue
+        tk = vmjd[v]
+        pra = ra[i] + vx * (tk - ti) / cdi
+        pdec = dec[i] + vy * (tk - ti)
+        nb = trees[v].query_ball_point(radec_to_unit(pra, pdec), tol_chord)
+        if not nb:
+            continue
+        uvi = radec_to_unit(pra, pdec)
+        k = int(idx_by[v][min(nb, key=lambda p: float(np.sum((radec_to_unit(ra[int(idx_by[v][p])],
+                                                                            dec[int(idx_by[v][p])]) - uvi) ** 2)))])
+        extra.append(k)
+    if extra:
+        return [int(i), int(j)] + extra
+    return None
+
+
+def extend_to_triplets(dets, pairs, *, pos_tol_arcsec=5.0, workers=None):
     """Promote 2-visit chord pairs to 3+visit tracks WHEN a consistent 3rd same-night detection exists.
 
     For each pair, extrapolate the PRECISE 2-centroid linear track (not the noisy trail velocity) to every
@@ -388,6 +550,19 @@ def extend_to_triplets(dets, pairs, *, pos_tol_arcsec=5.0):
     vmjd = {v: float(np.median(mjd[vis == v])) for v in uv}
     trees = {v: cKDTree(radec_to_unit(ra[idx_by[v]], dec[idx_by[v]])) for v in uv}
     tol_chord = _chord_radius(pos_tol_arcsec / 3600.0)
+    if workers and workers > 1 and len(pairs) >= 2000:
+        # --fast-link: parallel per-pair extension (fork pool). Byte-identical to the serial loop
+        # (ordered map, same per-pair result), just distributed -- the "~47-min hang" fix.
+        import multiprocessing as mp
+        from concurrent.futures import ProcessPoolExecutor
+        state = (mjd, ra, dec, vis, uv, idx_by, vmjd, trees, tol_chord)
+        ctx = mp.get_context("fork")
+        chunk = max(1, len(pairs) // (workers * 8))
+        print(f"[promote-3v] extend_to_triplets on {len(pairs)} pairs, {workers} workers...", flush=True)
+        with ProcessPoolExecutor(max_workers=workers, mp_context=ctx,
+                                 initializer=_et_init, initargs=(state,)) as ex:
+            res = list(ex.map(_et_one, pairs, chunksize=chunk))
+        return [r for r in res if r is not None]
     out = []
     for pr in pairs:
         i, j = pr
@@ -926,6 +1101,26 @@ def main():
     ap.add_argument("--static-radius-arcsec", type=float, default=3.0,
                     help="static-veto match radius: 3\" reaches the 2-3\" bright-star WINGS where the "
                     "subtraction-residual dipoles live (per-visit kill fraction 0.25->0.60 going 2\"->3\")")
+    ap.add_argument("--fast-link", action=argparse.BooleanOptionalAction, default=True,
+                    help="ON BY DEFAULT. EXACT speedups (validated BYTE-IDENTICAL against the serial path "
+                    "at 3 scales + 8 determinism runs): (1) batched C-level chord-seed KD queries (both the "
+                    "2v and the wide 3v-arc seed) instead of per-detection Python loops; (2) physical_check "
+                    "run ONCE per candidate in a process pool and cached for the two-pass claim (the serial "
+                    "path recomputed it); (3) extend_to_triplets parallelised (it was ~15M serial KD queries "
+                    "on a dense night's ~150k prefilter survivors -- the '~47-min hang'). Measured 4.6x "
+                    "end-to-end on 0706 at score 0.7 (1h57m -> 25min), same 11,901 alerts. --no-fast-link "
+                    "restores the serial path (only needed to re-audit equivalence).")
+    ap.add_argument("--link-workers", type=int, default=None,
+                    help="process-pool size for the fast-link parallel stages (default: allocated cores)")
+    ap.add_argument("--dipole-veto", action=argparse.BooleanOptionalAction, default=True,
+                    help="PRE-LINK ring veto: drop detections the DETECTOR flagged as bright-star diffim "
+                    "dipoles (catalog `is_dipole`, computed at detection time on the diffim stamp -- see "
+                    "ADCNN.inference.catalog + ADCNN.qa.alert_morphology.ripple_flag) from the LINKABLE set "
+                    "BEFORE seeding, so rings never form tracklets. They are KEPT in the stationarity/train "
+                    "counterpart catalogs (a ring is a fine static counterpart). ON BY DEFAULT (measured "
+                    "0706: removes 12.4% of linkable dets at the 0.5 floor / 22% at 0.7, so rings never "
+                    "form tracklets); exact no-op on catalogs without the column (older runs), so it is "
+                    "safe everywhere. --no-dipole-veto to disable.")
     ap.add_argument("--train-veto", action="store_true",
                     help="shared-great-circle LINE veto for 2v alerts (measured 2026-07-03, embargo "
                     "0629+0630): flag a pair whose members sit on a line of >=--train-min-aligned "
@@ -949,6 +1144,14 @@ def main():
                     help="train veto: flag when the two visits' aligned counts sum to >= this. 10 = "
                     "the measured separation (pathologies {11,12,14,15,15}, clean <=8, golden NEO 1)")
     a = ap.parse_args()
+    if a.fast_link and a.link_workers is None:
+        try:
+            a.link_workers = len(os.sched_getaffinity(0))    # cores actually allocated to this job
+        except AttributeError:
+            a.link_workers = os.cpu_count() or 1
+    if a.fast_link:
+        print(f"[trail-link] --fast-link ON: batched chord-seed + physical_check pool "
+              f"({a.link_workers} workers), EXACT", flush=True)
     # Overlay the calibrated op-point JSON: it sets each param UNLESS that flag was passed explicitly on the CLI.
     if a.op_point and os.path.exists(a.op_point):
         _op = json.load(open(a.op_point))
@@ -1010,6 +1213,16 @@ def main():
         d = d[d.score >= _score_floor]
         if a.score_candidate_min and a.score_candidate_min > 0:
             print(f"[trail-link] TWO-TIER follow-up: candidate floor {_score_floor}, hi-conf (tier A) >= {a.score_hiconf}", flush=True)
+    # PRE-LINK DIPOLE/RING VETO: remove detector-flagged rings from the LINKABLE set before seeding, so
+    # no tracklet can have a ring member. d_all/d_train (counterpart catalogs) were snapshotted ABOVE
+    # with the rings still in -- a ring is a valid static/train counterpart, so the vetoes keep their power.
+    if a.dipole_veto:
+        if "is_dipole" in d.columns:
+            _nd0 = len(d); d = d[~d.is_dipole.fillna(False).astype(bool)]
+            print(f"[trail-link] dipole veto (pre-seed): {_nd0 - len(d)}/{_nd0} ring dets removed from "
+                  f"the linkable set (kept as stationarity/train counterparts)", flush=True)
+        else:
+            print("[trail-link] --dipole-veto: no is_dipole column in --dets (old catalog) -> no-op", flush=True)
     d = d.reset_index(drop=True)
     need = ["mjd", "ra", "dec", "ra0", "dec0", "ra1", "dec1", "visit"]
     miss = [c for c in need if c not in d.columns]
@@ -1092,7 +1305,7 @@ def main():
             cpairs = chord_seed_pairs(dn, max_arc_min=(a.max_arc_2v_min or 1e9),
                                       rate_min=a.rate_min, rate_max=a.rate_max,
                                       max_visit_pairs=a.max_visit_pairs,
-                                      max_visit_sep_deg=a.max_visit_sep_deg)
+                                      max_visit_sep_deg=a.max_visit_sep_deg, fast=a.fast_link)
             # SEED-EXCLUSION static veto: a static-static pair is a repeating-artifact self-link --
             # never seed it. Single-static pairs stay (annotated + demoted at the alert, not dropped).
             if static_cfg is not None:
@@ -1124,7 +1337,8 @@ def main():
             # real-night recoveries; use 'raw' only to audit that equivalence.
             if a.promote_3v:
                 _promote_src = surv2v if a.promote_from == "survivors" else cpairs
-                cand += extend_to_triplets(dn, _promote_src, pos_tol_arcsec=a.promote_tol_arcsec)
+                cand += extend_to_triplets(dn, _promote_src, pos_tol_arcsec=a.promote_tol_arcsec,
+                                           workers=(a.link_workers if a.fast_link else None))
                 # 3v-FIRST seeding: the 40-min 2v arc cap is an FP lever for the PAIR tier, not a physical
                 # constraint on triplets -- a real mover seen in visits at e.g. 0/50/100 min has NO pair
                 # inside the 2v window and was previously unfindable. Seed pairs in a WIDER window
@@ -1136,7 +1350,7 @@ def main():
                     wide = chord_seed_pairs(dn, max_arc_min=a.seed_3v_arc_min,
                                             rate_min=a.rate_min, rate_max=a.rate_max,
                                             max_visit_pairs=a.max_visit_pairs,
-                                            max_visit_sep_deg=a.max_visit_sep_deg)
+                                            max_visit_sep_deg=a.max_visit_sep_deg, fast=a.fast_link)
                     # same seed-exclusion as the main 2v path: a triplet built ON a static-static
                     # pair is bogus by construction (2/3 members are repeating artifacts); a real
                     # 3-visit mover keeps 2 other constituent pairs to seed the same triplet.
@@ -1149,7 +1363,8 @@ def main():
                     # arc chord is well-determined so trail-PA/speed agree). 'raw' keeps the exhaustive path.
                     if a.promote_from == "survivors":
                         wide = prefilter_2v_pairs(dn, wide, a.chi2_2v_max, exptime_s=a.exptime)
-                    cand += extend_to_triplets(dn, wide, pos_tol_arcsec=a.promote_tol_arcsec)
+                    cand += extend_to_triplets(dn, wide, pos_tol_arcsec=a.promote_tol_arcsec,
+                                               workers=(a.link_workers if a.fast_link else None))
         cand.sort(key=len, reverse=True)   # 3+visit (longer) first; a triplet's dets aren't re-reported as pairs
         _PR_COEF = _PR_DOM = None
         _p_real = None
@@ -1159,6 +1374,7 @@ def main():
             _PR_COEF, _PR_DOM = _m["coef"], _m.get("domain")
             print(f"[trail-link] claim priority = calibrated P(real) "
                   f"(model fit on night {_m.get('night')})", flush=True)
+        _pc_cache = {}   # --fast-link: tuple(sorted(members)) -> (ok, info, n_ep), reused in the claim loop
         if a.claim_order in ("quality", "preal"):
             # Two-pass claim: evaluate EVERY candidate, then let the best-fitting one claim its
             # detections. The single-pass path below sorts by length only, so among 2-visit pairs
@@ -1168,20 +1384,37 @@ def main():
             # 20260630, only 4 of the 12 production alerts survived into an 11,150-alert stream, the
             # other 8 having had a member claimed by another pairing. Same compute (physical_check
             # runs once per candidate either way), more memory (results held before claiming).
+            # --fast-link: run physical_check ONCE per candidate, in a process pool, and cache the
+            # result for the claim loop below (the slow path recomputes it there). EXACT -- identical
+            # args, identical result -- only parallel + de-duplicated.
+            _pc_kw = dict(exptime_s=a.exptime, pa_tol_deg=a.pa_tol, lin_rms_arcsec=a.max_rms,
+                          min_epochs=a.min_epochs, epoch_gap_s=a.epoch_gap_s, pa_tol_2v_deg=a.pa_tol_2v,
+                          score_2v_min=0.0, max_arc_2v_min=a.max_arc_2v_min,
+                          orbit_rate_tol=a.orbit_rate_tol, perp_collinear_2v_arcsec=None, snr_frac_2v=None,
+                          chi2_2v_max=(a.chi2_2v_max if a.chi2_2v_max and a.chi2_2v_max > 0 else None),
+                          mfsnr_min_2v=(a.mfsnr_min_2v if a.mfsnr_min_2v and a.mfsnr_min_2v > 0 else None),
+                          rate_lo_2v=a.rate_lo_2v, rate_hi_2v=a.rate_hi_2v)
+            _pc_all = (_physical_check_all(dn, cand, _pc_kw, a.link_workers) if a.fast_link
+                       else [None] * len(cand))
             evald = []
-            for members in cand:
-                st = {}
-                ok, info, n_ep = physical_check(
-                    dn, members, a.exptime, pa_tol_deg=a.pa_tol, lin_rms_arcsec=a.max_rms,
-                    min_epochs=a.min_epochs, epoch_gap_s=a.epoch_gap_s, pa_tol_2v_deg=a.pa_tol_2v,
-                    score_2v_min=0.0, max_arc_2v_min=a.max_arc_2v_min,
-                    orbit_rate_tol=a.orbit_rate_tol, perp_collinear_2v_arcsec=None, snr_frac_2v=None,
-                    chi2_2v_max=(a.chi2_2v_max if a.chi2_2v_max and a.chi2_2v_max > 0 else None),
-                    mfsnr_min_2v=(a.mfsnr_min_2v if a.mfsnr_min_2v and a.mfsnr_min_2v > 0 else None),
-                    rate_lo_2v=a.rate_lo_2v, rate_hi_2v=a.rate_hi_2v, out=st)
+            for _ci, members in enumerate(cand):
+                if a.fast_link:
+                    ok, info, n_ep, c2 = _pc_all[_ci]
+                    if ok:
+                        _pc_cache[tuple(sorted(members))] = (ok, info, n_ep)
+                else:
+                    st = {}
+                    ok, info, n_ep = physical_check(
+                        dn, members, a.exptime, pa_tol_deg=a.pa_tol, lin_rms_arcsec=a.max_rms,
+                        min_epochs=a.min_epochs, epoch_gap_s=a.epoch_gap_s, pa_tol_2v_deg=a.pa_tol_2v,
+                        score_2v_min=0.0, max_arc_2v_min=a.max_arc_2v_min,
+                        orbit_rate_tol=a.orbit_rate_tol, perp_collinear_2v_arcsec=None, snr_frac_2v=None,
+                        chi2_2v_max=(a.chi2_2v_max if a.chi2_2v_max and a.chi2_2v_max > 0 else None),
+                        mfsnr_min_2v=(a.mfsnr_min_2v if a.mfsnr_min_2v and a.mfsnr_min_2v > 0 else None),
+                        rate_lo_2v=a.rate_lo_2v, rate_hi_2v=a.rate_hi_2v, out=st)
+                    c2 = float(st.get("chi2", np.inf))
                 if ok:
                     # 3+visit candidates carry no pair chi2; they sort first on length anyway.
-                    c2 = float(st.get("chi2", np.inf))
                     if a.claim_order == "preal":
                         # Claim by the CALIBRATED reality probability, not chi2 alone. Measured on
                         # 20260630: ordering by chi2 let a VETO-FLAGGED pair (final rank 8627) claim
@@ -1202,11 +1435,20 @@ def main():
             print(f"[trail-link] claim-order={a.claim_order}: {len(cand)} candidates passed, claiming "
                   f"{'highest-P(real)' if a.claim_order == 'preal' else 'best-chi2'} first", flush=True)
         npass = 0; used = set()
-        for members in cand:
+        import time as _time; _ct0 = _time.time(); _clast = _ct0
+        for _cix, members in enumerate(cand):
+            if _time.time() - _clast > 20:                    # heartbeat: claim/alert-build progress
+                print(f"[claim] building {_cix}/{len(cand)} candidates | {npass} passed "
+                      f"({_time.time()-_ct0:.0f}s)", flush=True)
+                _clast = _time.time()
             # NB: purity is carried by the chi2 gate; the independent AND-threshold discriminators
             # (score_2v_min, perp_collinear, snr_frac) are off in the shipped op-point (analysis tools that
             # bypass chi2 set them directly when calling physical_check).
-            ok, info, n_ep = physical_check(dn, members, a.exptime, pa_tol_deg=a.pa_tol,
+            _ck = _pc_cache.get(tuple(sorted(members))) if a.fast_link else None
+            if _ck is not None:                       # --fast-link: reuse the first-pass result (EXACT)
+                ok, info, n_ep = _ck
+            else:
+                ok, info, n_ep = physical_check(dn, members, a.exptime, pa_tol_deg=a.pa_tol,
                                             lin_rms_arcsec=a.max_rms, min_epochs=a.min_epochs,
                                             epoch_gap_s=a.epoch_gap_s,
                                             pa_tol_2v_deg=a.pa_tol_2v, score_2v_min=0.0,
