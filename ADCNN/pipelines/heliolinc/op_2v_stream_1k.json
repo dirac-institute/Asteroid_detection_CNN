@@ -9,7 +9,7 @@
   "score_candidate_min": 0.0,
   "score_hiconf": 0.8,
   "mfsnr_min_2v": 3.0,
-  "chi2_2v_max": 7.0,
+  "chi2_2v_max": 8.0,
   "bright_star_proximity": true,
   "bright_star_radius_arcsec": 2.5,
   "bright_star_mag_max": 21.0,
@@ -29,5 +29,6 @@
   "morphology_dipole_veto": true,
   "drop_stationary_single": true,
   "_chi2_TRUTH": "chi2_2v_max stays 7. A 2026-08-06 'measurement' briefly raised it to 30 on the claim that chi2<=9 discarded ~85% of real movers -- that was WRONG, produced by a bug in the injection harness (trail endpoints built by treating the IMAGE-frame `beta` as a SKY position angle, so every trail was rotated by its detector's orientation; trail-vs-trail PA agreed to ~2deg while trail-vs-motion disagreed by ~48deg, and the dpa_tm>20 hard gate then appeared to kill 81% of true pairs). With endpoints correctly pushed through each panel's WCS (as detect_night does) the shipped calibration is CONFIRMED SOUND: true-pair chi2 median 2.5 (the statistic is designed to be ~Ndof), hard gates kill only 5.8%, and chi2<=5 retains 74.7% / <=7 ~80% / <=9 86.6% / <=30 93.9% of true pairs. Truth harness: outputs/runs/pa_validate (inject_v2.py, endpoints fixed 2026-08-07).",
-  "_veto_TRUTH": "Veto TP cost measured on the same unbiased injected movers: confident-FP 0.0%, bright-star proximity 2.3% (offset-null predicted 2.7% -- CONFIRMED), stationarity>=1 counterpart 0.0%. The veto stack is essentially free, so it -- not the thresholds -- is where purity comes from. NOTE a first pass measured 25.4% for proximity; that was an INJECTION PLACEMENT BIAS (movers seeded at existing detection positions, 45.5% of which sit on stars because detections are ring-contaminated). Real asteroids land within 2.5in of a mag<21 star only 1.8% of the time. Seed injections at RANDOM sky."
+  "_veto_TRUTH": "Veto TP cost measured on the same unbiased injected movers: confident-FP 0.0%, bright-star proximity 2.3% (offset-null predicted 2.7% -- CONFIRMED), stationarity>=1 counterpart 0.0%. The veto stack is essentially free, so it -- not the thresholds -- is where purity comes from. NOTE a first pass measured 25.4% for proximity; that was an INJECTION PLACEMENT BIAS (movers seeded at existing detection positions, 45.5% of which sit on stars because detections are ring-contaminated). Real asteroids land within 2.5in of a mag<21 star only 1.8% of the time. Seed injections at RANDOM sky.",
+  "_chi2_TUNED": "chi2_2v_max 7 -> 8, tuned on the BIGGEST night (20260706, 26,253 stream alerts) WITH the deep-refcat ring veto active: chi2<=5 -> 387, <=7 -> 753, **<=8 -> 995**, <=8.5 -> 1126, <=10 -> 1543. 8.0 is the value that yields ~1k on the largest night, so every other night lands at or below the target. It also RAISES recall: the injection harness measures true-pair retention 74.7% at chi2<=5, ~80% at 7, 86.6% at 10 -- so loosening 7->8 gains real movers while hitting the count target. NOTE this supersedes the brief chi2=30 setting, which came from a BROKEN harness (see the retraction in threshold-sweep-0706 / pa-sigma-length-scaled)."
 }

@@ -34,9 +34,14 @@ LOG=outputs/logs; mkdir -p $LOG
 
 for N in "$@"; do
   SRC=outputs/runs/10k_cadence/run_night_$N
+  # ALWAYS prefer the ADCNN+stack merged catalogue when the night has one (run_night's stack_merge
+  # stage): the stack finds ~3.4% of real movers ADCNN misses (short trails, 1-2 deg/day), and the
+  # union is the reported product. Falls back to ADCNN-only for nights processed before the merge.
+  DETS=$SRC/adcnn_dets_masked.csv
+  [ -s "$SRC/dets_merged.csv" ] && DETS=$SRC/dets_merged.csv
   DST=outputs/runs/1k_cadence/run_night_$N; sd=$DST/stream
   L=$LOG/rerun_1k_$N.log
-  if [ ! -s "$SRC/stream/alerts.jsonl" ] || [ ! -s "$SRC/adcnn_dets_masked.csv" ]; then
+  if [ ! -s "$SRC/stream/alerts.jsonl" ] || [ ! -s "$DETS" ]; then
     echo "[$N] SKIP: missing src alerts or masked dets"; continue; fi
   # skip a night already built (resumable/unattended): needs both the alert list and its sheets
   if [ -s "$sd/alerts.jsonl" ] && [ -f "$sd/sheets/index.html" ] && [ "${FORCE:-0}" != "1" ]; then
@@ -51,11 +56,11 @@ for N in "$@"; do
     else echo "WARNING: no $SRC/bright_refcat.parquet -- PROXIMITY VETO OFF (build with build_refcats.sh)"; fi
     echo "=== $N threshold filter ($OP) $RC ==="
     python -m ADCNN.qa.filter_op --alerts "$SRC/stream/alerts.jsonl" \
-        --dets "$SRC/adcnn_dets_masked.csv" --op "$OP" --out "$sd/_surv.jsonl" $RC \
+        --dets "$DETS" --op "$OP" --out "$sd/_surv.jsonl" $RC \
         || { echo "FILTER FAILED"; exit 1; }
     echo "=== $N cutouts (mosaic) for survivors ==="
     python -m ADCNN.qa.alert_cutouts --alerts "$sd/_surv.jsonl" \
-        --dets "$SRC/adcnn_dets_masked.csv" --out "$sd/_surv_cutouts.npz" \
+        --dets "$DETS" --out "$sd/_surv_cutouts.npz" \
         --stamp-px 96 --workers "$WORKERS" || { echo "CUTOUTS FAILED"; exit 1; }
     echo "=== $N morphology ==="
     python -m ADCNN.qa.alert_morphology --alerts "$sd/_surv.jsonl" \

@@ -217,6 +217,9 @@ def run(a):
     tm = _Timer()
     static_catalog = out / "static_catalog.parquet"
     bright_refcat = out / "bright_refcat.parquet"
+    stack_dets = out / "stack_dets.csv"
+    merged_dets = out / "dets_merged.csv"
+    # THE catalogue every downstream stage reads: ADCNN + stack DIA sources, merged (see _dets()).
 
     def s_manifest():
         if manifest.exists() and manifest.stat().st_size > 0 and not a.force:
@@ -365,7 +368,7 @@ def run(a):
         # catalog, so writing it whole stores ~210 MB/night of rows nothing will ever read. The
         # default keeps a magnitude of margin so the veto cut can be raised without a rebuild.
         cmd = (f"bash -c '{lsst}; cd {REPO}; python -m ADCNN.linking.build_static_catalog "
-               f"--dets {out}/adcnn_dets_masked.csv --out {static_catalog} "
+               f"--dets {_dets()} --out {static_catalog} "
                f"--mag-max {a.static_catalog_mag_max}'")
         try:
             _bash(cmd, a.dry_run)
@@ -385,7 +388,7 @@ def run(a):
         if bright_refcat.exists() and not a.force:
             print("      (bright_refcat.parquet exists; reuse)"); return
         cmd = (f"bash -c '{lsst}; cd {REPO}; BUTLER_REPO=embargo python -m ADCNN.linking.build_static_refcat "
-               f"--dets {out}/adcnn_dets_masked.csv --out {bright_refcat} "
+               f"--dets {_dets()} --out {bright_refcat} "
                f"--refcat the_monster_20250219 --mag-max {a.refcat_mag_max}'")
         try:
             _bash(cmd, a.dry_run)
@@ -393,11 +396,43 @@ def run(a):
             print("      WARN: refcat build failed -- product runs WITHOUT the bright-star proximity "
                   "veto (rings will survive; documented fail-safe).")
 
+    def _dets():
+        """The detection catalogue downstream stages consume: the ADCNN+stack merge when it
+        exists, else ADCNN alone (fail-safe)."""
+        return merged_dets if merged_dets.exists() else (out / 'adcnn_dets_masked.csv')
+
+    def s_stack_merge():
+        """ALWAYS-ON union of the stack's DIA sources with ADCNN's detections.
+
+        The two detectors are complementary, measured on injected truth: detection is a TIE
+        (ADCNN 38.6% vs stack 39.1%) but 9.2% of movers are ADCNN-only and 9.7% stack-only; end-to-end
+        ADCNN 18.8% vs stack 7.2%, with 3.4% found ONLY by the stack. ADCNN owns the long-trail/faint
+        end (the stack's own trail plugins NaN above ~20px at ANY brightness); the stack owns the
+        short-trail/bright end. An ADCNN-only product forfeits ~3.4 points of real movers (~18%
+        relative). Rings are dropped from the ADCNN side BEFORE the union (chance links go as n1*n2).
+        Every row keeps `src`, so an alert member's provenance is always recoverable.
+        Best-effort: if the stack ingest fails the merge falls back to ADCNN-only and says so."""
+        if a.no_stack_merge:
+            print("      (--no-stack-merge: ADCNN-only, forfeits the stack-only movers)"); return
+        if merged_dets.exists() and not a.force:
+            print("      (dets_merged.csv exists; reuse)"); return
+        if not a.collection:
+            print("      WARN: no --collection, cannot ingest DIA sources -- ADCNN-only"); return
+        try:
+            _bash(f"bash -c '{lsst}; cd {REPO}; BUTLER_REPO={a.butler_repo} "
+                  f"python -m ADCNN.linking.ingest_diasource --butler-repo {a.butler_repo} "
+                  f"--collection {shlex.quote(a.collection)} --out {stack_dets}'", a.dry_run)
+        except subprocess.CalledProcessError:
+            print("      WARN: DIA-source ingest failed -- linking ADCNN-only (documented fail-safe)")
+            return
+        _bash(f"python -m ADCNN.linking.merge_dets --adcnn {out}/adcnn_dets_masked.csv "
+              f"--stack {stack_dets} --out {merged_dets}", a.dry_run)
+
     def s_link():
         floor = f" --score-candidate-min {a.candidate_floor}" if a.candidate_floor else ""
         static = f" --static-catalog {static_catalog}" if static_catalog.exists() and not a.no_static_veto else ""
         report = "" if a.no_report else " --report"
-        cmd = (f"python -m ADCNN.linking.link_2visit --dets {out}/adcnn_dets_masked.csv "
+        cmd = (f"python -m ADCNN.linking.link_2visit --dets {_dets()} "
                f"--known {out}/known.csv --out {out}/tracks.csv --op-point {op_point} "
                f"--npt 2 --min-epochs 2 --seed-2v chord{floor}{static} --train-veto{report} "
                f"--alerts-out {out}/alerts.jsonl")
@@ -408,7 +443,7 @@ def run(a):
         # `confident`, demotes flagged/killed alerts in the ranking, never drops. Needs the dets
         # catalog's fits_path for panel lookup -- pixel_vet itself no-ops (pass-through) without it.
         cmd = (f"python -m ADCNN.linking.pixel_vet --alerts {out}/alerts.jsonl "
-               f"--dets {out}/adcnn_dets_masked.csv --in-place")
+               f"--dets {_dets()} --in-place")
         _bash(cmd, a.dry_run)
 
     def s_stream():
@@ -439,7 +474,7 @@ def run(a):
             # science alerts -- that proxy preferred chi2 (11/12 vs 9/12 preserved) but truth prefers
             # P(real): 987 vs 936 real pairs recovered of 5,226 pairable, at higher purity too
             # (8.39% vs 8.02%). The proxy is not truth; none of those 12 has an MPC match.
-            _bash(f"python -m ADCNN.linking.link_2visit --dets {out}/adcnn_dets_masked.csv "
+            _bash(f"python -m ADCNN.linking.link_2visit --dets {_dets()} "
                   f"--known {out}/known.csv --out {sd}/tracks.csv --op-point {stream_op} "
                   f"--npt 2 --min-epochs 2 --seed-2v chord{static} --train-veto "
                   f"--claim-order preal --rank-by chi2 "
@@ -448,7 +483,7 @@ def run(a):
             print(f"      (stream alerts.jsonl exists -- reusing; --force to relink)")
         if a.force or not (sd / "cutouts.npz").exists():
             _bash(f"python -m ADCNN.qa.alert_cutouts --alerts {sd}/alerts.jsonl "
-                  f"--dets {out}/adcnn_dets_masked.csv --out {sd}/cutouts.npz "
+                  f"--dets {_dets()} --out {sd}/cutouts.npz "
                   f"--stamp-px {a.stream_stamp_px} --workers {a.stream_workers} "
                   f"--limit {a.stream_top_n}", a.dry_run)
         else:
@@ -493,6 +528,7 @@ def run(a):
     tm.stage("mask_flags", s_mask)
     tm.stage("static_catalog", s_static)
     tm.stage("bright_refcat", s_refcat)
+    tm.stage("stack_merge", s_stack_merge)
     tm.stage("link_2visit", s_link)
     tm.stage("pixel_vet", s_vet)
     tm.stage("mpc_crossmatch", s_mpc)
@@ -556,6 +592,9 @@ def main(argv=None):
                          "the shipped night product uses 0.5; 0 = single-floor op only")
     ap.add_argument("--no-known", action="store_true",
                     help="write a header-only known.csv (prompt/embargo recipe: label post-hoc)")
+    ap.add_argument("--no-stack-merge", action="store_true",
+                    help="do NOT merge the stack DIA sources; ADCNN-only. Measured cost: forfeits "
+                         "the ~3.4%% of real movers only the stack finds (~18%% relative recall)")
     ap.add_argument("--no-refcat", action="store_true",
                     help="skip building the all-sky bright-star refcat; the product then runs WITHOUT "
                          "the bright-star proximity veto (the primary ring lever) -- rings will survive")
