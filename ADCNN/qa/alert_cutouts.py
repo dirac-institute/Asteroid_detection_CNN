@@ -29,7 +29,7 @@ Usage:
       --out report/cutouts.npz [--stamp-px 96] [--wide-px 220] [--workers 8]
 """
 from __future__ import annotations
-import argparse, json, os, sys
+import argparse, json, os, re, sys
 from collections import defaultdict
 
 import numpy as np
@@ -95,76 +95,213 @@ def _match_endpoints(alerts, dets_path):
     return ends
 
 
-def _wide_cut(img, xy, out_px, margin_px=60):
-    """Box containing every (x,y) in `xy` + margin, block-averaged to out_px x out_px.
-    Returns (stamp, positions-in-stamp-coords, source-px-per-stamp-px)."""
-    xs = np.array([p[0] for p in xy], float); ys = np.array([p[1] for p in xy], float)
-    cx, cy = 0.5 * (xs.min() + xs.max()), 0.5 * (ys.min() + ys.max())
-    span = max(xs.max() - xs.min(), ys.max() - ys.min()) + 2 * margin_px
-    span = float(max(span, 4 * margin_px))
-    half = span / 2.0
-    x0, y0 = cx - half, cy - half
-    H, W = img.shape
-    # sample the box on an out_px grid (nearest source pixel); handles off-panel as zeros
-    gx = np.clip(np.round(x0 + (np.arange(out_px) + 0.5) * span / out_px).astype(int), -1, W)
-    gy = np.clip(np.round(y0 + (np.arange(out_px) + 0.5) * span / out_px).astype(int), -1, H)
-    inx = (gx >= 0) & (gx < W); iny = (gy >= 0) & (gy < H)
-    stamp = np.zeros((out_px, out_px), np.float32)
-    if inx.any() and iny.any():
-        stamp[np.ix_(iny, inx)] = img[np.ix_(gy[iny], gx[inx])]
+_DET_TOK_RE = re.compile(r"_(R\d\d_S\d\d)_LSSTCam_runs")
+
+
+def _det_token(path):
+    m = _DET_TOK_RE.search(path or "")
+    return m.group(1) if m else None
+
+
+def _grid_of(token):
+    """R<c><r>_S<sc><sr> -> a 2-D coordinate that is LINEAR in focal-plane position (raft*3+sensor
+    along each axis). Used only to fit an affine grid->sky map, so its absolute convention is
+    irrelevant as long as it is linear in the real layout."""
+    return (int(token[1]) * 3 + int(token[5]), int(token[2]) * 3 + int(token[6]))
+
+
+def _tangent_grid(cra, cdec, span_arcsec, out_px):
+    """out_px x out_px sky grid on a local gnomonic tangent plane centred at (cra,cdec). Returns
+    (radec (N,2), apx_arcsec). The grid is defined in SKY, not in any one detector's pixels, so no
+    detector WCS is ever extrapolated beyond its own footprint (that produced a garbage checkerboard)."""
+    apx = span_arcsec / out_px
+    cd = np.cos(np.radians(cdec))
+    off = (np.arange(out_px) - (out_px - 1) / 2.0) * apx
+    dx, dy = np.meshgrid(off, off)
+    ra = cra + dx / (3600.0 * cd)
+    dec = cdec + dy / 3600.0
+    return np.column_stack([ra.ravel(), dec.ravel()]), apx
+
+
+def _radec_to_grid(ra, dec, cra, cdec, apx, out_px):
+    cd = np.cos(np.radians(cdec))
+    ix = (ra - cra) * cd * 3600.0 / apx + (out_px - 1) / 2.0
+    iy = (dec - cdec) * 3600.0 / apx + (out_px - 1) / 2.0
+    return ix, iy
+
+
+def _panel_corrupt(vals, sig):
+    """A neighbour is refused if the values it would contribute are mostly saturated -- the mfsnr-
+    blowup diffim class paints a black/white checkerboard that would wreck the mosaic."""
+    if len(vals) == 0:
+        return False
+    return float((np.abs(vals) > 8.0 * sig).mean()) > 0.5
+
+
+def _wide_mosaic_one(members, endpoints, out_px, cand_paths, load_fn, affine, cra_cdec,
+                     margin_as=12.0):
+    """Build ONE wide stamp by mosaicking every detector that overlaps the box.
+
+    members       list of (ra,dec) per epoch
+    endpoints     list per epoch of (ra0,dec0,ra1,dec1) measured trail ends (or None)
+    cand_paths    ordered list of (det_id, path) candidate detectors of this visit (nearest first)
+    load_fn       det path -> (img, wcs, sig), memoised by the caller (per-visit panel cache)
+    Fills residual chip-gap pixels with sky-matched noise (unit sigma) so the frame is continuous.
+    Returns (stamp float16, pos (MAXEP,2), apx_arcsec, wends (MAXEP,2,2), filled_frac)."""
+    ras = np.array([m[0] for m in members]); decs = np.array([m[1] for m in members])
+    cra, cdec = float(ras.mean()), float(decs.mean()); cd = np.cos(np.radians(cdec))
+    sep = 0.0
+    for i in range(len(members)):
+        for j in range(i + 1, len(members)):
+            sep = max(sep, np.hypot((ras[i] - ras[j]) * cd, decs[i] - decs[j]) * 3600)
+    span = float(max(sep + 2 * margin_as, 4 * margin_as))
+    radec, apx = _tangent_grid(cra, cdec, span, out_px)
+    n = out_px * out_px
+    stamp = np.zeros(n, np.float32); filled = np.zeros(n, bool)
+    for _det, path in cand_paths:
+        if filled.all():
+            break
+        try:
+            img, wcs, sig = load_fn(path)
+        except Exception:
+            continue
+        idx = np.nonzero(~filled)[0]
+        pix = wcs.all_world2pix(radec[idx], 0)
+        rx = np.round(pix[:, 0]).astype(int); ry = np.round(pix[:, 1]).astype(int)
+        H, W = img.shape
+        good = (rx >= 0) & (rx < W) & (ry >= 0) & (ry < H)
+        if not good.any():
+            continue
+        vals = img[ry[good], rx[good]]
+        ok = vals != 0.0                                   # skip this detector's own masked pixels
+        vals, sel = vals[ok], idx[good][ok]
+        if len(vals) and not _panel_corrupt(vals, sig):
+            stamp[sel] = vals / sig                        # normalise by each detector's own sigma
+            filled[sel] = True
+    filled_frac = float(filled.mean())
+    stamp[~filled] = np.random.normal(0.0, 1.0, int((~filled).sum())).astype(np.float32)  # chip gaps
+    stamp = np.clip(stamp, -CLIP_SIGMA, CLIP_SIGMA).reshape(out_px, out_px).astype(np.float16)
     pos = np.full((MAXEP, 2), np.nan, np.float32)
-    for i, (px, py) in enumerate(xy[:MAXEP]):
-        pos[i] = ((px - x0) * out_px / span, (py - y0) * out_px / span)
-    return stamp, pos, span / out_px, (x0, y0, span)
+    for i, (mra, mdec) in enumerate(members[:MAXEP]):
+        pos[i] = _radec_to_grid(mra, mdec, cra, cdec, apx, out_px)
+    wends = np.full((MAXEP, 2, 2), np.nan, np.float32)
+    for i, en in enumerate(endpoints[:MAXEP]):
+        if en is None:
+            continue
+        for j, (ra, dec) in enumerate([(en[0], en[1]), (en[2], en[3])]):
+            wends[i, j] = _radec_to_grid(ra, dec, cra, cdec, apx, out_px)
+    return stamp, pos, np.float32(apx), wends, filled_frac
+
+
+_PANEL_CACHE = {}                # per-worker LRU of loaded panels (mosaic neighbours are re-read
+_PANEL_CACHE_MAX = 12            # across anchors of the same visit; a small cache kills that cost)
+
+
+def _load_panel(path):
+    """(img, wcs, sig) for a diffim panel, memoised per worker (bounded)."""
+    hit = _PANEL_CACHE.pop(path, None)
+    if hit is not None:
+        _PANEL_CACHE[path] = hit                       # move to MRU
+        return hit
+    from astropy.wcs import WCS
+    from ADCNN.inference.diffim_io import open_diffim
+    with open_diffim(path, memmap=False) as h:
+        img = np.nan_to_num(h[1].data.astype(np.float32))
+        wcs = WCS(h[1].header)
+    val = (img, wcs, _mad_sigma(img) or 1.0)
+    _PANEL_CACHE[path] = val
+    if len(_PANEL_CACHE) > _PANEL_CACHE_MAX:
+        _PANEL_CACHE.pop(next(iter(_PANEL_CACHE)))     # evict LRU
+    return val
 
 
 def _panel_job(args):
-    """One panel: all zoom cuts on it, plus any wide cuts anchored to it."""
-    path, zooms, wides, k, kw = args
+    """One anchor panel: all ZOOM cuts on it. Wide cuts are handled separately, grouped by visit,
+    because they mosaic across many detectors and must not re-read a panel per alert."""
+    path, zooms, k = args
     try:
-        from astropy.wcs import WCS
-        from ADCNN.inference.diffim_io import open_diffim
-        with open_diffim(path, memmap=False) as h:
-            img = np.nan_to_num(h[1].data.astype(np.float32))
-            wcs = WCS(h[1].header)
-        sig = _mad_sigma(img) or 1.0
-        zout, wout = [], []
-        if zooms:
-            xy = wcs.all_world2pix(np.array([[z[2], z[3]] for z in zooms], float), 0)
-            for (ai, ei, _r, _d, ends), (x, y) in zip(zooms, xy):
-                st = np.clip(_cut(img, x, y, k) / sig, -CLIP_SIGMA, CLIP_SIGMA)
-                e = np.full((2, 2), np.nan, np.float32)
-                if ends is not None:
-                    ee = wcs.all_world2pix(np.array([[ends[0], ends[1]], [ends[2], ends[3]]], float), 0)
-                    h = k // 2
-                    e[0] = (ee[0][0] - (round(x) - h), ee[0][1] - (round(y) - h))
-                    e[1] = (ee[1][0] - (round(x) - h), ee[1][1] - (round(y) - h))
-                zout.append((ai, ei, st.astype(np.float16),
-                             bool(0 <= x < img.shape[1] and 0 <= y < img.shape[0]), e))
-        for (ai, sky, allends) in wides:
-            xy = wcs.all_world2pix(np.array(sky, float), 0)
-            stamp, pos, apx, _wide_origin = _wide_cut(img, xy, kw)
-            # project EVERY member's measured trail endpoints into THIS (the wide) frame, so the
-            # two trails and the motion vector are all expressed in one common frame and their
-            # orientations can honestly be compared by eye.
-            wends = np.full((MAXEP, 2, 2), np.nan, np.float32)
-            for i, en in enumerate(allends[:MAXEP]):
-                if en is None:
-                    continue
-                ee = wcs.all_world2pix(np.array([[en[0], en[1]], [en[2], en[3]]], float), 0)
-                for j in (0, 1):
-                    wends[i, j] = ((ee[j][0] - _wide_origin[0]) * kw / _wide_origin[2],
-                                   (ee[j][1] - _wide_origin[1]) * kw / _wide_origin[2])
-            wout.append((ai, np.clip(stamp / sig, -CLIP_SIGMA, CLIP_SIGMA).astype(np.float16),
-                         pos, np.float32(apx * PIXSCALE), True, wends))
-        return zout, wout
+        img, wcs, sig = _load_panel(path)
+        zout = []
+        xy = wcs.all_world2pix(np.array([[z[2], z[3]] for z in zooms], float), 0)
+        for (ai, ei, _r, _d, ends), (x, y) in zip(zooms, xy):
+            st = np.clip(_cut(img, x, y, k) / sig, -CLIP_SIGMA, CLIP_SIGMA)
+            e = np.full((2, 2), np.nan, np.float32)
+            if ends is not None:
+                ee = wcs.all_world2pix(np.array([[ends[0], ends[1]], [ends[2], ends[3]]], float), 0)
+                h = k // 2
+                e[0] = (ee[0][0] - (round(x) - h), ee[0][1] - (round(y) - h))
+                e[1] = (ee[1][0] - (round(x) - h), ee[1][1] - (round(y) - h))
+            zout.append((ai, ei, st.astype(np.float16),
+                         bool(0 <= x < img.shape[1] and 0 <= y < img.shape[0]), e))
+        return zout
     except Exception as e:
         print(f"[cutouts] WARN panel unreadable ({e}): {path}", flush=True)
-        return ([(ai, ei, np.zeros((k, k), np.float16), False,
-                  np.full((2, 2), np.nan, np.float32)) for (ai, ei, _r, _d, _e) in zooms],
-                [(ai, np.zeros((kw, kw), np.float16), np.full((MAXEP, 2), np.nan, np.float32),
-                  np.float32(np.nan), False, np.full((MAXEP, 2, 2), np.nan, np.float32))
-                 for (ai, _s, _e) in wides])
+        return [(ai, ei, np.zeros((k, k), np.float16), False,
+                 np.full((2, 2), np.nan, np.float32)) for (ai, ei, _r, _d, _e) in zooms]
+
+
+def _wide_visit_job(args):
+    """All wide cuts of ONE visit, mosaicked across its detectors. Each visit's panels are loaded
+    at most once (local cache), so cost is O(panels of the visit) not O(alerts). Undetected
+    detectors that overlap a box are pulled too: their S3 path is built from a detected sibling's
+    path by swapping the R##_S## token, and which detectors overlap is decided by an affine fit of
+    (raft/sensor grid coord -> sky centre) over the detected detectors -- no FITS opened for
+    geometry, no camera-geometry / Butler dependency."""
+    visit, wides, det_paths, det_centers, det_tokens, kw, radius_deg = args
+    out = []
+    try:
+        cache = {}
+
+        def load_fn(p):
+            v = cache.get(p)
+            if v is None:
+                from astropy.wcs import WCS
+                from ADCNN.inference.diffim_io import open_diffim
+                with open_diffim(p, memmap=False) as h:
+                    img = np.nan_to_num(h[1].data.astype(np.float32))
+                    wcs = WCS(h[1].header)
+                v = (img, wcs, _mad_sigma(img) or 1.0)
+                if len(cache) >= 60:                       # cap RAM; visits rarely need more
+                    cache.pop(next(iter(cache)))
+                cache[p] = v
+            return v
+
+        # affine: focal-plane grid coord -> (ra*cos dec, dec), fit on this visit's detected panels
+        kk = [d for d in det_paths if d in det_centers and d in det_tokens]
+        pred_center = {}
+        if len(kk) >= 3:
+            mdec = np.mean([det_centers[d][1] for d in kk]); cdk = np.cos(np.radians(mdec))
+            G = np.array([_grid_of(det_tokens[d]) for d in kk], float)
+            S = np.array([[det_centers[d][0] * cdk, det_centers[d][1]] for d in kk])
+            A, *_ = np.linalg.lstsq(np.column_stack([G, np.ones(len(G))]), S, rcond=None)
+            for d, tok in det_tokens.items():
+                p = np.array([*_grid_of(tok), 1.0]) @ A
+                pred_center[d] = (p[0] / cdk, p[1])
+        else:
+            pred_center = dict(det_centers)                # fall back to detected only
+        tmpl = next(iter(det_paths.values())); tmpl_tok = _det_token(tmpl)
+
+        for (ai, members, endpoints) in wides:
+            bcra = float(np.mean([m[0] for m in members])); bcdec = float(np.mean([m[1] for m in members]))
+            cd = np.cos(np.radians(bcdec))
+            cands = []
+            for d, (pra, pdec) in pred_center.items():
+                dd = np.hypot((pra - bcra) * cd, pdec - bcdec)
+                if dd <= radius_deg:
+                    path = det_paths.get(d) or (tmpl.replace(tmpl_tok, det_tokens[d]) if d in det_tokens else None)
+                    if path:
+                        cands.append((dd, d, path))
+            cands.sort()
+            cand_paths = [(d, p) for _dd, d, p in cands]
+            stamp, pos, apx, wends, ff = _wide_mosaic_one(members, endpoints, kw, cand_paths, load_fn,
+                                                          None, (bcra, bcdec))
+            out.append((ai, stamp, pos, apx, True, wends))
+    except Exception as e:
+        print(f"[cutouts] WARN wide visit {visit} failed ({e})", flush=True)
+        for (ai, _m, _e) in wides:
+            out.append((ai, np.zeros((kw, kw), np.float16), np.full((MAXEP, 2), np.nan, np.float32),
+                        np.float32(np.nan), False, np.full((MAXEP, 2, 2), np.nan, np.float32)))
+    return out
 
 
 def build(alerts_path, dets_path, out_npz, stamp_px=96, wide_px=220, workers=8, limit=None):
@@ -179,8 +316,22 @@ def build(alerts_path, dets_path, out_npz, stamp_px=96, wide_px=220, workers=8, 
         ["visit", "detector"])
     panel_of = {(int(v), int(d)): p for v, d, p in zip(pmap.visit, pmap.detector, pmap.fits_path)}
 
+    # Global det_id -> R##_S## token (to construct paths of UNDETECTED overlapping detectors) and
+    # per-visit detected panel paths + sky centres (to fit the mosaic's grid->sky geometry).
+    det_tokens, det_paths_by_visit = {}, defaultdict(dict)
+    for (v, d), p in panel_of.items():
+        det_paths_by_visit[v][d] = p
+        t = _det_token(p)
+        if t:
+            det_tokens.setdefault(d, t)
+    cen = pd.read_csv(dets_path, usecols=["visit", "detector", "ra", "dec"]).groupby(
+        ["visit", "detector"])[["ra", "dec"]].mean()
+    det_centers_by_visit = defaultdict(dict)
+    for (v, d), (r, dc) in cen.iterrows():
+        det_centers_by_visit[int(v)][int(d)] = (float(r), float(dc))
+
     ends = _match_endpoints(alerts, dets_path)
-    zoom_by_panel, wide_by_panel = defaultdict(list), defaultdict(list)
+    zoom_by_panel, wide_by_visit = defaultdict(list), defaultdict(list)
     n_missing = 0
     for ai, al in enumerate(alerts):
         eps = al["epochs"]
@@ -191,31 +342,39 @@ def build(alerts_path, dets_path, out_npz, stamp_px=96, wide_px=220, workers=8, 
                 continue
             zoom_by_panel[p].append((ai, ei, float(ep["ra"]), float(ep["dec"]),
                                      ends.get((ai, ei))))
-        p0 = panel_of.get((int(eps[0]["visit"]), int(eps[0]["detector"])))
-        if p0 is not None:
-            wide_by_panel[p0].append((ai, [(float(e["ra"]), float(e["dec"])) for e in eps],
+        v0 = int(eps[0]["visit"])
+        if v0 in det_paths_by_visit:                       # anchor visit has readable panels
+            wide_by_visit[v0].append((ai, [(float(e["ra"]), float(e["dec"])) for e in eps],
                                       [ends.get((ai, j)) for j in range(len(eps))]))
 
-    panels = sorted(set(zoom_by_panel) | set(wide_by_panel))
-    jobs = [(p, zoom_by_panel.get(p, []), wide_by_panel.get(p, []), stamp_px, wide_px)
-            for p in panels]
+    zoom_jobs = [(p, zoom_by_panel[p], stamp_px) for p in sorted(zoom_by_panel)]
+    wide_jobs = [(v, wide_by_visit[v], det_paths_by_visit[v], det_centers_by_visit.get(v, {}),
+                  det_tokens, wide_px, 0.5) for v in sorted(wide_by_visit)]
     print(f"[cutouts] {len(alerts)} alerts -> {sum(len(v) for v in zoom_by_panel.values())} zooms "
-          f"+ {sum(len(v) for v in wide_by_panel.values())} wide, over {len(panels)} panels "
-          f"({n_missing} epochs with no panel path)", flush=True)
+          f"over {len(zoom_jobs)} panels + {sum(len(v) for v in wide_by_visit.values())} wide "
+          f"over {len(wide_jobs)} visits ({n_missing} epochs with no panel path)", flush=True)
 
     zres, wres = [], []
-    if workers > 1 and len(jobs) > 1:
+    if workers > 1 and (len(zoom_jobs) > 1 or len(wide_jobs) > 1):
         from concurrent.futures import ProcessPoolExecutor
         import multiprocessing as mp
-        with ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context("spawn")) as ex:
-            for n, (zo, wo) in enumerate(ex.map(_panel_job, jobs), 1):
-                zres.extend(zo); wres.extend(wo)
-                if n % 25 == 0 or n == len(jobs):
-                    print(f"[cutouts] {n}/{len(jobs)} panels", flush=True)
+        ctx = mp.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as ex:
+            for n, zo in enumerate(ex.map(_panel_job, zoom_jobs), 1):
+                zres.extend(zo)
+                if n % 25 == 0 or n == len(zoom_jobs):
+                    print(f"[cutouts] zoom {n}/{len(zoom_jobs)} panels", flush=True)
+        ww = max(1, min(workers, 4))                       # wide jobs each hold many ~200MB panels
+        with ProcessPoolExecutor(max_workers=ww, mp_context=ctx) as ex:
+            for n, wo in enumerate(ex.map(_wide_visit_job, wide_jobs), 1):
+                wres.extend(wo)
+                if n % 5 == 0 or n == len(wide_jobs):
+                    print(f"[cutouts] wide {n}/{len(wide_jobs)} visits", flush=True)
     else:
-        for n, j in enumerate(jobs, 1):
-            zo, wo = _panel_job(j)
-            zres.extend(zo); wres.extend(wo)
+        for j in zoom_jobs:
+            zres.extend(_panel_job(j))
+        for j in wide_jobs:
+            wres.extend(_wide_visit_job(j))
 
     zres.sort(key=lambda r: (r[0], r[1]))
     wres.sort(key=lambda r: r[0])
@@ -242,7 +401,7 @@ def build(alerts_path, dets_path, out_npz, stamp_px=96, wide_px=220, workers=8, 
     with open(os.path.splitext(out_npz)[0] + "_meta.json", "w") as f:
         json.dump(dict(n_alerts=len(alerts), n_zoom=len(zres), n_wide=len(wres), stamp_px=K,
                        wide_px=KW, clip_sigma=CLIP_SIGMA, alerts=os.path.abspath(alerts_path),
-                       dets=os.path.abspath(dets_path), n_panels=len(panels),
+                       dets=os.path.abspath(dets_path), n_panels=len(zoom_jobs),
                        n_missing_panel=n_missing), f, indent=2)
     print(f"[cutouts] wrote {out_npz} ({os.path.getsize(out_npz)/1e6:.1f} MB, "
           f"{len(zres)} zoom + {len(wres)} wide)", flush=True)

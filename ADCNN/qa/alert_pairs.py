@@ -227,7 +227,7 @@ def render(alerts_path, cutouts_npz, out_dir, top_n=None, dpi=120, workers=1, _s
                 y0 = 0.06 * W.shape[0]
                 axw.plot([0.06 * W.shape[1], 0.06 * W.shape[1] + L], [y0, y0], color="w", lw=2)
                 axw.text(0.06 * W.shape[1], y0 + 0.03 * W.shape[0], '30"', color="w", fontsize=6)
-            axw.set_title(f"wide view (image of epoch 0)\nboth positions + motion",
+            axw.set_title(f"wide view (multi-detector mosaic)\nboth positions + motion",
                           fontsize=6.8, pad=2.5)
             for sp in axw.spines.values():
                 sp.set_color("#888888")
