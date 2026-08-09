@@ -1,8 +1,11 @@
 #!/bin/bash
 #SBATCH --partition=ada
-#SBATCH --account=rubin:commissioning   # NOT kipac:kipac: kipac holds only a PREEMPTABLE
-                                        # qos on the GPU partitions, and 20260629 detection
-                                        # was evicted ~2 min in, twice, as a bare CANCELLED
+#SBATCH --account=kipac:kipac   # ada grants kipac a NORMAL (non-preemptable) qos; the
+                                # preemptable-only problem is specific to AMPERE, where
+                                # 20260629 detection was evicted twice as a bare CANCELLED.
+                                # rubin:commissioning also runs here, but its ada group CPU
+                                # cap rejects a 32-core request (AssocGrpCpuLimit) once
+                                # ~12 cores are already in use by the account.
 #SBATCH --gres=gpu:l40s:4
 #SBATCH --exclude=sdfampere017
 #SBATCH -c 32
