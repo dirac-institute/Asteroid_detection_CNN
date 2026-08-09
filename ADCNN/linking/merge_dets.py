@@ -74,7 +74,18 @@ def merge(adcnn_path, stack_path, out_path, dedup_arcsec=1.5, drop_rings=True, v
         t = cKDTree(radec_to_unit(a.ra.to_numpy(), a.dec.to_numpy()))
         d1, _ = t.query(radec_to_unit(g.ra.to_numpy(), g.dec.to_numpy()), k=1)
         keep[g.index.to_numpy()] = d1 >= tol
-    S_new = S[keep]
+    S_new = S[keep].copy()
+    # Stack rows carry no fits_path (ingest_diasource reads a table, not pixels), but every
+    # downstream pixel stage (alert_cutouts -> morphology -> sheets/pairs) needs one. Fill it from
+    # the ADCNN catalogue's (visit, detector) -> fits_path map: same panel, same file.
+    if "fits_path" in A.columns and {"visit", "detector"} <= set(S_new.columns):
+        fp = (A.dropna(subset=["fits_path"]).groupby(["visit", "detector"])["fits_path"].first())
+        idx = pd.MultiIndex.from_arrays([S_new.visit.astype(int), S_new.detector.astype(int)])
+        S_new["fits_path"] = fp.reindex(idx).to_numpy()
+        n_bad = int(S_new.fits_path.isna().sum())
+        if n_bad:
+            print(f"[merge] dropping {n_bad:,} stack rows on panels ADCNN never saw (no fits_path)", flush=True)
+            S_new = S_new[S_new.fits_path.notna()]
     M = pd.concat([A, S_new], ignore_index=True, sort=False)
     if "art_frac" in M.columns:
         M["art_frac"] = M["art_frac"].astype(float).fillna(0.0)

@@ -1101,6 +1101,12 @@ def main():
     ap.add_argument("--static-radius-arcsec", type=float, default=3.0,
                     help="static-veto match radius: 3\" reaches the 2-3\" bright-star WINGS where the "
                     "subtraction-residual dipoles live (per-visit kill fraction 0.25->0.60 going 2\"->3\")")
+    ap.add_argument("--reliability-min", type=float, default=0.5,
+                    help="score floor applied to STACK (src=='stack') detections, whose `score` column "
+                         "holds the stack's `reliability` classifier -- a DIFFERENT statistic from the "
+                         "ADCNN CNN score that --score-min is calibrated for. 0.5 is the stack's own "
+                         "documented low/high-reliability product split. Gating both with one number is "
+                         "apples-to-oranges and needlessly throttles the merge.")
     ap.add_argument("--fast-link", action=argparse.BooleanOptionalAction, default=True,
                     help="ON BY DEFAULT. EXACT speedups (validated BYTE-IDENTICAL against the serial path "
                     "at 3 scales + 8 determinism runs): (1) batched C-level chord-seed KD queries (both the "
@@ -1118,7 +1124,7 @@ def main():
                     "ADCNN.inference.catalog + ADCNN.qa.alert_morphology.ripple_flag) from the LINKABLE set "
                     "BEFORE seeding, so rings never form tracklets. They are KEPT in the stationarity/train "
                     "counterpart catalogs (a ring is a fine static counterpart). ON BY DEFAULT (measured "
-                    "0706: removes 12.4% of linkable dets at the 0.5 floor / 22% at 0.7, so rings never "
+                    "0706: removes 12.4%% of linkable dets at the 0.5 floor / 22%% at 0.7, so rings never "
                     "form tracklets); exact no-op on catalogs without the column (older runs), so it is "
                     "safe everywhere. --no-dipole-veto to disable.")
     ap.add_argument("--train-veto", action="store_true",
@@ -1210,7 +1216,22 @@ def main():
     # not gate here, so tier-B (0.60-0.80) pairs still pass the mfsnr/chi2/rate purity gates.
     _score_floor = a.score_candidate_min if (a.score_candidate_min and a.score_candidate_min > 0) else a.score_min
     if "score" in d and _score_floor > 0:
-        d = d[d.score >= _score_floor]
+        # PER-SOURCE gate. `score` holds a DIFFERENT statistic per detector: ADCNN's stage-2 CNN
+        # real/bogus (for which score_min is the validated operating point) versus the stack's own
+        # `reliability` classifier. They are not on a common scale, so applying the CNN floor to
+        # reliability is apples-to-oranges -- it cut stack rows with a linkable trail from 6,258 to
+        # 2,437 on 20260706 (2.6x) purely by using the wrong number. Gate each by its own statistic:
+        # stack rows use --reliability-min, defaulting to 0.5, which is the stack's OWN documented
+        # split between its low- and high-reliability data products.
+        if "src" in d.columns:
+            _is_stack = d.src.astype(str).eq("stack")
+            keep = np.where(_is_stack, d.score >= a.reliability_min, d.score >= _score_floor)
+            _n_st = int((_is_stack & keep).sum())
+            d = d[keep]
+            print(f"[trail-link] per-source score gate: adcnn>={_score_floor}, "
+                  f"stack reliability>={a.reliability_min} ({_n_st} stack dets kept)", flush=True)
+        else:
+            d = d[d.score >= _score_floor]
         if a.score_candidate_min and a.score_candidate_min > 0:
             print(f"[trail-link] TWO-TIER follow-up: candidate floor {_score_floor}, hi-conf (tier A) >= {a.score_hiconf}", flush=True)
     # PRE-LINK DIPOLE/RING VETO: remove detector-flagged rings from the LINKABLE set before seeding, so
