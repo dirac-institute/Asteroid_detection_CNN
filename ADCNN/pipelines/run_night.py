@@ -425,8 +425,10 @@ def run(a):
         except subprocess.CalledProcessError:
             print("      WARN: DIA-source ingest failed -- linking ADCNN-only (documented fail-safe)")
             return
+        # pass the deep refcat so the ring-drop still happens on catalogues predating is_dipole
         _bash(f"python -m ADCNN.linking.merge_dets --adcnn {out}/adcnn_dets_masked.csv "
-              f"--stack {stack_dets} --out {merged_dets}", a.dry_run)
+              f"--stack {stack_dets} --out {merged_dets} --refcat {bright_refcat} "
+              f"--refcat-mag-max {a.refcat_mag_max}", a.dry_run)
 
     def s_link():
         floor = f" --score-candidate-min {a.candidate_floor}" if a.candidate_floor else ""

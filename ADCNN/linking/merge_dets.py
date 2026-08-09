@@ -2,23 +2,26 @@
 """Merge the STACK's DIA sources into the ADCNN detection catalogue. ALWAYS ON in production.
 
 The two detectors are complementary, measured against injected truth (3,857 movers, rate >1 deg/day,
-SNR 2-10; see outputs/runs/pa_validate and the adcnn-vs-stack-truth note):
+SNR 2-10, each system run with its OWN code; outputs/runs/pa_validate + the adcnn-vs-stack-truth note):
 
-    DETECTION   ADCNN 38.6%   stack 39.1%   -- a TIE; 9.2% ADCNN-only, 9.7% stack-only
-    END-TO-END  ADCNN 18.8%   stack  7.2%   -- 15.1% ADCNN-only, 3.4% stack-only
+    DETECTION   ADCNN 38.6%   stack 39.1%   -- a TIE;  9.2% ADCNN-only,  9.7% stack-only
+    END-TO-END  ADCNN 18.8%   stack  7.2%           15.1% ADCNN-only,  3.4% stack-only
 
-ADCNN owns the long-trail / faint end (its matched filter measures trails to 0.84-1.03x out to 56px,
-while the stack's own Naive/Veres plugins return NaN above ~20px REGARDLESS of brightness). The stack
-owns the short-trail / bright end (<=14px, 1-2 deg/day), where PSF detection is optimal. Neither
-subsumes the other, so an ADCNN-only product silently forfeits ~3.4 points of real movers end-to-end
-(~18% relative) and the merged upper bound is ~22.2%.
+ADCNN owns the long-trail / faint end: its matched filter recovers trail length at 0.84-1.03x out to
+56px, while the stack's OWN ext_trailedSources Naive AND Veres plugins return NaN above ~20px
+REGARDLESS of brightness (verified at mag 19.0) -- so the stack detects long trails but cannot hand the
+linker usable geometry. The stack owns the short-trail / bright end (<=14px, 1-2 deg/day) where PSF
+detection is optimal. Neither subsumes the other: an ADCNN-only product forfeits the ~3.4 points of
+real movers only the stack finds (~18% relative), and the merged upper bound is ~22.2%.
 
-ORDER MATTERS: ADCNN detections are ~35% bright-star RING residuals on a real night. Chance-link rate
-scales as n1*n2, so merging a clean external catalogue into an uncleaned one compounds contamination.
-The rings are removed here (is_dipole, the detection-time flag) BEFORE the union, and the stack side
-is already dipole-cut in ingest_diasource.
+ORDER IS MANDATORY: ADCNN detections are ~18-35% bright-star RING residuals on a real night, and the
+chance-link rate goes as n1*n2 -- merging a clean external catalogue into an uncleaned one compounds
+the contamination. Rings are therefore removed from the ADCNN side BEFORE the union, via the
+detection-time `is_dipole` flag when present, else via deep-refcat proximity. If NEITHER is available
+this REFUSES to run rather than silently merging into a ring-contaminated catalogue (that silent skip
+was a real bug: night catalogues predating detection-time morphology have no is_dipole column).
 
-Every row carries `src` ("adcnn" | "stack") so the provenance of any alert member is recoverable.
+Every row carries `src` ("adcnn" | "stack"), so the provenance of any alert member is recoverable.
 """
 from __future__ import annotations
 import argparse
@@ -31,17 +34,29 @@ def radec_to_unit(ra, dec):
     return np.stack([np.cos(d) * np.cos(r), np.cos(d) * np.sin(r), np.sin(d)], -1)
 
 
-def merge(adcnn_path, stack_path, out_path, dedup_arcsec=1.5, drop_rings=True, verbose=True):
+def merge(adcnn_path, stack_path, out_path, dedup_arcsec=1.5, drop_rings=True, verbose=True,
+          refcat=None, refcat_mag_max=21.0, refcat_radius=2.5):
     from scipy.spatial import cKDTree
+    from ADCNN.linking.clean_dets import ring_mask
     A = pd.read_csv(adcnn_path)
     A["src"] = "adcnn"
     n_a0 = len(A)
-    if drop_rings and "is_dipole" in A.columns:
-        ring = A["is_dipole"].fillna(False).astype(bool)
+    if drop_rings:
+        has_flag = "is_dipole" in A.columns
+        if not has_flag and not refcat:
+            raise SystemExit(
+                "[merge] REFUSING to merge: the ADCNN catalogue has no `is_dipole` column (it was "
+                "detected before detection-time morphology existed) and no --refcat was given, so "
+                "rings cannot be removed before the union. Chance links go as n1*n2, so merging a "
+                "clean catalogue into a ring-contaminated one compounds the contamination. Pass "
+                "--refcat <deep mag<21 refcat>, or --keep-rings to override deliberately.")
+        ring = ring_mask(A, refcat_path=refcat, radius_arcsec=refcat_radius,
+                         mag_max=refcat_mag_max, use_dipole=has_flag, verbose=False)
         A = A[~ring].reset_index(drop=True)
         if verbose:
+            how = "is_dipole" if has_flag else f"deep-refcat proximity (mag<{refcat_mag_max}, {refcat_radius}\")"
             print(f"[merge] ADCNN {n_a0:,} -> {len(A):,} after dropping {int(ring.sum()):,} ring "
-                  f"detections ({100*ring.mean():.1f}%) -- must precede the union", flush=True)
+                  f"detections ({100*ring.mean():.1f}%) via {how} -- precedes the union", flush=True)
     try:
         S = pd.read_csv(stack_path)
     except Exception as e:
@@ -49,7 +64,7 @@ def merge(adcnn_path, stack_path, out_path, dedup_arcsec=1.5, drop_rings=True, v
         A.to_csv(out_path, index=False)
         return A
     S["src"] = "stack"
-    # keep only stack detections ADCNN did not already find (same object, one row)
+    # keep only the stack detections ADCNN did not already find, so one object is one row
     tol = 2 * np.sin(np.radians(dedup_arcsec / 3600.0) / 2)
     keep = np.ones(len(S), bool)
     for v, g in S.groupby("visit"):
@@ -61,12 +76,15 @@ def merge(adcnn_path, stack_path, out_path, dedup_arcsec=1.5, drop_rings=True, v
         keep[g.index.to_numpy()] = d1 >= tol
     S_new = S[keep]
     M = pd.concat([A, S_new], ignore_index=True, sort=False)
-    for c, fill in (("art_frac", 0.0), ("is_dipole", False), ("score", 1.0)):
-        if c in M.columns:
-            M[c] = M[c].fillna(fill)
+    if "art_frac" in M.columns:
+        M["art_frac"] = M["art_frac"].astype(float).fillna(0.0)
+    if "is_dipole" in M.columns:
+        M["is_dipole"] = M["is_dipole"].fillna(False).astype(bool)
+    if "score" in M.columns:
+        M["score"] = M["score"].astype(float).fillna(1.0)
     M.to_csv(out_path, index=False)
     if verbose:
-        nl = int(((M.src == "stack") & (M.get("len_db", 0) >= 6)).sum())
+        nl = int(((M.src == "stack") & (M.get("len_db", pd.Series(0, index=M.index)) >= 6)).sum())
         print(f"[merge] stack {len(S):,} -> {len(S_new):,} NEW (deduped at {dedup_arcsec}\") | "
               f"MERGED {len(M):,} dets ({int((M.src=='adcnn').sum()):,} adcnn + {len(S_new):,} stack, "
               f"{nl:,} stack rows with a linkable trail) -> {out_path}", flush=True)
@@ -80,10 +98,16 @@ def main(argv=None):
     ap.add_argument("--stack", required=True, help="stack catalogue from ingest_diasource")
     ap.add_argument("--out", required=True)
     ap.add_argument("--dedup-arcsec", type=float, default=1.5)
+    ap.add_argument("--refcat", default=None,
+                    help="deep (mag<21) all-sky refcat. REQUIRED when the ADCNN catalogue predates the "
+                         "detection-time is_dipole column, so rings can still be removed before the union")
+    ap.add_argument("--refcat-mag-max", type=float, default=21.0)
+    ap.add_argument("--refcat-radius", type=float, default=2.5)
     ap.add_argument("--keep-rings", action="store_true",
-                    help="do NOT drop ADCNN is_dipole rows before merging (diagnostic only)")
+                    help="do NOT remove ADCNN rings before merging (diagnostic only -- inflates chance links)")
     a = ap.parse_args(argv)
-    merge(a.adcnn, a.stack, a.out, a.dedup_arcsec, drop_rings=not a.keep_rings)
+    merge(a.adcnn, a.stack, a.out, a.dedup_arcsec, drop_rings=not a.keep_rings,
+          refcat=a.refcat, refcat_mag_max=a.refcat_mag_max, refcat_radius=a.refcat_radius)
 
 
 if __name__ == "__main__":
