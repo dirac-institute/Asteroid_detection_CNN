@@ -598,7 +598,8 @@ def physical_check(dets, members, exptime_s=30.0, pa_tol_deg=20.0, speed_frac=0.
                    lin_rms_arcsec=1.0, min_epochs=2, epoch_gap_s=120.0, pa_tol_2v_deg=10.0,
                    orbit_check_2v=True, orbit_rate_tol=0.5, score_2v_min=0.0, max_arc_2v_min=None,
                    perp_collinear_2v_arcsec=None, snr_frac_2v=None, chi2_2v_max=None, chi2_sig=None,
-                   mfsnr_min_2v=None, rate_lo_2v=None, rate_hi_2v=10.0, out=None):
+                   mfsnr_min_2v=None, rate_lo_2v=None, rate_hi_2v=10.0, out=None,
+                   gate_mode="all", len_db_min=0.0):
     """Defensible physical consistency of a candidate track (rejects chance/trail-angle-coincidence
     false links that pass position clustering). Requires:
       1. >= min_epochs DISTINCT time epochs (merge sub-epoch_gap snaps — back-to-back snaps are one).
@@ -660,9 +661,24 @@ def physical_check(dets, members, exptime_s=30.0, pa_tol_deg=20.0, speed_frac=0.
     # regime: the stack-missed fast/long-trail movers have high mf_snr and are KEPT. With mfsnr carrying the
     # purity, chi2_2v_max can be LOOSENED (~10) to recover noisy real movers (orbit chi2 doesn't separate
     # true/false among survivors). Lifts the 3sigma op-point from S0.95 (comp .044) to S0.80 (comp ~.09).
+    # ASYMMETRIC ("any") MODE. On this survey's cadence EVERY co-pointed revisit is CROSS-BAND (measured:
+    # not one same-band pair exists on any embargo night), and the second epoch is 0.45-0.62 mag shallower.
+    # Requiring the FAINTER member to clear a discovery-grade floor asks a CONFIRMATION epoch to be a
+    # DISCOVERY epoch: the trail geometry already comes from the deep epoch, the shallow one only has to
+    # show the object is THERE. Measured cost of the symmetric rule on injected truth: of movers detected
+    # in BOTH epochs, 59% never link, and 27-36% of those failures at SNR 4-5.5 are this mfsnr floor alone.
+    # "any" keeps the floor but satisfies it with the BEST member, so the deep epoch carries it.
     if two_visit and mfsnr_min_2v is not None and "mf_snr" in g.columns:
-        if float(g.mf_snr.min()) < mfsnr_min_2v:
-            return False, f"2v mf_snr {g.mf_snr.min():.1f}<{mfsnr_min_2v}", n_ep
+        _mf = float(g.mf_snr.max() if gate_mode == "any" else g.mf_snr.min())
+        if _mf < mfsnr_min_2v:
+            return False, f"2v mf_snr {_mf:.1f}<{mfsnr_min_2v} ({gate_mode})", n_ep
+    # Trail-length floor, when deferred out of the catalogue pre-filter (gate_mode="any"): the pre-filter
+    # DELETES short-trail detections outright, so a mover measuring 5px in the shallow epoch loses that
+    # detection and can never be paired at all. At pair level the same floor is satisfied by the epoch that
+    # actually resolves the trail.
+    if two_visit and gate_mode == "any" and len_db_min and len_db_min > 0 and "len_db" in g.columns:
+        if float(g.len_db.max()) < len_db_min:
+            return False, f"2v len_db {g.len_db.max():.1f}<{len_db_min} (any)", n_ep
     if two_visit and rate_lo_2v is not None:
         cd = float(np.cos(np.radians(g.dec.mean()))); dt = t.max() - t.min()
         rate = np.hypot((g.ra.iloc[-1] - g.ra.iloc[0]) * cd, g.dec.iloc[-1] - g.dec.iloc[0]) / dt if dt > 0 else 0.0
@@ -1011,6 +1027,14 @@ def main():
     ap.add_argument("--mfsnr-min-2v", type=float, default=10.0, help="2-visit photometric purity floor: fainter member's matched-filter TRAIL SNR >= this. CADENCE-DEPENDENT DIAL: at the realistic ~34-min WFD pair gap the residual chance-FP need this floor to reach 3sigma -> keep ~10. At RAPID cadence (deep-drilling/short dt, sparse FP) the geometric chi2 alone carries purity -> lower to ~5 to recover the fast FAINT movers (mf_snr ~ point_SNR*sqrt(PSF/trail_area) is low for long trails, so a high floor rejects exactly them). 0 to disable")
     ap.add_argument("--rate-lo-2v", type=float, default=1.0, help="2-visit NEO apparent-rate band low (deg/day)")
     ap.add_argument("--rate-hi-2v", type=float, default=8.0, help="2-visit NEO apparent-rate band high (deg/day)")
+    ap.add_argument("--gate-mode", choices=["all", "any"], default="all",
+                    help="how the len_db/mfsnr floors apply across a 2-visit pair. 'all' (default, legacy) "
+                         "requires EVERY member to clear them -- which asks the shallower, cross-band "
+                         "confirmation epoch to meet a discovery-grade bar. 'any' satisfies each floor with "
+                         "the BEST member, so the deep epoch carries the trail geometry and the shallow one "
+                         "only confirms the object is there. Measured: of movers detected in BOTH epochs 59%% "
+                         "never link, and at SNR 4-6 the len_db pre-filter plus the mfsnr floor account for "
+                         "~50-60%% of those losses.")
     ap.add_argument("--claim-order", choices=["seed", "quality", "preal"], default="seed",
                     help="which candidate claims a shared detection when tracks overlap. 'seed' "
                          "(default, frozen behaviour): longest-first, ties broken by SEEDING order. "
@@ -1210,7 +1234,14 @@ def main():
     if "art_frac" in d and a.art_frac_max > 0:
         d = d[d.art_frac.fillna(0.0) < a.art_frac_max]   # NaN (unmeasured mask) -> keep, never silently drop
     if "len_db" in d and a.len_db_min > 0:
-        d = d[d.len_db >= a.len_db_min]
+        if a.gate_mode == "any":
+            # DEFERRED to pair level. Dropping short-trail detections here deletes the SHALLOW epoch's
+            # confirmation of a real mover -- measured on injected truth: 19-45% of both-detected movers
+            # that fail to link are killed by this pre-filter alone.
+            print(f"[trail-link] len_db floor {a.len_db_min} DEFERRED to pair level (gate-mode any): "
+                  f"{int((d.len_db < a.len_db_min).sum()):,} short-trail dets kept as confirmations", flush=True)
+        else:
+            d = d[d.len_db >= a.len_db_min]
     # TWO-TIER follow-up: link down to the CANDIDATE floor when set (op: 0.60), else the single score_min.
     # The hi-confidence boundary (score_hiconf, 0.80) only LABELS each alert A/B in build_alert -- it does
     # not gate here, so tier-B (0.60-0.80) pairs still pass the mfsnr/chi2/rate purity gates.
@@ -1414,7 +1445,8 @@ def main():
                           orbit_rate_tol=a.orbit_rate_tol, perp_collinear_2v_arcsec=None, snr_frac_2v=None,
                           chi2_2v_max=(a.chi2_2v_max if a.chi2_2v_max and a.chi2_2v_max > 0 else None),
                           mfsnr_min_2v=(a.mfsnr_min_2v if a.mfsnr_min_2v and a.mfsnr_min_2v > 0 else None),
-                          rate_lo_2v=a.rate_lo_2v, rate_hi_2v=a.rate_hi_2v)
+                          rate_lo_2v=a.rate_lo_2v, rate_hi_2v=a.rate_hi_2v,
+                          gate_mode=a.gate_mode, len_db_min=a.len_db_min)
             _pc_all = (_physical_check_all(dn, cand, _pc_kw, a.link_workers) if a.fast_link
                        else [None] * len(cand))
             evald = []
@@ -1432,7 +1464,8 @@ def main():
                         orbit_rate_tol=a.orbit_rate_tol, perp_collinear_2v_arcsec=None, snr_frac_2v=None,
                         chi2_2v_max=(a.chi2_2v_max if a.chi2_2v_max and a.chi2_2v_max > 0 else None),
                         mfsnr_min_2v=(a.mfsnr_min_2v if a.mfsnr_min_2v and a.mfsnr_min_2v > 0 else None),
-                        rate_lo_2v=a.rate_lo_2v, rate_hi_2v=a.rate_hi_2v, out=st)
+                        rate_lo_2v=a.rate_lo_2v, rate_hi_2v=a.rate_hi_2v, out=st,
+                        gate_mode=a.gate_mode, len_db_min=a.len_db_min)
                     c2 = float(st.get("chi2", np.inf))
                 if ok:
                     # 3+visit candidates carry no pair chi2; they sort first on length anyway.
@@ -1477,7 +1510,8 @@ def main():
                                             perp_collinear_2v_arcsec=None, snr_frac_2v=None,
                                             chi2_2v_max=(a.chi2_2v_max if a.chi2_2v_max and a.chi2_2v_max > 0 else None),
                                             mfsnr_min_2v=(a.mfsnr_min_2v if a.mfsnr_min_2v and a.mfsnr_min_2v > 0 else None),
-                                            rate_lo_2v=a.rate_lo_2v, rate_hi_2v=a.rate_hi_2v)
+                                            rate_lo_2v=a.rate_lo_2v, rate_hi_2v=a.rate_hi_2v,
+                                            gate_mode=a.gate_mode, len_db_min=a.len_db_min)
             if not ok:
                 continue
             # dedup across ALL tiers: cand is sorted longest-first, so the best (longest) track claims its
