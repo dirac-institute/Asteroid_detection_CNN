@@ -69,6 +69,35 @@ def trail_velocity(d, exptime_s):
 # [|dSNR|/min], dpa_tm [deg trail-vs-motion PA], dspeed [frac trail-vs-motion speed].
 CHI2_SIG_2V = dict(perp=0.127, resid=0.133, dsnr=0.558, dpa_tm=4.869, dspeed=0.237)
 
+# --- TWO OPT-IN FIXES for the faint end, both measured on injected truth (2026-08-10) -------------
+# The linker tests whether the two epochs AGREE, not whether either is ACCURATE. That has a perverse
+# consequence: an estimator biased the SAME way in both epochs sails through, while a more accurate
+# but noisier one gets rejected. Measured on 5,143 movers in the faint-fast cell, the matched filter
+# LOST 100 real movers the segmentation kept -- and those losses had an accurate deep-epoch length
+# (0.98x truth) with a 20% over-read in the SHALLOW epoch, giving an A-vs-B disagreement of 0.41
+# against 0.17 for the movers that survived. The disagreement was the rejection cause, not the error.
+#
+# FIX 1 (ADCNN_LEN_BEST_EPOCH=1): a moving object has ONE rate, and the trail is that rate smeared
+# over one exposure -- so the two epochs measure the SAME physical quantity. Measuring it twice and
+# demanding agreement adds no information and manufactures a failure mode. Take the trail speed from
+# the epoch with the higher matched-filter SNR and use it for both.
+#
+# FIX 2 (ADCNN_DSPEED_SNR_SIGMA=1): the shipped dspeed sigma is FIXED at 0.237, but the fractional
+# length error is set by the source's own SNR. Fitted on truth: sigma_L/L = 1.391 * mfsnr^-0.968
+# (exponent ~ -1, exactly the matched-filter expectation). So 0.237 is far too TIGHT at mfsnr 4
+# (needs 0.364) and far too LOOSE at mfsnr 30 (needs 0.052) -- it penalises faint movers for noise
+# that is real, and lets bright chance links through.
+DSPEED_SIG_A, DSPEED_SIG_B = 1.391, -0.968
+DSPEED_SIG_LO, DSPEED_SIG_HI = 0.05, 0.60
+
+
+def dspeed_sigma(mfsnr):
+    """Per-object fractional trail-length uncertainty; falls back to the shipped constant if unset."""
+    if not os.environ.get("ADCNN_DSPEED_SNR_SIGMA"):
+        return CHI2_SIG_2V["dspeed"]
+    m = np.maximum(np.asarray(mfsnr, float), 1e-3)
+    return np.clip(DSPEED_SIG_A * m ** DSPEED_SIG_B, DSPEED_SIG_LO, DSPEED_SIG_HI)
+
 # TRAIL-PA MEASUREMENT PRECISION vs TRAIL LENGTH -- measured against INJECTED truth (2,181 recovered
 # injections over 30 real 20260706 panels, lengths 6-30 px; outputs/runs/pa_precision/measure_pa.py):
 #     L px :    6     8    10    13    17    22    30
@@ -130,7 +159,13 @@ def pair_chi2(g, exptime_s=30.0, sig=None):
     tvs = [tv(a), tv(b)]
     pas = [np.degrees(np.arctan2(ty, tx)) % 180.0 for tx, ty in tvs]
     dpa_tm = max(abs(((pa - mpa + 90) % 180) - 90) for pa in pas)
-    dspeed = max(abs(np.hypot(tx, ty) - mspeed) / max(mspeed, 0.3) for tx, ty in tvs)
+    if os.environ.get("ADCNN_LEN_BEST_EPOCH") and "mf_snr" in g.columns:
+        # FIX 1: trust the epoch that actually resolved the trail, not the noisier one.
+        _sn = g.mf_snr.to_numpy(float)
+        _best = tvs[0] if (len(_sn) > 1 and _sn[0] >= _sn[-1]) else tvs[-1]
+        dspeed = abs(np.hypot(_best[0], _best[1]) - mspeed) / max(mspeed, 0.3)
+    else:
+        dspeed = max(abs(np.hypot(tx, ty) - mspeed) / max(mspeed, 0.3) for tx, ty in tvs)
     dpa_tt = abs(((pas[0] - pas[1] + 90) % 180) - 90)
     rej = dict(bound=False, a=np.nan, e=np.nan, perp=np.nan, resid=np.nan, dsnr=np.nan, dpa_tm=dpa_tm, dspeed=dspeed)
     # CHEAP pre-gate (trail-vs-motion PA & speed, trail-vs-trail PA): reject chance pairs on O(1) geometry
@@ -149,9 +184,15 @@ def pair_chi2(g, exptime_s=30.0, sig=None):
     s = g.mf_snr.to_numpy() if "mf_snr" in g.columns else np.array([1.0, 1.0])
     dsnr = abs(s[0] - s[-1]) / max(min(s), 1e-3)
     f = dict(perp=perp, resid=resid, dsnr=dsnr, dpa_tm=dpa_tm, dspeed=dspeed)
+    _sig_ds = (float(dspeed_sigma(np.nanmax(g.mf_snr.to_numpy(float))))
+               if ("mf_snr" in g.columns and os.environ.get("ADCNN_DSPEED_SNR_SIGMA"))
+               else CHI2_SIG_2V["dspeed"])
     # PA term: divide by the sigma the SHORTER (worse-measured) member's trail actually supports, not a
     # single fixed value -- see sigma_dpa(). Opt out with ADCNN_PA_FIXED_SIGMA=1 to reproduce the old chi2.
     _sig = dict(sig)
+    # MUST be applied to the chi2 the same way the vectorised prefilter applies it, or the prefilter
+    # prunes pairs this chi2 would accept -- a silent recall loss (same trap the PA term documents).
+    _sig["dspeed"] = _sig_ds
     if os.environ.get("ADCNN_PA_SCALED_SIGMA") and "len_db" in g.columns:
         _Lmin = float(np.nanmin(g.len_db.to_numpy())) if np.isfinite(g.len_db.to_numpy()).any() else np.nan
         if np.isfinite(_Lmin):
@@ -435,7 +476,12 @@ def prefilter_2v_pairs(dets, pairs, chi2_max, exptime_s=30.0):
     msp = np.hypot(mx, my)
     dpa_tm = np.maximum(np.abs(((tpa[I] - mpa + 90) % 180) - 90),
                         np.abs(((tpa[J] - mpa + 90) % 180) - 90))
-    dspeed = np.maximum(np.abs(tsp[I] - msp), np.abs(tsp[J] - msp)) / np.maximum(msp, 0.3)
+    if os.environ.get("ADCNN_LEN_BEST_EPOCH") and "mf_snr" in d.columns:
+        _s = d.mf_snr.to_numpy(float)
+        _tsp_best = np.where(_s[I] >= _s[J], tsp[I], tsp[J])          # FIX 1, vectorised
+        dspeed = np.abs(_tsp_best - msp) / np.maximum(msp, 0.3)
+    else:
+        dspeed = np.maximum(np.abs(tsp[I] - msp), np.abs(tsp[J] - msp)) / np.maximum(msp, 0.3)
     ra0 = d.ra0.to_numpy(); de0 = d.dec0.to_numpy(); ra1 = d.ra1.to_numpy(); de1 = d.dec1.to_numpy()
     mfs = d.mf_snr.to_numpy() if "mf_snr" in d.columns else np.ones(len(d))
     dm = (dec[I] + dec[J]) / 2.0; c0 = np.cos(np.radians(dm)); ram = (ra[I] + ra[J]) / 2.0
@@ -457,8 +503,9 @@ def prefilter_2v_pairs(dets, pairs, chi2_max, exptime_s=30.0):
         _sig_pa = np.where(np.isfinite(_Lmin), _sig_pa, CHI2_SIG_2V["dpa_tm"])
     else:
         _sig_pa = CHI2_SIG_2V["dpa_tm"]
+    _sig_ds_v = dspeed_sigma(np.maximum(mfs[I], mfs[J]))   # FIX 2, vectorised (mirrors scalar path)
     partial = ((perp / CHI2_SIG_2V["perp"]) ** 2 + (dsnr / CHI2_SIG_2V["dsnr"]) ** 2 +
-               (dpa_tm / _sig_pa) ** 2 + (dspeed / CHI2_SIG_2V["dspeed"]) ** 2)
+               (dpa_tm / _sig_pa) ** 2 + (dspeed / _sig_ds_v) ** 2)
     keep = partial <= float(chi2_max)
     kept = [[int(a_), int(b_)] for a_, b_ in P2[keep]]
     longer = [p for p in pairs if len(p) != 2]
