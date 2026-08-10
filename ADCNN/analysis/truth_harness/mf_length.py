@@ -116,8 +116,16 @@ def main(n_panels=40):
                 continue
             S = TPL @ cut.ravel() / max(sigma, 1e-6)
             k = int(np.argmax(S))
+            # SAVE THE WHOLE PROFILE: S maximised over angle at each candidate length. argmax(S) is
+            # only ONE estimator, and for a FAINT trail S(L) is flat near its peak, so noise
+            # correlating with a longer template makes argmax land long (measured: 4.9% of faint-fast
+            # come back >150% of true, a failure the footprint estimator does not have at 0.4%).
+            # Storing the profile lets every candidate estimator -- smoothed argmax, peak centroid,
+            # length-penalised -- be compared OFFLINE without re-running the expensive pixel pass.
+            prof = S.reshape(len(L_GRID), len(B_GRID)).max(axis=1)
             rows.append(dict(oid=oid, L_true=Ltrue, snr_t=snr, seg_len=seg_len,
-                             mf_len=float(META[k, 0]), mf_snr=float(S[k])))
+                             mf_len=float(META[k, 0]), mf_snr=float(S[k]),
+                             **{f"s{int(L)}": float(v) for L, v in zip(L_GRID, prof)}))
         done += 1
         if done % 10 == 0:
             print(f"[mf] {done} panels, {len(rows):,} trails", flush=True)
