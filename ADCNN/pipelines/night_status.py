@@ -47,6 +47,27 @@ def status(run_dir):
     sd = R / "stream"
     st = {"night": R.name.replace("run_night_", ""), "complete": False,
           "first_missing": None, "detail": {}}
+    # The sentinel is a CACHE, not proof. It was a one-way latch: `touch .complete` on an empty
+    # directory reported COMPLETE, and all nine real sentinels PREDATED the artifacts they certify
+    # (0629: sentinel 08-01, catalogue 08-11). Trust it only if it is newer than the artifacts.
+    _sent = R / ".complete"
+    if _sent.exists():
+        # The sentinel certifies these artifacts. It is invalid if any REQUIRED one is missing (a
+        # bare `touch .complete` on an empty directory reported COMPLETE) or if any is NEWER than the
+        # sentinel (all nine real sentinels predated the artifacts they certified).
+        _required = (R / "adcnn_dets_masked.csv", R / "stream" / "alerts.jsonl")
+        _missing = [f for f in _required if not (f.exists() and f.stat().st_size > 0)]
+        _newer = [f for f in (R / "adcnn_dets_masked.csv", R / "dets_merged.csv",
+                              R / "stream" / "alerts.jsonl")
+                  if f.exists() and f.stat().st_mtime > _sent.stat().st_mtime]
+        if _missing:
+            print(f"[night_status] .complete is INVALID (missing/empty "
+                  f"{', '.join(f.name for f in _missing)}) -- re-verifying", flush=True)
+            _sent.unlink()
+        elif _newer:
+            print(f"[night_status] .complete is STALE (older than {', '.join(f.name for f in _newer)}) "
+                  f"-- re-verifying", flush=True)
+            _sent.unlink()
     if (R / ".complete").exists():
         st["complete"] = True
         st["detail"]["sentinel"] = True
@@ -68,7 +89,16 @@ def status(run_dir):
     ap = sd / "alerts.jsonl"
     if not (ap.exists() and ap.stat().st_size > 0):
         st["first_missing"] = "link"; st["detail"]["link"] = "no stream alerts"; return st
-    ids = [json.loads(l)["alertId"] for l in open(ap)]
+    # A TRUNCATED alerts.jsonl must degrade to "rerun the link stage", never raise. run_night calls
+    # status() on ENTRY, before preflight, so an unguarded json.loads wedged the night permanently:
+    # all three campaign retries burned on an identical instant crash. This is exactly the half-write
+    # class this module exists to catch -- it handled empty files but not partial lines.
+    try:
+        ids = [json.loads(l)["alertId"] for l in open(ap)]
+    except (json.JSONDecodeError, KeyError, UnicodeDecodeError) as e:
+        print(f"[night_status] {ap} is unreadable ({type(e).__name__}) -- treating the link stage as "
+              f"incomplete so it is rebuilt", flush=True)
+        return "link"
     n = len(ids)
     st["detail"]["link"] = f"{n} alerts"
 
@@ -102,6 +132,13 @@ def status(run_dir):
         st["first_missing"] = "summary"; st["detail"]["summary"] = "missing/mismatch"; return st
 
     st["complete"] = True
+    # Re-write the sentinel after a successful re-verification, so the cheap stat path is restored
+    # for the next caller. Verification invalidates a stale sentinel (see above); without this, every
+    # subsequent call would redo the full artifact scan on a night that is genuinely finished.
+    try:
+        (R / ".complete").write_text("")
+    except OSError:
+        pass
     return st
 
 
