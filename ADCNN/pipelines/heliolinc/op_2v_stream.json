@@ -10,7 +10,7 @@
   "mfsnr_min_2v": 0.0,
   "chi2_2v_max": 30.0,
   "rate_lo_2v": 1.0,
-  "rate_hi_2v": 12.0,
+  "rate_hi_2v": 8.0,
   "len_db_min": 6.0,
   "pa_tol": 20.0,
   "pa_tol_2v": 10.0,
