@@ -95,10 +95,27 @@ def filter_stream(alerts_path, dets_path, op_path, out_path, refcat_path=None, a
     op = json.load(open(op_path))
     CHI2, MF, LEN = op["chi2_2v_max"], op["mfsnr_min_2v"], op["len_db_min"]
     RLO, RHI = op["rate_lo_2v"], op["rate_hi_2v"]
+    # Defaults are the PRE deep-refcat-fix values, so an op-point that enables proximity but omits
+    # the depth keys silently loses 99.5% of the veto (MEASURED: 182 -> 1 flagged of 200 alerts).
+    # Refuse rather than degrade.
+    if op.get("bright_star_proximity") and not ({"bright_star_radius_arcsec",
+                                                 "bright_star_mag_max"} <= set(op)):
+        raise SystemExit(
+            "[filter_op] op enables bright_star_proximity but omits bright_star_radius_arcsec / "
+            "bright_star_mag_max. The built-in defaults (4 arcsec, mag<16) predate the deep-refcat "
+            "fix and lose ~99.5% of the veto silently. Set both keys explicitly.")
     PROX_R = op.get("bright_star_radius_arcsec", 4.0)
     PROX_M = op.get("bright_star_mag_max", 16.0)
     alerts = [json.loads(l) for l in open(alerts_path)]
     artifact = _member_artifact(alerts, dets_path) if dets_path else set()
+    # A veto enabled in the op but handed no catalogue is a NO-OP that prints "(0)" -- textually
+    # identical to "0 flagged". MEASURED on 200 real alerts: with --refcat 10 survivors, without it
+    # 84 (8.4x larger, ~88% ring-contaminated). This exact bug shipped once. Fail, do not degrade.
+    if op.get("bright_star_proximity") and not refcat_path:
+        raise SystemExit(
+            "[filter_op] op enables bright_star_proximity but no --refcat was given, so the veto "
+            "would silently do nothing (the product would be ~8x larger and heavily ring-"
+            "contaminated). Pass --refcat <deep mag<21 refcat>, or disable the veto in the op.")
     near_star = (_near_bright_star(alerts, refcat_path, PROX_R, PROX_M)
                  if refcat_path and op.get("bright_star_proximity") else set())
 
@@ -134,6 +151,9 @@ def filter_stream(alerts_path, dets_path, op_path, out_path, refcat_path=None, a
     with open(out_path, "w") as f:
         for a in surv:
             f.write(json.dumps(a) + "\n")
+    if not artifact and any(c.startswith("m_") for c in getattr(_d, "columns", [])) is False:
+        print("[filter_op] WARNING: dets carry no m_* mask columns -- the mask-artifact veto is OFF, "
+              "not '0 flagged'", flush=True)
     print(f"[filter_op] chi2<={CHI2} + veto-drop + mask-artifact({len(artifact)}) + "
           f"bright-star({len(near_star)}): {len(surv)} survivors of {len(alerts)} -> {out_path}",
           flush=True)

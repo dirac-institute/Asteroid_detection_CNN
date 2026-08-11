@@ -157,6 +157,20 @@ class _Timer:
         }
 
 
+def _ok(p, min_bytes=1):
+    """Exists AND is non-empty. A bare .exists() lets a half-written or 0-byte file become THE input.
+
+    Demonstrated by the audit: a planted 0-byte dets_merged.csv was passed to link_2visit, pixel_vet
+    and alert_cutouts as the night's catalogue, and a 0-byte bright_refcat.parquet silently disables
+    the bright-star proximity veto -- the primary ring lever, which flags ~56% of the raw product.
+    Every shell driver already used `[ -s ]`; this brings run_night to the same discipline.
+    """
+    try:
+        return p.exists() and p.stat().st_size >= min_bytes
+    except OSError:
+        return False
+
+
 def _bash(cmd, dry):
     print(f"      $ {cmd}")
     if not dry:
@@ -303,7 +317,7 @@ def run(a):
 
     def s_known():
         kn = out / "known.csv"
-        if kn.exists() and not a.force:
+        if _ok(kn, min_bytes=0) and not a.force:
             print("      (known.csv exists; reuse)"); return
         if a.no_known:
             # embargo/prompt recipe: header-only catalog; label post-hoc (SkyBoT / mpc-crossmatch).
@@ -361,7 +375,7 @@ def run(a):
         # coverage fail-louds in the builder => static veto OFF fail-safe (link without the catalog).
         if a.no_static_veto:
             print("      (--no-static-veto: skipped)"); return
-        if static_catalog.exists() and not a.force:
+        if _ok(static_catalog) and not a.force:
             print("      (static_catalog.parquet exists; reuse)"); return
         # Prune at BUILD time to the magnitudes the veto can ever use. The veto matches statics
         # brighter than --static-mag-max (20.0); on 20260630 that is 6.2% of the 9.5M-row coadd
@@ -385,7 +399,7 @@ def run(a):
         cost to real movers (~20:1). Best-effort: a failure just leaves the veto off (fail-safe)."""
         if a.no_refcat:
             print("      (--no-refcat: skipped)"); return
-        if bright_refcat.exists() and not a.force:
+        if _ok(bright_refcat) and not a.force:
             print("      (bright_refcat.parquet exists; reuse)"); return
         cmd = (f"bash -c '{lsst}; cd {REPO}; BUTLER_REPO=embargo python -m ADCNN.linking.build_static_refcat "
                f"--dets {_dets()} --out {bright_refcat} "
@@ -399,7 +413,7 @@ def run(a):
     def _dets():
         """The detection catalogue downstream stages consume: the ADCNN+stack merge when it
         exists, else ADCNN alone (fail-safe)."""
-        return merged_dets if merged_dets.exists() else (out / 'adcnn_dets_masked.csv')
+        return merged_dets if _ok(merged_dets) else (out / 'adcnn_dets_masked.csv')
 
     def s_stack_merge():
         """ALWAYS-ON union of the stack's DIA sources with ADCNN's detections.
@@ -414,7 +428,7 @@ def run(a):
         Best-effort: if the stack ingest fails the merge falls back to ADCNN-only and says so."""
         if a.no_stack_merge:
             print("      (--no-stack-merge: ADCNN-only, forfeits the stack-only movers)"); return
-        if merged_dets.exists() and not a.force:
+        if _ok(merged_dets) and not a.force:
             print("      (dets_merged.csv exists; reuse)"); return
         if not a.collection:
             print("      WARN: no --collection, cannot ingest DIA sources -- ADCNN-only"); return
@@ -432,7 +446,7 @@ def run(a):
 
     def s_link():
         floor = f" --score-candidate-min {a.candidate_floor}" if a.candidate_floor else ""
-        static = f" --static-catalog {static_catalog}" if static_catalog.exists() and not a.no_static_veto else ""
+        static = f" --static-catalog {static_catalog}" if _ok(static_catalog) and not a.no_static_veto else ""
         report = "" if a.no_report else " --report"
         cmd = (f"python -m ADCNN.linking.link_2visit --dets {_dets()} "
                f"--known {out}/known.csv --out {out}/tracks.csv --op-point {op_point} "
@@ -461,7 +475,7 @@ def run(a):
             print("      (--no-stream: skipped)"); return
         sd = out / "stream"
         sd.mkdir(parents=True, exist_ok=True)
-        static = f" --static-catalog {static_catalog}" if static_catalog.exists() and not a.no_static_veto else ""
+        static = f" --static-catalog {static_catalog}" if _ok(static_catalog) and not a.no_static_veto else ""
         # per-substage resume: a re-run after an interrupted night must not redo the ~45 min link
         # or the S3 cutout pass. --force redoes everything (same convention as manifest/known).
         ap = sd / "alerts.jsonl"
@@ -502,7 +516,7 @@ def run(a):
               f"--top-n {a.stream_pairs_top_n}", a.dry_run)
         _bash(f"python -m ADCNN.qa.stream_summary --alerts {sd}/alerts.jsonl "
               f"--out {sd}/stream_summary.json"
-              + (f" --static-catalog {static_catalog}" if static_catalog.exists() else ""), a.dry_run)
+              + (f" --static-catalog {static_catalog}" if _ok(static_catalog) else ""), a.dry_run)
         # The cutout cache is ~1.1 GB/night and is pure intermediate: it exists so re-ranking and
         # re-rendering cost no pixel IO. Once the images are written it is regenerable in ~25 min
         # from the dets catalog, so it is not worth keeping by default.

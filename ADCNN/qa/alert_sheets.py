@@ -59,13 +59,49 @@ def _assert_cache_matches(alerts_path, cutouts_npz, n_alerts):
               f"{os.path.basename(alerts_path)}", flush=True)
         return
     m = json.load(open(meta))
-    if m.get("n_alerts") != n_alerts:
+    # COUNT is compared against the UNTRUNCATED file, not the post---limit list: run_night passes the
+    # same --limit to the cut and the render, so the two counts matched by construction and the guard
+    # could never fire; and a legitimate "render the top 11 of 12" aborted, blaming a stale cache.
+    try:
+        n_file = sum(1 for _ in open(alerts_path))
+    except OSError:
+        n_file = n_alerts
+    if m.get("n_alerts") not in (n_alerts, n_file):
         raise SystemExit(
             f"cutout cache is STALE: {cutouts_npz} was built for {m.get('n_alerts')} alerts but "
-            f"{alerts_path} now has {n_alerts}. The cache is indexed by alert position, so "
+            f"{alerts_path} has {n_file}. The cache is indexed by alert position, so "
             f"rendering would caption every image with the wrong alert. Rebuild it:\n"
             f"  python -m ADCNN.qa.alert_cutouts --alerts {alerts_path} --dets <masked dets> "
             f"--out {cutouts_npz}")
+    # IDENTITY. A count check cannot see a PERMUTATION, and run_night rewrites alerts.jsonl in place
+    # (rerank_alerts) between the cut and the render -- counterfactually only 9 of 20,000 index
+    # positions would then have addressed the same alert. The cache already stores visit/detector per
+    # zoom row and no renderer ever checked them.
+    try:
+        import numpy as _np
+        z = _np.load(cutouts_npz, allow_pickle=True)
+        if {"alert", "visit", "detector"} <= set(z.files):
+            ai = _np.asarray(z["alert"]); vv = _np.asarray(z["visit"]); dd = _np.asarray(z["detector"])
+            alerts = [json.loads(l) for l in open(alerts_path)]
+            bad = 0
+            for k in range(min(len(ai), 400)):          # sample: a permutation shows up immediately
+                j = int(ai[k])
+                if j >= len(alerts):
+                    bad += 1; continue
+                eps = alerts[j].get("epochs") or []
+                if not any(int(e.get("visit", -1)) == int(vv[k])
+                           and int(e.get("detector", -1)) == int(dd[k]) for e in eps):
+                    bad += 1
+            if bad:
+                raise SystemExit(
+                    f"cutout cache does NOT MATCH {alerts_path}: {bad} of the first "
+                    f"{min(len(ai),400)} cached stamps name a (visit,detector) absent from the alert "
+                    f"they are indexed to. The counts agree, so this is a REORDERING -- every image "
+                    f"would be captioned with the wrong alert. Rebuild the cache.")
+    except SystemExit:
+        raise
+    except Exception as _e:
+        print(f"[cache-check] identity check skipped ({type(_e).__name__}: {_e})", flush=True)
 
 
 def render(alerts_path, cutouts_npz, out_dir, per_sheet=48, limit=None, dpi=110, grid_cols=6):
