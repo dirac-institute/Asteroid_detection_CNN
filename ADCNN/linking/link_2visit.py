@@ -77,16 +77,24 @@ CHI2_SIG_2V = dict(perp=0.127, resid=0.133, dsnr=0.558, dpa_tm=4.869, dspeed=0.2
 # (0.98x truth) with a 20% over-read in the SHALLOW epoch, giving an A-vs-B disagreement of 0.41
 # against 0.17 for the movers that survived. The disagreement was the rejection cause, not the error.
 #
-# FIX 1 (ADCNN_LEN_BEST_EPOCH=1): a moving object has ONE rate, and the trail is that rate smeared
+# FIX 1 (ON by default; ADCNN_LEN_FIXED_EPOCH=1 to disable): a moving object has ONE rate, and the trail is that rate smeared
 # over one exposure -- so the two epochs measure the SAME physical quantity. Measuring it twice and
 # demanding agreement adds no information and manufactures a failure mode. Take the trail speed from
 # the epoch with the higher matched-filter SNR and use it for both.
 #
-# FIX 2 (ADCNN_DSPEED_SNR_SIGMA=1): the shipped dspeed sigma is FIXED at 0.237, but the fractional
+# FIX 2 (ON by default; ADCNN_DSPEED_FIXED_SIGMA=1 to disable): the sigma WAS fixed at 0.237, but the fractional
 # length error is set by the source's own SNR. Fitted on truth: sigma_L/L = 1.391 * mfsnr^-0.968
 # (exponent ~ -1, exactly the matched-filter expectation). So 0.237 is far too TIGHT at mfsnr 4
 # (needs 0.364) and far too LOOSE at mfsnr 30 (needs 0.052) -- it penalises faint movers for noise
 # that is real, and lets bright chance links through.
+# FIX 1 is ON by default. Best measured configuration at the binding 1k budget (5,315 injected
+# movers, full grid): MF+fix1+fix2 gives ALL 13.04% / FLAGSHIP 4.18%, against MF alone 12.70% / 4.04%
+# and the pre-MF pipeline 9.39% / 3.61%. Its edge over MF alone is not individually significant
+# (ALL p=0.17, FLAGSHIP p=0.83) but both point estimates are positive, it is never significantly
+# worse than any alternative, and its only real cost is ~30% longer linking (38% more surviving
+# candidates). ADCNN_LEN_FIXED_EPOCH=1 restores the old max-over-both-epochs behaviour.
+LEN_BEST_EPOCH = not os.environ.get("ADCNN_LEN_FIXED_EPOCH")
+
 DSPEED_SIG_A, DSPEED_SIG_B = 1.391, -0.968
 DSPEED_SIG_LO, DSPEED_SIG_HI = 0.05, 0.60
 
@@ -164,7 +172,7 @@ def pair_chi2(g, exptime_s=30.0, sig=None):
     tvs = [tv(a), tv(b)]
     pas = [np.degrees(np.arctan2(ty, tx)) % 180.0 for tx, ty in tvs]
     dpa_tm = max(abs(((pa - mpa + 90) % 180) - 90) for pa in pas)
-    if os.environ.get("ADCNN_LEN_BEST_EPOCH") and "mf_snr" in g.columns:
+    if LEN_BEST_EPOCH and "mf_snr" in g.columns:
         # FIX 1: trust the epoch that actually resolved the trail, not the noisier one.
         _sn = g.mf_snr.to_numpy(float)
         _best = tvs[0] if (len(_sn) > 1 and _sn[0] >= _sn[-1]) else tvs[-1]
@@ -189,9 +197,12 @@ def pair_chi2(g, exptime_s=30.0, sig=None):
     s = g.mf_snr.to_numpy() if "mf_snr" in g.columns else np.array([1.0, 1.0])
     dsnr = abs(s[0] - s[-1]) / max(min(s), 1e-3)
     f = dict(perp=perp, resid=resid, dsnr=dsnr, dpa_tm=dpa_tm, dspeed=dspeed)
+    # dspeed_sigma() owns the on/off decision -- do NOT re-test an env var here. A stale guard on the
+    # OLD opt-in name survived the flip to default-on, so this path silently kept the fixed 0.237
+    # while the vectorised prefilter used the per-object value: the prefilter then pruned pairs the
+    # full chi2 accepts, with nothing in any log to show for it. One source of truth.
     _sig_ds = (float(dspeed_sigma(np.nanmax(g.mf_snr.to_numpy(float))))
-               if ("mf_snr" in g.columns and os.environ.get("ADCNN_DSPEED_SNR_SIGMA"))
-               else CHI2_SIG_2V["dspeed"])
+               if "mf_snr" in g.columns else CHI2_SIG_2V["dspeed"])
     # PA term: divide by the sigma the SHORTER (worse-measured) member's trail actually supports, not a
     # single fixed value -- see sigma_dpa(). Opt out with ADCNN_PA_FIXED_SIGMA=1 to reproduce the old chi2.
     _sig = dict(sig)
@@ -481,7 +492,7 @@ def prefilter_2v_pairs(dets, pairs, chi2_max, exptime_s=30.0):
     msp = np.hypot(mx, my)
     dpa_tm = np.maximum(np.abs(((tpa[I] - mpa + 90) % 180) - 90),
                         np.abs(((tpa[J] - mpa + 90) % 180) - 90))
-    if os.environ.get("ADCNN_LEN_BEST_EPOCH") and "mf_snr" in d.columns:
+    if LEN_BEST_EPOCH and "mf_snr" in d.columns:
         _s = d.mf_snr.to_numpy(float)
         _tsp_best = np.where(_s[I] >= _s[J], tsp[I], tsp[J])          # FIX 1, vectorised
         dspeed = np.abs(_tsp_best - msp) / np.maximum(msp, 0.3)
