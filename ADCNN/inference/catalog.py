@@ -285,13 +285,14 @@ def build_detection_catalog(h5_path, seg_ckpt, cnn_pt, *, config: InferenceConfi
     if n_workers is None:
         try:
             n_workers = max(1, len(os.sched_getaffinity(0)) - 1)
-        # Pin BLAS in the PARENT before spawning: children inherit the environment at fork/spawn
-        # time, and by the time _worker_init runs the child has already imported numpy.
-        for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
-            os.environ.setdefault(_v, "1")
         except AttributeError:
             n_workers = max(1, (os.cpu_count() or 2) - 1)
 
+    # Pin BLAS in the PARENT before spawning: children inherit the environment at spawn time, and by
+    # the time _worker_init runs the child has already imported numpy (measured: 64 OpenBLAS threads
+    # per worker with n_workers=127, i.e. 8,128 threads on 128 cores).
+    for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        os.environ.setdefault(_v, "1")
     dev = torch.device(device if torch.cuda.is_available() else "cpu")
     if dev.type == "cuda":
         torch.backends.cudnn.benchmark = True  # fixed 128px tiles -> autotune once
