@@ -20,12 +20,34 @@ def _panel(frac_zero, sigma=15.0, shape=(512, 512), seed=0):
     return a
 
 
-def test_normal_panel_is_unchanged():
-    """Zeros in a minority -> the historical all-pixel path, exactly."""
+def test_panel_with_no_masked_pixels_matches_legacy_exactly():
+    """With no exact zeros there is nothing to exclude, so the historical value is reproduced."""
+    a = _panel(0.0)
+    good = a[np.isfinite(a)]
+    legacy = float(1.4826 * np.median(np.abs(good)) + 1e-8)
+    assert abs(diffim_mad_sigma(a) - legacy) < 1e-6
+
+
+def test_exclusion_is_unconditional_not_majority_gated():
+    """A majority test leaves a CLIFF: panels 20-50% masked keep the biased all-pixel median.
+
+    MEASURED on real 0706 panels -- at zero_frac 0.499 the all-pixel rule gives 0.157 where the
+    nonzero rule gives 52.649 (335x under); at 0.449, 5.24 vs 30.90; at 0.233, 40.6 vs 60.8. Three of
+    25 sampled panels sat in that band. Zeros are MASK at every fraction, not only past 50%.
+    """
+    for frac in (0.2, 0.3, 0.45, 0.499):
+        s = diffim_mad_sigma(_panel(frac, sigma=15.0))
+        assert 10.0 < s < 22.0, f"{frac:.0%} masked -> sigma {s:.3f}, biased by the mask pixels"
+
+
+def test_normal_panel_shift_is_small_and_upward():
+    """Excluding mask pixels removes a DOWNWARD bias, so sigma rises slightly. Bound the size."""
     a = _panel(0.05)
     good = a[np.isfinite(a)]
     legacy = float(1.4826 * np.median(np.abs(good)) + 1e-8)
-    assert abs(diffim_mad_sigma(a) - legacy) < 1e-9
+    new = diffim_mad_sigma(a)
+    assert new >= legacy, "removing a low-quantile drag cannot lower sigma"
+    assert new / legacy < 1.15, f"shift {new/legacy:.3f} exceeds the ~1.3% seen on real panels"
 
 
 def test_majority_masked_panel_recovers_a_sane_sigma():

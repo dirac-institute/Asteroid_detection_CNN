@@ -32,8 +32,16 @@ def _endpoints(ra, dec, length_px, beta_deg):
     L_deg = np.clip(length_px, 0, None) * PIXEL_SCALE / 3600.0
     b = np.radians(beta_deg)
     cd = np.cos(np.radians(dec))
-    hdx = 0.5 * L_deg * np.cos(b) / np.maximum(cd, 1e-6)
-    hdy = 0.5 * L_deg * np.sin(b)
+    # trailAngle is a SKY position angle measured NORTH->EAST. Mapping it as if measured from EAST
+    # mirrors every trail about the NE diagonal (PA -> 90-PA), randomising its direction.
+    # MEASURED on 1,127 stack<->ADCNN matched detections: as shipped the trail-PA disagreement with
+    # ADCNN was median 50.8 deg (frac>20deg 0.826, vs 45.0/0.556 for an unrelated reference);
+    # with sin/cos swapped it is median 4.4 deg (frac>20deg 0.115). 83% of stack trails were
+    # therefore beyond pair_chi2's hardcoded dpa_tm>20 kill, and because the PA was RANDOMISED
+    # rather than absent, the ~17% that passed did so by chance -- the chi2 PA term carried no
+    # information for stack members. N->E means the East component goes with sin, North with cos.
+    hdx = 0.5 * L_deg * np.sin(b) / np.maximum(cd, 1e-6)
+    hdy = 0.5 * L_deg * np.cos(b)
     return ra - hdx, dec - hdy, ra + hdx, dec + hdy
 
 

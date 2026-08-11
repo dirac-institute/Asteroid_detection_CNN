@@ -28,10 +28,15 @@ def diffim_mad_sigma(arr: np.ndarray) -> float:
     if good.size == 0:
         return 1.0
     nz = good[good != 0]
-    base = good if nz.size * 2 >= good.size else nz     # majority-masked -> ignore the mask pixels
-    if base.size == 0:
+    # UNCONDITIONAL. A majority test leaves a cliff: panels 25-50% masked keep the all-pixel median,
+    # which is a low quantile of |x| by construction. MEASURED on real 0706 panels -- zero_frac 0.4-0.5
+    # gives sig_all/sig_nonzero = 0.161, worst case 4.63 vs 58.49 (12.6x under), ~569 panels/night in
+    # that band. Downstream, mf_snr = flux/(sigma*sqrt(n)) inflates: on one such panel 15 of 40
+    # production detections passed mfsnr_min ONLY because sigma was under-estimated. Exactly-zero
+    # pixels are MASK, not noise samples, at every masking fraction.
+    if nz.size == 0:
         return 1.0
-    return float(1.4826 * np.median(np.abs(base)) + 1e-8)
+    return float(1.4826 * np.median(np.abs(nz)) + 1e-8)
 
 
 def _panel_orient_maps(masks_panel: np.ndarray, csv_panel) -> tuple:

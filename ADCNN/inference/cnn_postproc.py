@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+from ADCNN.data.preprocessing import diffim_mad_sigma
 
 
 # Default operating point — set by the combined-FPP-budget calibration on the calibration
@@ -95,7 +96,14 @@ def _cutout(arr: np.ndarray, x: float, y: float, k: int = CUTOUT_K) -> np.ndarra
     out = np.zeros((k, k), np.float32)
     x0, x1, y0, y1 = max(0, x - hh), min(w, x + hh), max(0, y - hh), min(h, y + hh)
     c = arr[y0:y1, x0:x1]
-    out[:c.shape[0], :c.shape[1]] = c
+    # Place the patch at its OFFSET inside the stamp. Writing it at [0,0] left-shifts every source
+    # clipped by the LEFT or TOP edge, so it is no longer centred -- and `_features` analyses
+    # stamp[c-28:c+29] assuming it is. MEASURED: in the y<48 band the pre-link ring flag disagreed
+    # with the (correct) QA path on 70.3% of detections vs 0.0% in the control band, i.e. the ring
+    # veto was blind along the low edges. Right/bottom edges were always correct, which is why this
+    # went unseen. Matches ADCNN.qa.alert_cutouts._cut, as ripple_flag's docstring promises.
+    oy, ox = y0 - (y - hh), x0 - (x - hh)
+    out[oy:oy + c.shape[0], ox:ox + c.shape[1]] = c
     return out
 
 
@@ -108,7 +116,16 @@ def make_cutouts(cand_df, img, prob, agg, *, k: int = CUTOUT_K) -> np.ndarray:
     agg = np.asarray(agg, np.float32)
     # MAD-sigma over FINITE pixels only: real DP2 diffims carry NaN/masked pixels.
     finite = img[np.isfinite(img)]
-    sig = float(np.median(np.abs(finite - np.median(finite))) * 1.4826) if finite.size else 1.0
+    # Use the CANONICAL estimator. This line used median(|x - median(x)|), a different formula that
+    # returns exactly 0 on any panel >=50% masked -> `sig or 1.0` -> 1.0 -> the diffim channel becomes
+    # img/1.0 clipped to +-20, i.e. saturated (5 of 120 sampled panels). It also cost 1.007 s/panel
+    # measured, vs 0.615 s for the canonical one, ~284 CPU-min/night -- while cand_df["panel_sigma"]
+    # already holds the answer. On clean panels the two agree to 1e-5, so this is a degenerate-panel
+    # and cost fix, not a behaviour change on normal data.
+    if "panel_sigma" in getattr(cand_df, "columns", []) and len(cand_df):
+        sig = float(cand_df["panel_sigma"].iloc[0])
+    else:
+        sig = diffim_mad_sigma(img)
     sig = sig or 1.0
     if not len(cand_df):
         return np.zeros((0, 3, k, k), np.float32)

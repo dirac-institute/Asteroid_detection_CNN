@@ -68,7 +68,14 @@ def predict_panel_overlap_3ch_full(
     s = min(stats_crop, H, W)
     h0c = (H - s) // 2
     w0c = (W - s) // 2
-    sigma = diffim_mad_sigma(panel_image[h0c:h0c + s, w0c:w0c + s])
+    # Estimate on the WHOLE panel, not a centre crop. MEASURED: 3 of 120 sampled 0706 panels have
+    # their centre-1024 crop 100% masked, so diffim_mad_sigma hits its `return 1.0` escape while the
+    # true panel sigma is 31-47 -- build_3channel then does clip(img/1.0, +-5) and every noise pixel
+    # saturates. On panel 10109 the crop is 40.9% zero: 17.0 vs 58.5 for the panel. The estimator is
+    # a median over nonzero pixels, so the crop bought precision that was never the bottleneck.
+    sigma = diffim_mad_sigma(panel_image)
+    if not np.isfinite(sigma) or sigma <= 0:
+        raise ValueError(f"degenerate panel sigma {sigma!r}: panel is fully masked or non-finite")
 
     prob_acc = np.zeros((H, W), dtype=np.float32)
     sin_acc  = np.zeros((H, W), dtype=np.float32)

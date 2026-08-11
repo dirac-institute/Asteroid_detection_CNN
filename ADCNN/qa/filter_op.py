@@ -90,7 +90,7 @@ def _near_bright_star(alerts, refcat_path, radius_arcsec, mag_max):
     return hit
 
 
-def filter_stream(alerts_path, dets_path, op_path, out_path, refcat_path=None):
+def filter_stream(alerts_path, dets_path, op_path, out_path, refcat_path=None, allow_unranked=False):
     from ADCNN.qa.select_clean import _confident_fp
     op = json.load(open(op_path))
     CHI2, MF, LEN = op["chi2_2v_max"], op["mfsnr_min_2v"], op["len_db_min"]
@@ -109,7 +109,28 @@ def filter_stream(alerts_path, dets_path, op_path, out_path, refcat_path=None):
                 and np.mean(_G(a, "vetting", "trail_len_px", d=[0]) or [0]) >= LEN
                 and RLO <= _G(a, "motion", "rate_degday", d=0) <= RHI)
     surv = [a for ai, a in enumerate(alerts) if keep(ai, a)]
-    surv.sort(key=lambda a: -(_G(a, "ranking", "pReal", d=-1)))        # pReal order for display only
+    # RANK BY (class, -pReal) -- the same key rank_alerts uses, so FLAG-not-drop survives the sort.
+    #
+    # Two defects lived here. (1) With `-pReal` alone and a stream carrying NO `ranking` key, every
+    # sort key was identical, Python's stable sort was a NO-OP, and the output silently kept the
+    # linker's chi2 order. MEASURED: all nine delivered nights have pReal=None for 100% of alerts,
+    # and only 24 of the top-100 a vetter sees were the true top-100 by P(real). The symptom was in
+    # plain sight -- every rendered file is named `pNA`. (2) Dropping the class term inverts
+    # FLAG-not-drop: applying `-pReal` alone to a stream that DOES carry pReal put 52 veto-flagged
+    # alerts in the top 100, best at rank 6. The class order survived only BECAUSE the sort was inert,
+    # so these two must be fixed together.
+    from ADCNN.linking.rank_alerts import _rank_class
+    _n_pr = sum(1 for a in surv if _G(a, "ranking", "pReal", d=None) is not None)
+    if surv and _n_pr == 0 and not allow_unranked:
+        raise SystemExit(
+            f"[filter_op] REFUSING to emit an unranked product: none of {len(surv)} survivors carry "
+            f"ranking.pReal, so a pReal sort is a silent no-op and the output would keep the linker's "
+            f"chi2 order. Run ADCNN.qa.rerank_alerts on the input stream first (P(real) is computable "
+            f"from the alert fields), or pass --allow-unranked to accept chi2 order deliberately.")
+    if surv and _n_pr < len(surv):
+        print(f"[filter_op] WARNING: {len(surv)-_n_pr} of {len(surv)} survivors lack ranking.pReal "
+              f"and will sort last within their class", flush=True)
+    surv.sort(key=lambda a: (_rank_class(a), -(_G(a, "ranking", "pReal", d=-1))))
     with open(out_path, "w") as f:
         for a in surv:
             f.write(json.dumps(a) + "\n")
@@ -124,11 +145,13 @@ def main(argv=None):
     ap.add_argument("--alerts", required=True)
     ap.add_argument("--dets", required=True, help="masked dets CSV (for the instrument-artifact mask flags)")
     ap.add_argument("--op", required=True)
+    ap.add_argument("--allow-unranked", action="store_true",
+                    help="emit in linker chi2 order when no alert carries ranking.pReal (default: refuse)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--refcat", default=None, help="all-sky bright-star refcat parquet (ra,dec,mag) "
                     "for the bright-star proximity veto; used only if the op enables it")
     a = ap.parse_args(argv)
-    filter_stream(a.alerts, a.dets, a.op, a.out, a.refcat)
+    filter_stream(a.alerts, a.dets, a.op, a.out, a.refcat, allow_unranked=a.allow_unranked)
 
 
 if __name__ == "__main__":
