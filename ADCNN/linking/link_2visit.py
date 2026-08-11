@@ -93,7 +93,12 @@ DSPEED_SIG_LO, DSPEED_SIG_HI = 0.05, 0.60
 
 def dspeed_sigma(mfsnr):
     """Per-object fractional trail-length uncertainty; falls back to the shipped constant if unset."""
-    if not os.environ.get("ADCNN_DSPEED_SNR_SIGMA"):
+    # ON by default. The shipped fixed 0.237 is homoscedastic while the underlying length error is
+    # manifestly not: sigma_L/L = 1.391*mfsnr^-0.968 measured on truth (exponent ~ -1, the
+    # matched-filter expectation). 0.237 is far too TIGHT at mfsnr 4 (needs 0.364) and far too LOOSE
+    # at mfsnr 30 (needs 0.052) -- it penalises faint movers for noise that is real and lets bright
+    # chance links through. ADCNN_DSPEED_FIXED_SIGMA=1 restores the constant.
+    if os.environ.get("ADCNN_DSPEED_FIXED_SIGMA"):
         return CHI2_SIG_2V["dspeed"]
     m = np.maximum(np.asarray(mfsnr, float), 1e-3)
     return np.clip(DSPEED_SIG_A * m ** DSPEED_SIG_B, DSPEED_SIG_LO, DSPEED_SIG_HI)

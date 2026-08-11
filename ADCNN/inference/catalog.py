@@ -115,6 +115,12 @@ else:  # no pipeline config on disk (bootstrap) -> last-resort env, else raw (no
     MF_LEN_OFFSET = float(os.environ.get("ADCNN_MF_LEN_OFFSET", "0"))
     MF_LEN_SLOPE = float(os.environ.get("ADCNN_MF_LEN_SLOPE", "1"))
 import sys as _sys
+# TEMPLATE-BANK trail length. ON by default: measured end-to-end at the binding 1k budget it lifts
+# delivered completeness 9.39% -> 12.70% (McNemar p<1e-4) at flat purity, with the mechanism confirmed
+# (detection bit-identical, linking efficiency of both-detected movers 23.5% -> 28.7%).
+# ADCNN_MF_TEMPLATE_LENGTH=0 restores the footprint estimator + ends-bloom de-bias exactly.
+MF_TEMPLATE_LENGTH = os.environ.get("ADCNN_MF_TEMPLATE_LENGTH", "1") not in ("0", "false", "False")
+
 print(f"[catalog] MF_LEN de-bias offset={MF_LEN_OFFSET} slope={MF_LEN_SLOPE} "
       f"(pipeline={_PIPE.name if _PIPE else 'none'})", file=_sys.stderr, flush=True)
 
@@ -142,7 +148,26 @@ def panel_to_catalog_rows(pid: int, prob, img, agg, rl, cnn,
     cand["image_id"] = int(pid)
     if "mf_length" in cand.columns:   # de-bias the ends-bloom -> physical trail length (see MF_LEN_*)
         cand["mf_length_raw"] = cand["mf_length"]   # preserve RAW (pre-debias) for model-specific MF_LEN recalibration
-        cand["mf_length"] = np.clip((cand["mf_length"] - MF_LEN_OFFSET) / MF_LEN_SLOPE, 0.0, None)
+        if MF_TEMPLATE_LENGTH:
+            # TEMPLATE-BANK matched filter (ADCNN.inference.mf_trail_length). The incumbent length is
+            # the extent of the THRESHOLDED footprint, so it is contrast-dependent: on a faint trail
+            # the threshold keeps only the bright middle and the ends are lost (measured median
+            # 13.17px against a truth median of ~24px on a faint population). A faint FAST mover then
+            # reads as a SLOW one, the linker's dspeed chi2 fires, and a real detection is discarded.
+            #
+            # The ends-bloom de-bias is DELIBERATELY NOT APPLIED here: MF_LEN_OFFSET/SLOPE were
+            # calibrated for the FOOTPRINT estimator's bias, so applying them to template lengths
+            # would double-correct. The template estimator carries its own single calibration (MF_K).
+            from ADCNN.inference.mf_trail_length import refine_trail_length
+            _L, _B = refine_trail_length(cand["x_centroid"].to_numpy(), cand["y_centroid"].to_numpy(),
+                                         img, cand["mf_length"].to_numpy(),
+                                         cand["mf_beta"].to_numpy() if "mf_beta" in cand.columns
+                                         else np.zeros(len(cand)))
+            cand["mf_length"] = np.clip(_L, 0.0, None)
+            if "mf_beta" in cand.columns:
+                cand["mf_beta"] = _B
+        else:
+            cand["mf_length"] = np.clip((cand["mf_length"] - MF_LEN_OFFSET) / MF_LEN_SLOPE, 0.0, None)
     _attach_dipole_morphology(cand, img)             # DETECTION-TIME ring flag (no extra pixel IO)
     return cand[[c for c in _COLMAP if c in cand.columns]].rename(columns=_COLMAP)
 
