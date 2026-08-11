@@ -95,6 +95,15 @@ CHI2_SIG_2V = dict(perp=0.127, resid=0.133, dsnr=0.558, dpa_tm=4.869, dspeed=0.2
 # candidates). ADCNN_LEN_FIXED_EPOCH=1 restores the old max-over-both-epochs behaviour.
 LEN_BEST_EPOCH = not os.environ.get("ADCNN_LEN_FIXED_EPOCH")
 
+# Hard pre-gate thresholds, overridable for measurement (ADCNN_PRE_DPA_TM / _DPA_TT / _DSPEED).
+# Defaults are the shipped values. They kill 37.2% of truth pairs that HAVE a detection in both
+# epochs, and 0.0% of the same pairs rebuilt from truth geometry -- i.e. they are calibrated against
+# a precision the detector does not deliver. Raise only with a delivered-at-1k measurement behind it:
+# at a fixed budget, admitting more pairs can DISPLACE real movers rather than add them.
+PRE_DPA_TM = float(os.environ.get("ADCNN_PRE_DPA_TM", "20.0"))
+PRE_DPA_TT = float(os.environ.get("ADCNN_PRE_DPA_TT", "15.0"))
+PRE_DSPEED = float(os.environ.get("ADCNN_PRE_DSPEED", "0.6"))
+
 DSPEED_SIG_A, DSPEED_SIG_B = 1.391, -0.968
 DSPEED_SIG_LO, DSPEED_SIG_HI = 0.05, 0.60
 
@@ -155,7 +164,8 @@ ADM_KEYS = ("adm_n", "adm_rho_lo", "adm_rho_hi", "adm_a_lo", "adm_a_hi",
             "adm_e_lo", "adm_e_hi", "adm_q_lo", "adm_q_hi")
 
 
-def pair_chi2(g, exptime_s=30.0, sig=None):
+def pair_chi2(g, exptime_s=30.0, sig=None, pre_dpa_tm=None, pre_dpa_tt=None,
+              pre_dspeed=None):
     """Combined orbit-fit chi^2 for a 2-visit pair (g = 2-row member df). Returns (chi2, info-dict).
     Features (collinearity, bound-orbit rate-residual, brightness, trail-vs-motion PA & speed) are each
     divided by their real-pair scatter and summed in quadrature (Mahalanobis goodness-of-fit). Real pairs
@@ -180,11 +190,23 @@ def pair_chi2(g, exptime_s=30.0, sig=None):
     else:
         dspeed = max(abs(np.hypot(tx, ty) - mspeed) / max(mspeed, 0.3) for tx, ty in tvs)
     dpa_tt = abs(((pas[0] - pas[1] + 90) % 180) - 90)
-    rej = dict(bound=False, a=np.nan, e=np.nan, perp=np.nan, resid=np.nan, dsnr=np.nan, dpa_tm=dpa_tm, dspeed=dspeed)
+    rej = dict(bound=False, a=np.nan, e=np.nan, perp=np.nan, resid=np.nan, dsnr=np.nan,
+               dpa_tm=dpa_tm, dspeed=dspeed, pregate=True)
     # CHEAP pre-gate (trail-vs-motion PA & speed, trail-vs-trail PA): reject chance pairs on O(1) geometry
     # BEFORE the expensive bound-orbit solve (astropy ephemeris + Lambert). Cuts ~all chance chords on the
     # dense fields, so the chi2 path is fast (without this the orbit solve runs on every candidate -> O(hour)).
-    if dpa_tm > 20.0 or dpa_tt > 15.0 or dspeed > 0.6:
+    # HARD PRE-GATES. These reject before the expensive orbit solve, and they return inf, so NO
+    # chi2_2v_max can recover a pair they kill. MEASURED on 2,401 truth pairs with a detection in both
+    # epochs: they discard 37.2% (dpa_tm>20 26.4%, dpa_tt>15 33.7%, dspeed>0.6 7.7%; dpa_tt alone
+    # uniquely kills 204). Rebuilding the SAME pairs from the injected truth geometry kills 0.0% --
+    # so the 37.2% is pure MEASUREMENT SCATTER, not geometric inconsistency, and the thresholds are
+    # calibrated against geometry the detector cannot deliver. The module's own _PA_S table gives
+    # sigma_PA = 17.06 deg at 6 px, so sigma(dpa_tt) ~ 24 deg and a 15 deg cut rejects roughly half of
+    # real short-trail pairs by construction. Now op-point parameters so this is testable.
+    _ptm = PRE_DPA_TM if pre_dpa_tm is None else pre_dpa_tm
+    _ptt = PRE_DPA_TT if pre_dpa_tt is None else pre_dpa_tt
+    _pds = PRE_DSPEED if pre_dspeed is None else pre_dspeed
+    if dpa_tm > _ptm or dpa_tt > _ptt or dspeed > _pds:
         return np.inf, rej
     c0 = np.cos(np.radians(g.dec.mean()))
     P = np.array([[(ra - g.ra.mean()) * c0 * 3600.0, (dec - g.dec.mean()) * 3600.0]
