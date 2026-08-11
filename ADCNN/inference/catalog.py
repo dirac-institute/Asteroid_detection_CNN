@@ -230,8 +230,18 @@ def _worker_init(cnn_pt: str, config: InferenceConfig) -> None:
     """Isolate each feature worker: pin BLAS to one thread (we parallelise across panels, so
     per-worker thread pools would only oversubscribe) and load one CNN. The cutout CNN scores
     on the GPU, so the worker keeps the shard's CUDA_VISIBLE_DEVICES (shared with segmentation model)."""
+    # Setting these here is TOO LATE: this module imports numpy at module scope, which under spawn
+    # runs BEFORE the initializer, so the BLAS pool is already sized from the visible core count.
+    # MEASURED: threadpool_info() inside a worker reported 64 OpenBLAS threads, with n_workers =
+    # cores-1 = 127 -- i.e. 127x64 threads on 128 cores. Kept for child processes that import later;
+    # threadpoolctl below is what actually pins the already-initialised pool.
     for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
         os.environ[var] = "1"
+    try:
+        import threadpoolctl
+        threadpoolctl.threadpool_limits(1)
+    except Exception:
+        pass
     global _CNN, _CONFIG
     _CNN = _load_filter(cnn_pt, config)
     _CONFIG = config
@@ -275,6 +285,10 @@ def build_detection_catalog(h5_path, seg_ckpt, cnn_pt, *, config: InferenceConfi
     if n_workers is None:
         try:
             n_workers = max(1, len(os.sched_getaffinity(0)) - 1)
+        # Pin BLAS in the PARENT before spawning: children inherit the environment at fork/spawn
+        # time, and by the time _worker_init runs the child has already imported numpy.
+        for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+            os.environ.setdefault(_v, "1")
         except AttributeError:
             n_workers = max(1, (os.cpu_count() or 2) - 1)
 

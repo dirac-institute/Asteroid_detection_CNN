@@ -39,6 +39,11 @@ MEASURED (out-of-fold, leave-one-visit-pair-out, 2,296 injected trails), |fracti
 and the dspeed chi2 penalty every fast pair paid drops from 0.45 sigma to 0.01 sigma. End-to-end at
 the binding 1k budget the delivered completeness goes 9.39% -> 12.70% (McNemar p < 1e-4).
 
+COST: 251 ms/panel at ONE BLAS thread (226 detections/panel). An earlier "20-39 ms" figure was
+measured with 64 BLAS threads and was only that fast BECAUSE thread pinning was broken -- do not
+quote it. Production runs ~127 panels concurrently at one thread each, so the wall-clock cost is
+~33 s per full-cadence night against a ~2.2 h detect stage.
+
 ROBUST TO PSF MISMATCH: with the template sigma 31% wrong (2.1 vs 1.6) and MF_K refit, the median
 error is 12.5% vs 11.9% and the p90 is BETTER. It does not depend on knowing the PSF.
 
