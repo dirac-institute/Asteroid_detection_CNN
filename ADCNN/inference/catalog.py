@@ -169,6 +169,21 @@ def panel_to_catalog_rows(pid: int, prob, img, agg, rl, cnn,
                                          cand["mf_beta"].to_numpy() if "mf_beta" in cand.columns
                                          else np.zeros(len(cand)),
                                          sigma=_sig)
+            # REGRESSION GUARD: refine_trail_length returns the INCUMBENT footprint length for any
+            # detection it cannot handle (within MF_STAMP/2 of a panel edge). In template mode the
+            # de-bias else-branch below never runs, so those fallback rows kept a RAW footprint
+            # length -- measured median 24.09 px against 17.42 px under the previous pipeline (ratio
+            # 1.370, 84.8% inflated by >20%) on 0.87% of detections (~33k/night). detect_night builds
+            # the on-sky trail endpoints from this, so their trail was ~37% too long and fed the
+            # linker's dspeed chi2 as a real disagreement. Apply the ends-bloom de-bias to exactly
+            # the rows that kept the footprint estimate.
+            _fellback = np.isclose(_L, cand["mf_length"].to_numpy(), rtol=0, atol=0)
+            _L = np.asarray(_L, float).copy()
+            if _fellback.any():
+                _L[_fellback] = np.clip(
+                    (_L[_fellback] - MF_LEN_OFFSET) / MF_LEN_SLOPE, 0.0, None)
+                print(f"[catalog] {int(_fellback.sum())} edge detections kept the footprint length "
+                      f"-> ends-bloom de-bias applied to those rows only", flush=True)
             cand["mf_length"] = np.clip(_L, 0.0, None)
             if "mf_beta" in cand.columns:
                 cand["mf_beta"] = _B

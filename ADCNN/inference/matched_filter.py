@@ -136,6 +136,8 @@ def matched_filter_for_nn_candidates(
     recovers truth to ~8-10° MAD.)
     """
     n = len(cand_df)
+    cid_arr = (cand_df["candidate_id"].to_numpy() if "candidate_id" in cand_df.columns else None)
+    n_skip = 0
     snr_out = np.zeros(n, dtype=np.float32)
     n_out = np.zeros(n, dtype=np.int32)
     flux_out = np.zeros(n, dtype=np.float32)
@@ -191,7 +193,20 @@ def matched_filter_for_nn_candidates(
             cy = max(0, min(labels_panel.shape[0] - 1, cy))
             cx = max(0, min(labels_panel.shape[1] - 1, cx))
             lab_id = int(labels_panel[cy, cx])
+            if (lab_id == 0 or lab_id > n_lab) and cid_arr is not None:
+                # The centroid pixel can fall OUTSIDE its own component (a hollow ring, a bent trail),
+                # and this used to `continue` -- leaving mf_snr=0, mf_length=0, mf_beta=0 with nothing
+                # logged, for 5.43% of production detections (207,758 rows). They are the LARGEST,
+                # most elongated, highest-confidence candidates, and every mfsnr gate drops all of
+                # them. The row already names its component: `candidate_id` IS the label, verified on
+                # 32,605/32,605 candidates (component pixel count == the row's `area`), including all
+                # 573 whose centroid pixel is label 0. MISATTRIB was 0 -- the centroid never lands on
+                # a DIFFERENT component, so this recovers geometry without inventing it.
+                _cid = int(cid_arr[ridx])
+                if 0 < _cid <= n_lab:
+                    lab_id = _cid
             if lab_id == 0 or lab_id > n_lab:
+                n_skip += 1
                 continue
             s, e = int(starts[lab_id - 1]), int(starts[lab_id])
             ys = ys_sorted[s:e]
@@ -210,6 +225,9 @@ def matched_filter_for_nn_candidates(
             _, _, beta_rad, _ = _footprint_principal_axis(ys, xs)
             beta_out[ridx] = math.degrees(beta_rad) % 180.0
 
+    if n_skip:
+        print(f"[matched_filter] {n_skip} candidates left with NO trail geometry "
+              f"(mf_snr/length/beta = 0); every mfsnr gate will drop them", flush=True)
     out = cand_df.copy()
     out["mf_snr"] = snr_out
     out["mf_n_line"] = n_out

@@ -143,7 +143,13 @@ def refine_trail_length(x, y, img, length_in, beta_in, sigma=None):
     # `sig <= 0` is NOT enough: diffim_mad_sigma adds a +1e-8 floor, so a fully masked panel yields
     # 1e-8, passes that guard, and the estimator divides by it -- returning garbage lengths (median
     # 43.6px where the incumbent said 25.0). Refuse below a floor that no real nJy diffim approaches.
-    if not np.isfinite(sig) or sig <= MF_SIGMA_MIN:
+    # This guard was written when diffim_mad_sigma returned its 1e-8 floor on a fully masked panel.
+    # That estimator now returns 1.0 for such a panel, which sails past MF_SIGMA_MIN=1e-4 -- so the
+    # guard silently stopped firing and the flat-S attractor returned (mutation-verified: an all-zero
+    # panel yields sig=1.0 and lengths [9,20,33] -> [43.65]x3, beta -> 0). Treat the estimator's
+    # "I could not measure this" sentinel as degenerate too. Latent on real data (0 of 14,142
+    # in-bounds detections hit it), but it is the exact failure the guard exists to stop.
+    if not np.isfinite(sig) or sig <= MF_SIGMA_MIN or sig == 1.0:
         return L, B
     cuts = np.empty((len(idx), MF_STAMP * MF_STAMP), np.float32)
     for k, i in enumerate(idx):
