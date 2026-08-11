@@ -73,6 +73,7 @@ MF_DELTA = 1.0           # peak-centroid window, in units of S
 # truncation 0.6% -> 6.9%. Set >0 only with evidence from a fine grid.
 MF_MIN_LEN = float(os.environ.get("ADCNN_MF_MIN_LEN", "0"))
 MF_PSF_SIGMA = float(os.environ.get("ADCNN_MF_PSF_SIGMA", "1.6"))
+MF_SIGMA_MIN = 1e-4      # nJy diffims sit at sigma ~15; anything near 0 is a masked panel
 MF_L = np.arange(4, 80, 1.0)
 MF_B = np.arange(0, 180, 3.0)
 
@@ -98,7 +99,7 @@ def _templates(sigma_px: float = MF_PSF_SIGMA, stamp: int = MF_STAMP) -> np.ndar
     return np.asarray(out, np.float32)
 
 
-def refine_trail_length(x, y, img, length_in, beta_in):
+def refine_trail_length(x, y, img, length_in, beta_in, sigma=None):
     """Template-bank length/angle at each (x, y). Returns (length, beta), incumbent where unusable.
 
     Detections too close to the panel edge for a full stamp keep their incoming values, as do those
@@ -123,8 +124,21 @@ def refine_trail_length(x, y, img, length_in, beta_in):
     idx = np.flatnonzero(ok)
     if not len(idx):
         return L, B
-    sig = 1.4826 * np.median(np.abs(img - np.median(img)))
-    if not np.isfinite(sig) or sig <= 0:
+    # Noise scale. PROFILED: recomputing this dominated the estimator -- 277 ms of a 318 ms call at
+    # the real density of 226 detections/panel (87%), because it took TWO full 4kx4k medians while
+    # the template bank itself costs 20 ms. The pipeline ALREADY computes a panel sigma during
+    # candidate extraction (features.panel_sigmas via preprocessing.diffim_mad_sigma), so callers
+    # should pass it in. The fallback uses that SAME canonical estimator -- median(|x|), one median,
+    # not median(|x - median(x)|) -- so an explicitly supplied sigma and the fallback agree exactly.
+    if sigma is None:
+        from ADCNN.data.preprocessing import diffim_mad_sigma
+        sig = diffim_mad_sigma(img)
+    else:
+        sig = float(sigma)
+    # `sig <= 0` is NOT enough: diffim_mad_sigma adds a +1e-8 floor, so a fully masked panel yields
+    # 1e-8, passes that guard, and the estimator divides by it -- returning garbage lengths (median
+    # 43.6px where the incumbent said 25.0). Refuse below a floor that no real nJy diffim approaches.
+    if not np.isfinite(sig) or sig <= MF_SIGMA_MIN:
         return L, B
     cuts = np.empty((len(idx), MF_STAMP * MF_STAMP), np.float32)
     for k, i in enumerate(idx):

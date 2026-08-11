@@ -159,10 +159,16 @@ def panel_to_catalog_rows(pid: int, prob, img, agg, rl, cnn,
             # calibrated for the FOOTPRINT estimator's bias, so applying them to template lengths
             # would double-correct. The template estimator carries its own single calibration (MF_K).
             from ADCNN.inference.mf_trail_length import refine_trail_length
+            # Reuse the panel sigma computed during candidate extraction. Recomputing it dominated
+            # the estimator -- 277 ms of a 318 ms call, five times the template bank that needs it --
+            # and a second full-panel median would simply pay that cost again.
+            _sig = (float(cand["panel_sigma"].iloc[0]) if "panel_sigma" in cand.columns
+                    and np.isfinite(cand["panel_sigma"].iloc[0]) else None)
             _L, _B = refine_trail_length(cand["x_centroid"].to_numpy(), cand["y_centroid"].to_numpy(),
                                          img, cand["mf_length"].to_numpy(),
                                          cand["mf_beta"].to_numpy() if "mf_beta" in cand.columns
-                                         else np.zeros(len(cand)))
+                                         else np.zeros(len(cand)),
+                                         sigma=_sig)
             cand["mf_length"] = np.clip(_L, 0.0, None)
             if "mf_beta" in cand.columns:
                 cand["mf_beta"] = _B

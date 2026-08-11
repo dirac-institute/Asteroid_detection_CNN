@@ -12,11 +12,26 @@ import numpy as np
 
 
 def diffim_mad_sigma(arr: np.ndarray) -> float:
-    """Robust noise scale of a zero-mean diffim. median(|x|) * 1.4826."""
+    """Robust noise scale of a zero-mean diffim. median(|x|) * 1.4826.
+
+    MASKED PIXELS ARE NOT NOISE SAMPLES. Some panels are majority exactly-zero (masked/no-data): on
+    0706, 2 of 40 sampled panels are >80% zeros. There the all-pixel median is 0, this returned its
+    1e-8 floor, and every consumer dividing by it exploded -- `mf_snr = flux/(sigma*sqrt(n))` reached
+    1.38e12, with 22,221 detections (0.58%) above 1e5 across 770 panels. `mfsnr_min_2v` cannot reject
+    those: they are ABOVE the gate by twelve orders of magnitude, so they enter the linkable set and
+    manufacture chance links.
+
+    When zeros are a MINORITY the all-pixel median is used exactly as before, so normal panels are
+    bit-for-bit unchanged; only degenerate panels take the nonzero-pixel path.
+    """
     good = arr[np.isfinite(arr)]
     if good.size == 0:
         return 1.0
-    return float(1.4826 * np.median(np.abs(good)) + 1e-8)
+    nz = good[good != 0]
+    base = good if nz.size * 2 >= good.size else nz     # majority-masked -> ignore the mask pixels
+    if base.size == 0:
+        return 1.0
+    return float(1.4826 * np.median(np.abs(base)) + 1e-8)
 
 
 def _panel_orient_maps(masks_panel: np.ndarray, csv_panel) -> tuple:

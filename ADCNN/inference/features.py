@@ -81,10 +81,17 @@ def extract_panel_candidates(
 
     diffims = {pid: arr.astype(np.float32, copy=False) for pid, arr in diffims.items()}
     panel_sigmas = {pid: panel_mad_sigma(diffims[pid]) for pid in pids}
+    # Carry the panel noise scale on the candidate frame. It is already computed here, and a second
+    # full-panel median costs ~158 ms -- five times the entire matched-filter length estimate that
+    # needs it (31 ms). One computation, one source of truth.
     cand_df = matched_filter_for_nn_candidates(
         cand_df, panel_probs=panel_probs, diffim_panels=diffims,
         panel_sigmas=panel_sigmas, line_width=line_width, pad_length=pad_length,
     )
+    if len(cand_df) and "panel_id" in cand_df.columns:
+        cand_df["panel_sigma"] = cand_df["panel_id"].map(panel_sigmas).astype("float32")
+    elif len(cand_df):
+        cand_df["panel_sigma"] = np.float32(next(iter(panel_sigmas.values()), 1.0))
     return cand_df, panel_probs
 
 
