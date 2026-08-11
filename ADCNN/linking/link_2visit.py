@@ -492,6 +492,12 @@ def prefilter_2v_pairs(dets, pairs, chi2_max, exptime_s=30.0):
     exact_lowS_pairs). This turns the per-pair 135ms rho-scan orbit fit into a numpy pass for the ~99% of
     chance pairs -- the LSST-scale fast path for low score floors. Formulas/sigmas identical to pair_chi2.
     Apply ONLY to the 2v candidate list, never to the promotion/triplet-seeding input."""
+    # "0 to disable" is documented for chi2_2v_max and honoured for physical_check, but this path
+    # only short-circuited on None -- so `keep = partial <= 0.0` annihilated the stream (measured:
+    # 450,113 seed pairs -> 0). A gate that reads as free because disabling it yields nothing is a
+    # trap for the next gate-cost measurement.
+    if not chi2_max:
+        return list(pairs)
     if chi2_max is None or not pairs:
         return pairs
     d = dets.reset_index(drop=True)

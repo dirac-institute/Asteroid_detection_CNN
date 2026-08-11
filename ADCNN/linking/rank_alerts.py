@@ -328,7 +328,13 @@ def write_alerts(alerts, path, *, append=False, top_n=None, rank_by="priority"):
     if rank_by == "chi2":
         def _key(a):
             c = (a.get("orbit") or {}).get("chi2")
-            return (_rank_class(a), float(c) if c is not None else float("inf"),
+            # TIER FIRST. 3+visit tracks carry chi2=None (link_2visit sets NaN for n_ep != 2), which
+            # maps to +inf and sorted them LAST inside the clean class -- on 0706 the night's only
+            # 3+visit alert, the ~100%-purity discovery tier, landed at rank 4795 of 5790 instead of
+            # rank 1. priority_score's own comment says the tier order holds "BY CONSTRUCTION";
+            # rank_by="chi2" discarded that construction. `priority` is 1 for 3+visit, 2 for 2visit.
+            return (_rank_class(a), a.get("priority", 9),
+                    float(c) if c is not None else float("inf"),
                     -a.get("priorityScore", 0.0))
     else:
         def _key(a):

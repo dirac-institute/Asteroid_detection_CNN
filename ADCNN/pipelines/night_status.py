@@ -55,8 +55,16 @@ def status(run_dir):
         # The sentinel certifies these artifacts. It is invalid if any REQUIRED one is missing (a
         # bare `touch .complete` on an empty directory reported COMPLETE) or if any is NEWER than the
         # sentinel (all nine real sentinels predated the artifacts they certified).
-        _required = (R / "adcnn_dets_masked.csv", R / "stream" / "alerts.jsonl")
+        # The sentinel must cover EVERYTHING status() would otherwise verify, or it becomes a way to
+        # bypass the very checks this module exists for: with a valid sentinel, deleting the entire
+        # stream/pairs image product still reported COMPLETE. Include the frozen science product --
+        # run_night_20260629 carries a sentinel with NO alerts.jsonl, tracks.csv or report/, and can
+        # never self-heal because run_night sees COMPLETE and does nothing.
+        _required = (R / "adcnn_dets_masked.csv", R / "stream" / "alerts.jsonl",
+                     R / "stream" / "stream_summary.json")
+        _required_dirs = (R / "stream" / "pairs", R / "stream" / "sheets")
         _missing = [f for f in _required if not (f.exists() and f.stat().st_size > 0)]
+        _missing += [d for d in _required_dirs if not (d.is_dir() and any(d.iterdir()))]
         _newer = [f for f in (R / "adcnn_dets_masked.csv", R / "dets_merged.csv",
                               R / "stream" / "alerts.jsonl")
                   if f.exists() and f.stat().st_mtime > _sent.stat().st_mtime]
@@ -98,7 +106,12 @@ def status(run_dir):
     except (json.JSONDecodeError, KeyError, UnicodeDecodeError) as e:
         print(f"[night_status] {ap} is unreadable ({type(e).__name__}) -- treating the link stage as "
               f"incomplete so it is rebuilt", flush=True)
-        return "link"
+        # MUST return the status DICT. Returning a bare string here reproduced the very wedge this
+        # guard was added to remove: every caller indexes the result (`_s["complete"]` in run_night,
+        # `s["first_missing"]` in main), so a string raised TypeError on entry -- before preflight,
+        # so all retries crashed identically. Same wedge, different exception.
+        st["first_missing"] = "link"; st["detail"]["link"] = f"unreadable ({type(e).__name__})"
+        return st
     n = len(ids)
     st["detail"]["link"] = f"{n} alerts"
 
