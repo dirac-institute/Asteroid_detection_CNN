@@ -199,11 +199,18 @@ def render(alerts_path, cutouts_npz, out_dir, per_sheet=48, limit=None, dpi=110,
         json.dump(manifest, f, indent=1)
 
     night = alerts[0].get("night", "?")
+    # `alerts` is the post---limit list, so the page reported "20000 alerts" for a night whose stream
+    # holds 26,253 -- a reader has no way to tell a rendered subset from the whole night.
+    try:
+        n_night = sum(1 for _ in open(alerts_path))
+    except (OSError, TypeError, NameError):
+        n_night = len(alerts)
     rows = []
     for rank, al in enumerate(alerts[:2000]):        # table capped; full data in alert_report.csv
         m = al.get("motion") or {}
         rows.append(f"<tr><td>{rank}</td><td>{html.escape(str(al['alertId']))}</td>"
                     f"<td>{_classify(al)}</td><td>{al.get('confidenceTier', '')}</td>"
+                    f"<td>{(al.get('ranking') or {}).get('pReal') if (al.get('ranking') or {}).get('pReal') is None else format((al.get('ranking') or {}).get('pReal'), '.4f')}</td>"
                     f"<td>{_num(al, 'priorityScore'):.3f}</td>"
                     f"<td>{_num(m, 'rate_degday'):.2f}</td>"
                     f"<td>{_num(m, 'pa_deg'):.0f}</td></tr>")
@@ -216,11 +223,12 @@ def render(alerts_path, cutouts_npz, out_dir, per_sheet=48, limit=None, dpi=110,
 table{{border-collapse:collapse;font-size:12px}}td,th{{border:1px solid #444;padding:2px 6px}}
 img{{border:1px solid #333;margin:.4rem 0}}h3{{font-size:13px;color:#8cf}}</style>
 <h1>ADCNN alert stream — night {night}</h1>
-<p><b>{len(alerts)}</b> alerts, rank-ordered (best first). Sheets: {n_sheets} ×
+<p><b>{len(alerts)}</b> alerts rendered{f" of {n_night} in the night's stream" if n_night != len(alerts) else ""},
+ordered by <b>P(real)</b> within veto class (best first). Sheets: {n_sheets} ×
 {per_sheet} alerts. Each row = one alert, columns = its epochs; a real mover shifts
 across the row, a residual does not.</p>
 <h2>Ranked table (first {min(len(alerts), 2000)})</h2>
-<table><tr><th>rank<th>alertId<th>class<th>tier<th>prio<th>°/d<th>PA</tr>
+<table><tr><th>rank<th>alertId<th>class<th>tier<th>pReal<th>prio<th>°/d<th>PA</tr>
 {''.join(rows)}</table>
 <h2>Contact sheets</h2>
 {imgs}
