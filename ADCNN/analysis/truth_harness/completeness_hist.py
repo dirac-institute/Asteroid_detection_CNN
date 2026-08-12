@@ -80,14 +80,17 @@ def segment_det(T, dets, perp_arcsec=PERP_ARCSEC, dra_off=0.0, ddec_off=0.0):
             g = dets[dets.visit == int(v)]
             if not len(g):
                 continue
-            cdg = np.cos(np.radians(g.dec.values))
-            tr = cKDTree(np.c_[g.ra.values * cdg, g.dec.values])
+            # EXACT spherical pre-filter. The tree was built with each DETECTION's cos(dec) and
+            # queried with the TRUTH point's, so the candidate radius was sheared and real matches
+            # were missed before the segment test ever saw them. Unit vectors have no such
+            # projection: the ball query is then exact on the sphere.
+            tr = cKDTree(_unit(g.ra.values, g.dec.values))
             for p in T.index.get_indexer(idx):
                 cd = np.cos(np.radians(dec0[p]))
                 cx, cy = ra0[p] * cd * 3600.0, dec0[p] * 3600.0
                 ux, uy = np.cos(pa[p]), np.sin(pa[p])
-                cand = tr.query_ball_point([ra0[p] * cd, dec0[p]],
-                                           (half[p] + perp_arcsec + 0.5) / 3600.0)
+                _r = np.radians((half[p] + perp_arcsec + 0.5) / 3600.0)
+                cand = tr.query_ball_point(_unit([ra0[p]], [dec0[p]])[0], 2 * np.sin(_r / 2))
                 if not cand:
                     continue
                 gx = g.ra.values[cand] * cd * 3600.0; gy = g.dec.values[cand] * 3600.0

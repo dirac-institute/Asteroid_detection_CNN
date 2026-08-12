@@ -70,24 +70,29 @@ PIX = 0.2
 L_EDGES = [0, 8, 12, 16, 24, 32, 44, 60]
 S_EDGES = [0, 3, 4, 5, 6, 8, 10, 99]
 ARMS = ["ADCNN", "stack", "merged"]
-TAG = {"ADCNN": "adcnn", "stack": "stack", "merged": "merged"}
+# override with e.g. E2E_TAGS="adcnn,stack,merged_fix"
+TAG = dict(zip(ARMS, os.environ.get("E2E_TAGS", "adcnn,stack,merged").split(",")))
 
 
 def deliver(tag):
     """Full 1k op, then the top-BUDGET by priorityScore. Returns the delivered alerts."""
     src, surv = f"{V}/e2e_alerts_{tag}.jsonl", f"{V}/e2e_surv_{tag}.jsonl"
-    r = subprocess.run([sys.executable, "-m", "ADCNN.qa.filter_op", "--alerts", src,
+    # SHIP IT THE WAY run_night DOES: rerank_alerts (calibrated P(real)) BEFORE filter_op, and take
+    # filter_op's own (class, priority, -pReal) output order. Re-sorting by priorityScore with
+    # --allow-unranked bypassed the guard that exists to stop a silent chi2-order product, and gave a
+    # delivered set overlapping the real one by only 814/1000.
+    ranked = f"{V}/e2e_ranked_{tag}.jsonl"
+    subprocess.run(["cp", src, ranked], check=True)
+    subprocess.run([sys.executable, "-m", "ADCNN.qa.rerank_alerts", "--alerts", ranked],
+                   capture_output=True, text=True, env={**os.environ, "PYTHONPATH": os.getcwd()})
+    r = subprocess.run([sys.executable, "-m", "ADCNN.qa.filter_op", "--alerts", ranked,
                         "--dets", f"{V}/e2e_dets_{tag}.csv", "--op", OP, "--out", surv,
-                        "--refcat", REFCAT, "--allow-unranked"],
+                        "--refcat", REFCAT],
                        capture_output=True, text=True, env={**os.environ, "PYTHONPATH": os.getcwd()})
     if r.returncode != 0:
         raise SystemExit(f"filter_op failed for {tag}:\n{r.stdout}\n{r.stderr}")
-    al = [json.loads(l) for l in open(surv)]
-    n_link = sum(1 for _ in open(src))
-    # chi2 tiebreak: priorityScore is heavily tied, so an unstable cut would be a hidden variable
-    al.sort(key=lambda a: (-(a.get("priorityScore") or 0.0),
-                           float(((a.get("orbit") or {}).get("chi2")) or 1e9)))
-    return al[:BUDGET], n_link, len(al)
+    al = [json.loads(l) for l in open(surv)]          # already in the delivered order
+    return al[:BUDGET], sum(1 for _ in open(src)), len(al)
 
 
 def delivered_oids(alerts, T, perp=PERP):
@@ -116,11 +121,15 @@ def delivered_oids(alerts, T, perp=PERP):
                 if key not in idx:
                     continue
                 cx, cy, pos, cd = ctr[key]
+                # ONE projection for both points. `cx`/`cy` above were built with the TRUTH row's
+                # cos(dec); using the alert's here sheared the perpendicular distance by ~1.8*ddec
+                # against a 1.0" tolerance -- a one-directional UNDER-count (0 alerts flipped the
+                # other way; corrected, ADCNN goes 8.01% -> 9.31%). `cd` is the truth projection.
                 cdq = np.cos(np.radians(e["dec"]))
                 for k in idx[key].query_ball_point([e["ra"] * cdq, e["dec"]], rmax):
                     p = pos[k]
                     ux, uy = np.cos(pa[p]), np.sin(pa[p])
-                    gx, gy = e["ra"] * cdq * 3600.0, e["dec"] * 3600.0
+                    gx, gy = e["ra"] * cd[k] * 3600.0, e["dec"] * 3600.0
                     t = np.clip((gx - cx[k]) * ux + (gy - cy[k]) * uy, -half[p], half[p])
                     if np.hypot(gx - (cx[k] + t * ux), gy - (cy[k] + t * uy)) < perp:
                         got = int(T.oid.iloc[p]); break

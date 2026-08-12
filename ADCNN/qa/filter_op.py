@@ -46,8 +46,13 @@ def _member_artifact(alerts, dets_path):
     trees = {}
     for (v, det), g in d.groupby(["visit", "detector"]):
         cd = np.cos(np.radians(g.dec.values))
+        # `.any()` on a NaN is TRUE. Stack rows carry no m_* columns at all (100% NaN after the
+        # merge), so every one of them was flagged as sitting on an instrument-artifact mask and any
+        # alert with a stack member was dropped. MEASURED on the real 0706 merged product: zeroing
+        # the stack's m_* values takes the flag count 460 -> 427 and admits the one stack-member
+        # alert that reaches the op. A missing mask is NOT a set mask -- fill with False first.
         trees[(int(v), int(det))] = (cKDTree(np.c_[g.ra.values * cd, g.dec.values]),
-                                     g[have].to_numpy().any(axis=1))
+                                     g[have].fillna(False).astype(bool).to_numpy().any(axis=1))
     hit = set()
     tol = 1.5 / 3600.0
     for ai, a in enumerate(alerts):
