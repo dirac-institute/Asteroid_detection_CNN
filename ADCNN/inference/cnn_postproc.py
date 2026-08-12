@@ -115,7 +115,9 @@ def make_cutouts(cand_df, img, prob, agg, *, k: int = CUTOUT_K) -> np.ndarray:
     prob = np.asarray(prob, np.float32)
     agg = np.asarray(agg, np.float32)
     # MAD-sigma over FINITE pixels only: real DP2 diffims carry NaN/masked pixels.
-    finite = img[np.isfinite(img)]
+    # (The `finite = img[np.isfinite(img)]` that used to sit here was DEAD -- nothing read it once the
+    # sigma came from cand_df["panel_sigma"] -- and it cost 57.5 ms and a 65 MB copy per panel.
+    # Removal verified bit-identical with NaNs deliberately planted in the panel.)
     # Use the CANONICAL estimator. This line used median(|x - median(x)|), a different formula that
     # returns exactly 0 on any panel >=50% masked -> `sig or 1.0` -> 1.0 -> the diffim channel becomes
     # img/1.0 clipped to +-20, i.e. saturated (5 of 120 sampled panels). It also cost 1.007 s/panel

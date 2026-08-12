@@ -134,6 +134,13 @@ def run_shard(gpu_id, rows, seg_ckpt, cnn_model, thr, prefetch, out_csv, n_worke
     from ADCNN.inference.catalog import _worker, _worker_init, InferenceConfig
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = torch.jit.load(seg_ckpt, map_location=dev).eval()
+    # gate_pmax=0.10 is INERT at the shipped operating point and has been all along: over 2,703,888
+    # detections across 15,198 panels, ZERO have max_p < 0.10, because the adaptive t_low in
+    # candidates.py binds first at a measured 0.4447-0.4769 (mu+6sd) on real panels -- not at the
+    # nominal t_low=0.05 the config advertises, and not at the 0.5 ceiling either. The knob is live
+    # (it does cut at 0.50/0.90), it simply sits far below what binds. Left in place because removing
+    # it changes nothing and the real operating point is the adaptive threshold, which is what should
+    # be documented and calibrated.
     config = InferenceConfig(cnn_thr=thr, gate_pmax=0.10)
     # RESUME: skip (visit,detector) panels already processed (sidecar .done log) so a preempted +
     # requeued job continues instead of losing everything. Detections are appended per panel.

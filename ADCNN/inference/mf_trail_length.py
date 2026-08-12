@@ -83,6 +83,7 @@ MF_L = np.arange(4, 80, 1.0)
 MF_B = np.arange(0, 180, 3.0)
 
 _TPL = None
+_TPL_KEY = None      # (psf_sigma, stamp) the cached bank was built for
 
 
 def _templates(sigma_px: float = MF_PSF_SIGMA, stamp: int = MF_STAMP) -> np.ndarray:
@@ -111,13 +112,19 @@ def refine_trail_length(x, y, img, length_in, beta_in, sigma=None):
     the TEMPLATE itself measures below MF_MIN_LEN (where a near-PSF source does not constrain the
     angle). The fallback is decided by the OUTPUT, never by the incoming length.
     """
-    global _TPL
+    global _TPL, _TPL_KEY
     x = np.asarray(x, float); y = np.asarray(y, float)
     L = np.asarray(length_in, float).copy(); B = np.asarray(beta_in, float).copy()
     if not len(x):
         return L, B
-    if _TPL is None:
-        _TPL = _templates()
+    # KEY THE CACHE. Without this, ADCNN_MF_PSF_SIGMA was read once and then ignored for the life of
+    # the process -- the bank built for the first sigma served every later call, so a study that
+    # varied the PSF would have measured the same templates throughout and concluded the estimator
+    # was insensitive to it.
+    _key = (MF_PSF_SIGMA, MF_STAMP)
+    if _TPL is None or _TPL_KEY != _key:
+        _TPL = _templates(MF_PSF_SIGMA, MF_STAMP)
+        _TPL_KEY = _key
     H, W = img.shape
     c = MF_STAMP // 2
     # Gate on the OUTPUT, never on the incoming length. The incumbent's failure mode IS truncation
@@ -161,6 +168,12 @@ def refine_trail_length(x, y, img, length_in, beta_in, sigma=None):
     w = np.clip(prof - (prof.max(1, keepdims=True) - MF_DELTA), 0.0, None)
     Lhat = (w * MF_L[None, :]).sum(1) / np.maximum(w.sum(1), 1e-9) * MF_K
     Bhat = MF_B[S.max(axis=1).argmax(axis=1)]
+    # The bank tops out at MF_L[-1]; a trail longer than that saturates and reads SHORT with no
+    # signal that it did (a 200 px trail returns 76.5 px, -62%). Say so rather than return it silently.
+    _sat = int((Lhat >= MF_L[-1] * MF_K * 0.995).sum())
+    if _sat:
+        print(f"[mf_trail] {_sat} detection(s) at the {MF_L[-1]:.0f}px template-bank ceiling -- their "
+              f"length is a LOWER BOUND, not a measurement", flush=True)
     use = Lhat >= MF_MIN_LEN                     # fall back below the template bank's usable regime
     L[idx[use]] = Lhat[use]
     B[idx[use]] = Bhat[use]
