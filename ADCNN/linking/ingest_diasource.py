@@ -98,7 +98,13 @@ def ingest(butler_repo, collection, night, out_path, reliability_min=0.5, snr_mi
         d = pd.DataFrame({c: np.asarray(t[c]) for c in t.columns
                           if c in ("ra", "dec", "midpointMjdTai", "snr", "reliability", "trailLength",
                                    "trailAngle", "ssObjectId", "dipoleMeanFlux", "dipoleFluxDiff",
-                                   "x", "y", "psfFlux")})
+                                   "x", "y", "psfFlux",
+                                   # trail QUALITY + trail-likeness, previously discarded. trailFlux
+                                   # over psfFlux separates trailed from point sources on the stack's
+                                   # own terms (measured median 1.267 at len>=6 px vs 1.052 below),
+                                   # and extendedness likewise (0.867 vs 0.999) -- a native gate for
+                                   # deciding which unmeasured rows are worth re-measuring.
+                                   "trailFlux", "trailFluxErr", "trail_flag_edge", "extendedness")})
         d["visit"] = int(r.dataId["visit"]); d["detector"] = int(r.dataId["detector"])
         parts.append(d)
         if (i + 1) % 200 == 0:
@@ -125,9 +131,33 @@ def ingest(butler_repo, collection, night, out_path, reliability_min=0.5, snr_mi
     print(f"[diasrc] {n0:,} sources -> {len(d):,} kept "
           f"(reliability<{reliability_min} or snr cut: {n_rel:,}; stack-dipole: {n_dip:,})", flush=True)
     # -> ADCNN schema ----------------------------------------------------------------------
-    L_px = (d["trailLength"].fillna(0.0) / PIXEL_SCALE) if "trailLength" in d else pd.Series(0.0, index=d.index)
-    beta = d["trailAngle"].fillna(0.0) if "trailAngle" in d else pd.Series(0.0, index=d.index)
-    ra0, dec0, ra1, dec1 = _endpoints(d.ra.to_numpy(), d.dec.to_numpy(), L_px.to_numpy(), beta.to_numpy())
+    # DO NOT fillna(0). `trailLength` is NaN on 69% of dia_source_detector rows -- the DPDD trailed
+    # fit is simply not available for most sources -- and mapping that to 0.0 makes "never measured"
+    # indistinguishable from "measured as a point source". Both then fail the op's len_db_min of 6.0,
+    # so two thirds of the stack's contribution is discarded for a measurement that was never
+    # attempted rather than for being short. Keeping NaN lets a consumer route those rows to a
+    # different estimator instead of silently killing them.
+    #
+    # NB the plugin columns are NOT an option here: dia_source_detector in this collection carries
+    # trailFlux/trailFluxErr/trailRa/trailDec/trailLength/trailAngle/trail_flag_edge, and NO
+    # ext_trailedSources_Naive_* or _Veres_* -- those plugins are not run in the DRP that produces it.
+    # Where trailLength IS present it behaves correctly: median 0.54" with 84% sub-PSF, which is what
+    # a trailed fit should return for the point sources that dominate a DIASource table, and it
+    # reaches 48.6 px on genuine trails.
+    if "trailLength" in d:
+        L_px = d["trailLength"] / PIXEL_SCALE
+        n_unmeasured = int(L_px.isna().sum())
+        if n_unmeasured:
+            print(f"[diasrc] {n_unmeasured:,} of {len(d):,} sources ({100*n_unmeasured/len(d):.1f}%) have NO "
+                  f"trailLength -- kept as NaN, NOT 0. They cannot pass a len_db floor and need a "
+                  f"separate trail measurement to become linkable.", flush=True)
+    else:
+        L_px = pd.Series(np.nan, index=d.index)
+    beta = d["trailAngle"] if "trailAngle" in d else pd.Series(np.nan, index=d.index)
+    # endpoints are NaN wherever the length is: a row with no trail measurement has no trail, and the
+    # linker's trail-vs-chord terms must see that rather than a zero-length segment at the centroid
+    ra0, dec0, ra1, dec1 = _endpoints(d.ra.to_numpy(), d.dec.to_numpy(),
+                                      L_px.to_numpy(), beta.fillna(0.0).to_numpy())
     out = pd.DataFrame(dict(
         mjd=d["midpointMjdTai"], ra=d["ra"], dec=d["dec"], mag=np.nan, band="r", obscode="I11",
         visit=d["visit"], detector=d["detector"],
@@ -136,6 +166,10 @@ def ingest(butler_repo, collection, night, out_path, reliability_min=0.5, snr_mi
         length=L_px, len_db=L_px, mf_snr=d.get("snr", pd.Series(np.nan, index=d.index)),
         ra0=ra0, dec0=dec0, ra1=ra1, dec1=dec1, beta=beta,
         ssObjectId=d.get("ssObjectId", pd.Series(0, index=d.index)),
+        trail_flux=d.get("trailFlux", pd.Series(np.nan, index=d.index)),
+        trail_flux_err=d.get("trailFluxErr", pd.Series(np.nan, index=d.index)),
+        trail_flag_edge=d.get("trail_flag_edge", pd.Series(np.nan, index=d.index)),
+        extendedness=d.get("extendedness", pd.Series(np.nan, index=d.index)),
         is_dipole=False, art_frac=0.0, src="stack"))
     out.to_csv(out_path, index=False)
     known = int((out.ssObjectId.fillna(0) > 0).sum())
