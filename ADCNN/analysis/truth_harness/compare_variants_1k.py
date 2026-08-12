@@ -11,6 +11,33 @@ to watch is ALL rising while FLAGSHIP falls.
 PAIRED TEST. The arms link the SAME injected objects, so McNemar is the correct test; a two-proportion
 z discards the pairing and understates significance (measured: z=4.43 unpaired vs p=1.15e-15 paired).
 
+MEASURED 2026-08-11 on inj_dets_v3.csv (5,315 injected movers, post-audit detection). Ceiling:
+2,053 of 5,315 (38.63%) detected in BOTH epochs -- no linker can exceed that.
+
+    cell        base     pregate   paired McNemar
+    ALL        11.12%     11.06%   gained 4, lost 7, p=0.55
+    FLAGSHIP    2.02%      1.95%   gained 0, lost 1, p=1.0
+
+pregate (ADCNN_PRE_DPA_TT=25, ADCNN_PRE_DPA_TM=30) is REFUTED: it admitted 1,570 MORE alerts at the
+link stage (49,690 -> 51,260) and delivered 147 FEWER through the op, for no gain in either cell.
+NOTE the flagship arm carries only ~28 delivered movers, so this excludes LARGE effects only -- it
+needs ~6 discordant pairs to reach p<0.05 and got 1. "No evidence of benefit", not "equivalent".
+
+THE OP IS PROTECTIVE, and that is the headline (same arm, one variable):
+
+    top-1000 of the RAW linked stream   ALL 10.07%   FLAGSHIP 0.43%
+    top-1000 after the shipped 1k op    ALL 11.12%   FLAGSHIP 2.02%
+
+4.7x in the priority cell. At a fixed budget the op does not trade purity against completeness -- it
+decides WHICH 1000 ship, and its gates stop faint-fast movers being displaced by alerts that rank
+higher on priorityScore. Removing the bright-star proximity veto alone leaves 8,523 survivors instead
+of 5,028 and changes FLAGSHIP not at all (2.02% both), so that veto's purity benefit is free here.
+
+These absolutes are NOT comparable to the pre-audit 13.04%/4.18%. Two explanations for the gap were
+tested and both REFUTED -- it is not the bright-star veto (removing it made ALL slightly worse) and
+not the op (removing it made both cells much worse). Detection changed; the remaining candidates are
+the link configuration and detection itself.
+
 Usage: python -m ADCNN.analysis.truth_harness.compare_variants_1k base pregate
 """
 import json
