@@ -26,6 +26,28 @@ import pandas as pd
 PIXEL_SCALE = 0.2          # arcsec/pixel (LSSTCam)
 
 
+def _reliability(rel, keep, n0):
+    """The stack's real/bogus score, or a REFUSAL -- never a silent 1.0.
+
+    This was `rel[...] if len(rel) == n0 else 1.0`, i.e. one absent or mis-sized `reliability` column
+    away from putting EVERY stack detection at the maximum possible score. That is not a benign
+    default: P(real) is a logistic fit on (score_min, chi2, mfsnr_min), `--claim-order preal` claims
+    the highest P(real) first, and a detection can only be claimed once -- so max-scored stack pairs
+    outrank real ADCNN pairs and take their detections. MEASURED in the injection harness, where
+    score=1.0 IS hard-coded: stack-containing alerts are 27.8% of the merged stream but 97.3% of the
+    top 2000 by priorityScore, with WORSE orbit chi2 (16.68 vs 14.43), and the merged arm links 84
+    fewer true movers than ADCNN alone. Delivered nights are NOT in this state (0706 stack score is a
+    real distribution, median 0.6228) -- this guard is so they cannot silently enter it.
+    """
+    if len(rel) == n0:
+        return rel[keep.values].reset_index(drop=True)
+    raise SystemExit(
+        f"[ingest_diasource] the stack table has no usable `reliability` column "
+        f"({len(rel)} values for {n0} rows). Defaulting it to 1.0 would put every stack detection at "
+        f"the maximum P(real) input and let stack pairs win the claim competition against real ADCNN "
+        f"pairs. Supply reliability, or pass --no-stack-score to link with the stack demoted.")
+
+
 def _endpoints(ra, dec, length_px, beta_deg):
     """Trail endpoints: half-length along the trail PA. Matches detect_night's convention so the
     linker's chord/trail geometry is identical for both detectors."""
@@ -110,7 +132,7 @@ def ingest(butler_repo, collection, night, out_path, reliability_min=0.5, snr_mi
         mjd=d["midpointMjdTai"], ra=d["ra"], dec=d["dec"], mag=np.nan, band="r", obscode="I11",
         visit=d["visit"], detector=d["detector"],
         x=d.get("x", pd.Series(np.nan, index=d.index)), y=d.get("y", pd.Series(np.nan, index=d.index)),
-        score=rel[keep.values].reset_index(drop=True) if len(rel) == n0 else 1.0,
+        score=_reliability(rel, keep, n0),
         length=L_px, len_db=L_px, mf_snr=d.get("snr", pd.Series(np.nan, index=d.index)),
         ra0=ra0, dec0=dec0, ra1=ra1, dec1=dec1, beta=beta,
         ssObjectId=d.get("ssObjectId", pd.Series(0, index=d.index)),
