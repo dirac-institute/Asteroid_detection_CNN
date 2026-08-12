@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measure the stack's detections with ADCNN's trail estimator, so both measurements are available.
 
-WHY. The DPDD `trailLength` on `dia_source_detector` is ABSENT (NaN) for 69% of sources -- the trailed
+WHY. The DPDD `trailLength` on `dia_source_detector` is ABSENT (NaN) for ~31% of sources -- the trailed
 fit is not available for most of them -- and where present it tops out well short of the fast-mover
 regime. Only 1.12% of production stack rows clear the op's `len_db_min: 6.0`, against 82.09% of
 ADCNN's, which is why the stack contributes 0.33% of the linked stream and ZERO delivered alerts. The
@@ -86,8 +86,11 @@ def _gate(d):
         m = np.isfinite(r) & (r >= TRAILFLUX_MIN)
         why["trailFlux/psfFlux"] = int((~m).sum()); ok &= m
     if "extendedness" in d.columns:
+        # An UNMEASURED extendedness must not pass while an unmeasured trailFlux/psfFlux rejects --
+        # that asymmetry let 5.15% of gate-passers through on a value nobody measured (extendedness is
+        # NaN on 31.6% of rows). Absent evidence of trail-likeness is not evidence of it.
         e = d["extendedness"].to_numpy(float)
-        m = ~np.isfinite(e) | (e <= EXTENDEDNESS_MAX)
+        m = np.isfinite(e) & (e <= EXTENDEDNESS_MAX)
         why["extendedness"] = int((~m).sum()); ok &= m
     if not why:
         raise SystemExit(
@@ -97,6 +100,67 @@ def _gate(d):
             "confident nonsense over the whole catalogue. Re-run ingest_diasource so these columns "
             "are carried through.")
     return ok, why
+
+
+def measure_panel(x, y, img, prob, agg, cnn, *, t_low, cnn_thr, panel_sigma=None, device="cpu"):
+    """THE GATE THAT WORKS: ADCNN's own two stages, applied at externally-supplied positions.
+
+    Designed to be called from inside detect_night, where `prob`, `agg` and the stage-2 `cnn` are
+    ALREADY in hand for the panel -- so the expensive part (2,962 ms of seg inference) is already
+    paid and this adds only a cutout batch and one template-bank call.
+
+    Why both stages are needed, measured on real 0706 panels against stack detections:
+      * ungated, the bank saturates: median 69.01 px, 33.9% pinned at the 79 px ceiling
+      * gating on the SEG PROBABILITY alone fixes the bulk -- median 69.01 -> 6.20 px -- but leaves
+        24% at the ceiling, because a bright star's diffraction spike has genuine seg response and is
+        genuinely linear
+      * stack rows ADCNN ITSELF reported sit at 10%, and ADCNN's own detections at 4.7%; the thing
+        that separates a trail from a spike is STAGE 2, which is exactly what ADCNN applies
+
+    The rescue is real: of 349 stack detections with seg prob >= 0.4 on four panels, 278 (80%) were
+    never reported by ADCNN -- that is the "stack finds movers we miss" population, and it is
+    currently unlinkable because 21% of them have no DPDD trailLength at all and the rest read a
+    median 2.35 px.
+
+    Returns (length_px, beta_deg, score, passed) arrays, NaN/False where the gate rejected.
+    """
+    import pandas as _pd
+    from ADCNN.inference.cnn_postproc import apply_cnn
+    from ADCNN.inference.mf_trail_length import refine_trail_length
+    from ADCNN.data.preprocessing import diffim_mad_sigma
+
+    x = np.asarray(x, float); y = np.asarray(y, float)
+    n = len(x)
+    L = np.full(n, np.nan); B = np.full(n, np.nan); S = np.full(n, np.nan)
+    if not n:
+        return L, B, S, np.zeros(0, bool)
+    H, W = prob.shape
+    yi = np.clip(np.round(y).astype(int), 0, H - 1)
+    xi = np.clip(np.round(x).astype(int), 0, W - 1)
+    # STAGE 1: local MAX of the seg probability. A trail's peak response need not sit exactly under
+    # the external centroid, so a single-pixel read under-selects.
+    segp = np.array([prob[max(0, b - 3):b + 4, max(0, a - 3):a + 4].max() for b, a in zip(yi, xi)])
+    g1 = segp >= t_low
+    if not g1.any():
+        return L, B, S, np.zeros(n, bool)
+    sig = float(panel_sigma) if panel_sigma is not None else diffim_mad_sigma(img)
+    # STAGE 2: the focal cutout CNN, the discriminator that rejects spikes.
+    idx = np.flatnonzero(g1)
+    cand = _pd.DataFrame({"y_centroid": y[idx], "x_centroid": x[idx],
+                          "panel_sigma": np.full(len(idx), sig)})
+    scored = apply_cnn(cand, cnn, img, prob, agg, thr=None, device=device)
+    sc = scored["score"].to_numpy(float)
+    S[idx] = sc
+    g2 = sc >= cnn_thr
+    keep = idx[g2]
+    if not len(keep):
+        return L, B, S, np.zeros(n, bool)
+    Lk, Bk = refine_trail_length(x[keep], y[keep], img,
+                                 np.zeros(len(keep)), np.zeros(len(keep)), sigma=sig)
+    ran = Lk != 0                                  # 0 means the stamp fell off the panel edge
+    L[keep[ran]] = Lk[ran]; B[keep[ran]] = Bk[ran]
+    passed = np.zeros(n, bool); passed[keep[ran]] = True
+    return L, B, S, passed
 
 
 def measure(dets_path, out_path, limit_panels=None, verbose=True):

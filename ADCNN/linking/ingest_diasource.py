@@ -14,9 +14,14 @@ Emitted columns match the ADCNN catalogue the linker reads:
   mf_snr  <- `snr`
   length  <- `trailLength` converted arcsec -> pixels (PIXEL_SCALE); beta <- `trailAngle`
   ra0/1   <- trail endpoints from (trailLength, trailAngle), the same convention detect_night writes
-RING SAFETY: the stack measures dipoles itself (dipoleFluxDiff / dipoleMeanFlux / dipoleLength). We
-drop sources whose dipole flux difference dominates -- the stack's own statement that the source is a
-subtraction dipole -- so the merge cannot re-import the ring population ADCNN was just cleaned of.
+RING SAFETY -- CURRENTLY ABSENT, READ THIS BEFORE TRUSTING THE MERGE. The intent was to drop sources
+whose dipole flux difference dominates, using the stack's own dipoleFluxDiff/dipoleMeanFlux. On the
+DRP output we actually consume those are NaN on 72.4% of rows and EXACTLY 0 on the rest, so the rule
+flags nothing: nine delivered nights, 3,880,041 sources, zero dropped. The stack side is therefore NOT
+ring-cleaned, while the ADCNN side is (25.5% of its rows dropped as rings before the union). Measured
+counterfactually from pixels, 41.9% of stack rows would be flagged is_dipole and 60.6% would fail
+--art-frac-max. `is_dipole` and `art_frac` are consequently written as NaN, not False/0.0, so no
+downstream gate mistakes "never measured" for "measured clean".
 """
 from __future__ import annotations
 import argparse
@@ -121,6 +126,20 @@ def ingest(butler_repo, collection, night, out_path, reliability_min=0.5, snr_mi
     n_rel = int((~keep).sum())
     n_dip = 0
     if drop_dipoles and {"dipoleFluxDiff", "dipoleMeanFlux"} <= set(d.columns):
+        # THIS DROP CANNOT FIRE ON THE CURRENT DRP OUTPUT, and printing "stack-dipole: 0" makes that
+        # indistinguishable from "no dipoles present". MEASURED on 17,097 real 0706 rows:
+        # dipoleMeanFlux/dipoleFluxDiff are NaN on 72.4%, and on the 27.6% that ARE present
+        # dipoleFluxDiff is EXACTLY 0 on 100.0%. Across nine delivered nights the log reads
+        # "stack-dipole: 0" every time -- 3,880,041 sources, zero dropped. The module docstring's
+        # "RING SAFETY" claim rests on this, so it is currently fiction.
+        _dm = d["dipoleMeanFlux"]; _dd = d["dipoleFluxDiff"]
+        _usable = (_dm.notna() & _dd.notna() & (_dd.abs() > 0)).sum()
+        if _usable == 0:
+            print(f"[diasrc] WARNING: the stack-dipole drop is INERT -- dipoleFluxDiff is absent or "
+                  f"exactly zero on all {len(d):,} rows, so it can flag nothing. The stack side is "
+                  f"therefore NOT ring-cleaned by this path; is_dipole must be measured from pixels "
+                  f"(see ADCNN.linking.measure_stack_trails) before these rows are made linkable.",
+                  flush=True)
         # the stack's own dipole statement: |flux difference| comparable to the mean lobe flux
         frac = (d["dipoleFluxDiff"].abs() /
                 d["dipoleMeanFlux"].abs().replace(0, np.nan)).fillna(0.0)
@@ -131,7 +150,11 @@ def ingest(butler_repo, collection, night, out_path, reliability_min=0.5, snr_mi
     print(f"[diasrc] {n0:,} sources -> {len(d):,} kept "
           f"(reliability<{reliability_min} or snr cut: {n_rel:,}; stack-dipole: {n_dip:,})", flush=True)
     # -> ADCNN schema ----------------------------------------------------------------------
-    # DO NOT fillna(0). `trailLength` is NaN on 69% of dia_source_detector rows -- the DPDD trailed
+    # DO NOT fillna(0). `trailLength` is NaN on ~31% of dia_source_detector rows -- MEASURED on the
+    # collection the nights actually use, LSSTCam/runs/prompt/20260706/ApPipe in the `embargo` repo
+    # (30.9% of 2,738 rows; 25.7% of delivered stack rows carry the len_db==0 & beta==0 signature).
+    # An earlier 69% figure quoted here came from dp2_prep/DM-53881 stage4, whose visits are 2025-04
+    # and which the night pipeline does not read -- do not requote it. The DPDD trailed
     # fit is simply not available for most sources -- and mapping that to 0.0 makes "never measured"
     # indistinguishable from "measured as a point source". Both then fail the op's len_db_min of 6.0,
     # so two thirds of the stack's contribution is discarded for a measurement that was never
@@ -170,7 +193,17 @@ def ingest(butler_repo, collection, night, out_path, reliability_min=0.5, snr_mi
         trail_flux_err=d.get("trailFluxErr", pd.Series(np.nan, index=d.index)),
         trail_flag_edge=d.get("trail_flag_edge", pd.Series(np.nan, index=d.index)),
         extendedness=d.get("extendedness", pd.Series(np.nan, index=d.index)),
-        is_dipole=False, art_frac=0.0, src="stack"))
+        # NOT MEASURED -- do not write False/0.0. Those are the values that mean "clean", and they
+        # disarm two gates that demonstrably fire for ADCNN rows: link_2visit's --art-frac-max (0.3)
+        # and its pre-seed dipole veto (which removes 113,207 of 441,651 ADCNN dets on a real night).
+        # COUNTERFACTUAL on real pixels, recomputed with the SAME code the ADCNN side uses and
+        # validated to reproduce the ADCNN catalogue's art_frac exactly (max |diff| 0.000 on 4,598
+        # rows): of 1,200 random stack rows, 60.6% would FAIL --art-frac-max and 41.9% would be
+        # flagged is_dipole. On the merged 0706 stream, 8 of the 33 stack-member alerts fail the
+        # measured art_frac and 4 of those sit inside the 1000-alert budget, one at rank 24.
+        # That exposure scales with any fix that makes more stack rows linkable, so these must be
+        # MEASURED (measure_stack_trails has the panel open already), not defaulted.
+        is_dipole=np.nan, art_frac=np.nan, src="stack"))
     out.to_csv(out_path, index=False)
     known = int((out.ssObjectId.fillna(0) > 0).sum())
     print(f"[diasrc] wrote {len(out):,} stack detections -> {out_path} "
