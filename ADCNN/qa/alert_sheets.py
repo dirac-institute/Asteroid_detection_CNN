@@ -83,6 +83,26 @@ def _assert_cache_matches(alerts_path, cutouts_npz, n_alerts):
             f"alert position, so rendering would caption every image with the wrong alert. Rebuild:\n"
             f"  python -m ADCNN.qa.alert_cutouts --alerts {alerts_path} --dets <masked dets> "
             f"--out {cutouts_npz}")
+    # FINGERPRINT FIRST. Caches written since a1e751b carry a sha256 of the full (visit,detector)
+    # sequence, so a permutation ANYWHERE is caught in O(1) with no npz load. Older caches have no
+    # fingerprint and fall through to the row-by-row comparison below.
+    _fp = m.get("alerts_fingerprint")
+    if _fp:
+        import hashlib
+        h = hashlib.sha256()
+        with open(alerts_path) as _f:
+            for _line in _f:
+                _a = json.loads(_line)
+                for _e in (_a.get("epochs") or []):
+                    h.update(f"{_e.get('visit',-1)}:{_e.get('detector',-1)};".encode())
+                h.update(b"|")
+        if h.hexdigest() != _fp:
+            raise SystemExit(
+                f"cutout cache does NOT MATCH {alerts_path}: the alert sequence fingerprint differs "
+                f"from the one recorded when the pixels were cut, so alerts.jsonl has been "
+                f"re-ordered, filtered or re-linked since. The cache is indexed by alert position -- "
+                f"rendering would caption every image with the wrong alert. Rebuild the cache.")
+        return
     # IDENTITY. A count check cannot see a PERMUTATION, and run_night rewrites alerts.jsonl in place
     # (rerank_alerts) between the cut and the render -- counterfactually only 9 of 20,000 index
     # positions would then have addressed the same alert. The cache already stores visit/detector per

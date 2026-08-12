@@ -184,7 +184,11 @@ def _wide_mosaic_one(members, endpoints, out_px, cand_paths, load_fn, affine, cr
     # the delivered image. Seed it on the mosaic centre: deterministic, and still decorrelated between
     # alerts. Measured fabrication: 0.3-1.2% of a median-rate alert's wide view, 8-13% for the fastest
     # (whose mosaic reaches past the focal plane), and 100% when every candidate panel is unreadable.
-    _rng = np.random.default_rng(abs(hash((round(float(cra), 6), round(float(cdec), 6), out_px))) % (2**32))
+    # hash(float('nan')) is id-derived in Python 3.10+, so a NaN centre would silently un-seed this
+    # again -- the exact non-reproducibility the seed exists to remove. Fall back to a fixed seed.
+    _key = (round(float(cra), 6), round(float(cdec), 6), int(out_px))
+    _rng = np.random.default_rng(abs(hash(_key)) % (2**32)
+                                 if np.isfinite(cra) and np.isfinite(cdec) else 0)
     stamp[~filled] = _rng.normal(0.0, 1.0, int((~filled).sum())).astype(np.float32)  # chip gaps
     stamp = np.clip(stamp, -CLIP_SIGMA, CLIP_SIGMA).reshape(out_px, out_px).astype(np.float16)
     pos = np.full((MAXEP, 2), np.nan, np.float32)
@@ -410,8 +414,19 @@ def build(alerts_path, dets_path, out_npz, stamp_px=96, wide_px=220, workers=8, 
         wide_ok=np.array([r[4] for r in wres], bool),
         wide_ends=(np.stack([r[5] for r in wres]) if wres
                    else np.zeros((0, MAXEP, 2, 2), np.float32)))
+    # IDENTITY FINGERPRINT of the alert sequence this cache was built against. A count cannot see a
+    # PERMUTATION, and that is exactly how six delivered nights shipped sheets captioned with the
+    # wrong alert: the cache is keyed by alert position and rerank_alerts rewrote alerts.jsonl in
+    # place after the cut. Any consumer -- renderers, night_status -- can now decide in O(1) whether
+    # the file in front of it is the one the pixels were cut from, without loading the npz.
+    _fp = hashlib.sha256()
+    for _a in alerts:
+        for _e in (_a.get("epochs") or []):
+            _fp.update(f"{_e.get('visit',-1)}:{_e.get('detector',-1)};".encode())
+        _fp.update(b"|")
     with open(os.path.splitext(out_npz)[0] + "_meta.json", "w") as f:
-        json.dump(dict(n_alerts=len(alerts), n_zoom=len(zres), n_wide=len(wres), stamp_px=K,
+        json.dump(dict(alerts_fingerprint=_fp.hexdigest(),
+                       n_alerts=len(alerts), n_zoom=len(zres), n_wide=len(wres), stamp_px=K,
                        wide_px=KW, clip_sigma=CLIP_SIGMA, alerts=os.path.abspath(alerts_path),
                        dets=os.path.abspath(dets_path), n_panels=len(zoom_jobs),
                        n_missing_panel=n_missing), f, indent=2)

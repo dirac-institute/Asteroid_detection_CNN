@@ -80,3 +80,55 @@ def test_run_night_ranks_before_it_cuts():
     i_cut = src.index("python -m ADCNN.qa.alert_cutouts")
     assert i_rank < i_cut, ("run_night cuts cutouts before re-ranking: the cache is keyed by alert "
                             "position and rerank_alerts permutes alerts.jsonl in place")
+
+
+def _fingerprint(alerts):
+    import hashlib
+    h = hashlib.sha256()
+    for a in alerts:
+        for e in (a.get("epochs") or []):
+            h.update(f"{e.get('visit',-1)}:{e.get('detector',-1)};".encode())
+        h.update(b"|")
+    return h.hexdigest()
+
+
+def _write_fp(tmp_path, n):
+    alerts = [{"alertId": i, "ranking": {"pReal": 1.0 - i / n},
+               "epochs": [{"visit": 1000 + i, "detector": i % 189, "ra": 10.0 + i * 1e-3,
+                           "dec": -20.0}]} for i in range(n)]
+    np.savez(tmp_path / "c.npz", alert=np.arange(n), epoch=np.zeros(n, int),
+             visit=np.array([1000 + i for i in range(n)]), detector=np.array([i % 189 for i in range(n)]),
+             stamps=np.zeros((n, 4, 4), np.float16), wide=np.zeros((n, 4, 4), np.float16),
+             wide_alert=np.arange(n))
+    (tmp_path / "c_meta.json").write_text(json.dumps(
+        {"n_alerts": n, "alerts_fingerprint": _fingerprint(alerts)}))
+    return alerts, str(tmp_path / "c.npz")
+
+
+def _dump(tmp_path, alerts):
+    p = tmp_path / "a.jsonl"
+    p.write_text("".join(json.dumps(a) + "\n" for a in alerts))
+    return str(p)
+
+
+def test_fingerprint_catches_a_single_adjacent_swap(tmp_path):
+    """The row-by-row guard needs the npz; the fingerprint is O(1) and covers the WHOLE sequence, so
+    night_status can certify a product it currently cannot check. One swap is the smallest corruption."""
+    alerts, npz = _write_fp(tmp_path, 400)
+    alert_sheets._assert_cache_matches(_dump(tmp_path, alerts), npz, 400)
+    sw = list(alerts); sw[300], sw[301] = sw[301], sw[300]
+    with pytest.raises(SystemExit, match="fingerprint differs"):
+        alert_sheets._assert_cache_matches(_dump(tmp_path, sw), npz, 400)
+
+
+def test_select_clean_refreshes_the_fingerprint_it_carries_over(tmp_path):
+    """The sidecar is copied from the source cache, so without a refresh the reindexed 1k product
+    would fail its own check and no night could be rendered."""
+    from ADCNN.qa.select_clean import select
+    alerts, npz = _write_fp(tmp_path, 200)
+    ap = _dump(tmp_path, alerts)
+    drop = np.zeros(200, bool); drop[[3, 11, 150]] = True
+    np.savez(tmp_path / "m.npz", ripple=drop)
+    select(ap, str(tmp_path / "m.npz"), npz, 200,
+           str(tmp_path / "o.jsonl"), str(tmp_path / "o.npz"), mode="rings")
+    alert_sheets._assert_cache_matches(str(tmp_path / "o.jsonl"), str(tmp_path / "o.npz"), 197)

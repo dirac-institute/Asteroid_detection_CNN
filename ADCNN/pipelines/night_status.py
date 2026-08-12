@@ -126,6 +126,30 @@ def status(run_dir):
     orphan = fidset - set(ids)                        # a file naming an alert not in the stream
     st["detail"]["images"] = (f"{len(imgs)} files, top {len(want_img)} expected, {dup} dup, "
                               f"{len(missing_imgs)} missing, {len(orphan)} orphan")
+    # PRESENCE IS NOT CORRECTNESS. alertId and count cannot see a PERMUTATION, and that is exactly
+    # how six nights certified COMPLETE while every rendered image carried another alert's caption
+    # (the cache is keyed by alert POSITION and rerank_alerts rewrote alerts.jsonl after the cut).
+    # alert_cutouts now records a sha256 of the full (visit,detector) sequence; if the cache is still
+    # around, check the pixels were cut from THIS file. A cache is deleted after a successful night,
+    # so its absence is normal and not a failure -- what must never happen is certifying a MISMATCH.
+    mp = sd / "cutouts_meta.json"
+    if imgs and mp.exists():
+        try:
+            fp = json.load(open(mp)).get("alerts_fingerprint")
+        except (json.JSONDecodeError, OSError):
+            fp = None
+        if fp:
+            import hashlib
+            h = hashlib.sha256()
+            with open(ap) as f:
+                for line in f:
+                    for e in (json.loads(line).get("epochs") or []):
+                        h.update(f"{e.get('visit',-1)}:{e.get('detector',-1)};".encode())
+                    h.update(b"|")
+            if h.hexdigest() != fp:
+                st["detail"]["images"] += "; CACHE MISMATCH -- images show the WRONG alerts"
+                st["first_missing"] = "images"
+                return st
     if dup or missing_imgs or orphan:
         st["first_missing"] = "images"; return st
 

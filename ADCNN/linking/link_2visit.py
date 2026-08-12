@@ -1303,11 +1303,13 @@ def main():
             "drop_stationary_single": "NOT IMPLEMENTED anywhere (deliberately kept + labelled)",
         }
         # Op files also carry PROVENANCE -- what the op is for, what it was calibrated on, what it
-        # claims. Those are documentation, not parameters, and must not be mistaken for a dropped cut.
-        _PROVENANCE = {"claim", "notes", "product", "status", "model_version", "calibrated_on",
-                       "data_release", "links", "modes", "heliolinx", "score_min_note"}
-        _unknown = [k for k in _op if k not in _flag and k not in _NOT_LINKER
-                    and k not in _PROVENANCE and not k.startswith("_")]
+        # claims. Those are documentation, not parameters. Discriminate by VALUE TYPE rather than by
+        # an exact-name whitelist: every real cut is numeric or boolean, so a future `comment` or
+        # `author` key is passed through as documentation instead of hard-failing the production
+        # linker on a word nobody thought to list.
+        _unknown = [k for k, v in _op.items()
+                    if k not in _flag and k not in _NOT_LINKER and not k.startswith("_")
+                    and isinstance(v, (int, float, bool)) and not isinstance(v, str)]
         if _unknown:
             raise SystemExit(
                 f"[trail-link] op-point {a.op_point} sets keys the linker does not apply and would "
