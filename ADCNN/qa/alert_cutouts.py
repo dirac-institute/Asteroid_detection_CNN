@@ -29,7 +29,7 @@ Usage:
       --out report/cutouts.npz [--stamp-px 96] [--wide-px 220] [--workers 8]
 """
 from __future__ import annotations
-import argparse, json, os, re, sys
+import argparse, hashlib, json, os, re, sys
 from collections import defaultdict
 
 import numpy as np

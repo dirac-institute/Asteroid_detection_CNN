@@ -44,6 +44,14 @@ def select(alerts_path, morph_npz, cutouts_npz, n, out_alerts, out_cutouts, mode
     lines = open(alerts_path).read().splitlines()
     alerts = [json.loads(l) for l in lines]
     K = len(lines)
+    # VALIDATE THE INPUT CACHE FIRST. This function reindexes by POSITION and then stamps a fresh
+    # fingerprint computed from the alerts file -- so without this check a stale or permuted cache is
+    # laundered into a product every downstream guard accepts. Pixel-proven on real 0710 stamps: 20 of
+    # 30 alerts carried the wrong alert's pixels (mean 66.66% of pixels differing) and the guard
+    # PASSED. Before the fingerprint existed the row-by-row fallback caught it, so this was a
+    # regression the fingerprint introduced, not a pre-existing hole.
+    from ADCNN.qa.alert_sheets import _assert_cache_matches
+    _assert_cache_matches(alerts_path, cutouts_npz, K)
     mo = np.load(morph_npz)
     ripple = mo["ripple"]
     if len(ripple) != K:

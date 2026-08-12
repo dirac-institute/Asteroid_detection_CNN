@@ -138,6 +138,15 @@ def render(alerts_path, cutouts_npz, out_dir, top_n=None, dpi=120, workers=1, _s
     wends = z["wide_ends"] if "wide_ends" in z.files else None
     zi = {(int(a_ix[i]), int(e_ix[i])): i for i in range(len(a_ix))}
     wide, w_al = z["wide"], z["wide_alert"]
+    # `ok` and `wide_ok` were written, reindexed through select_clean, and read by NOBODY -- flipping
+    # wide_ok produced a byte-identical PNG. That matters because the failure they mark is invisible:
+    # a wide mosaic whose panels were all unreadable is filled entirely with synthetic N(0,1) noise
+    # and renders as a plausible EMPTY FIELD, complete with motion arrow, scale bar and a green
+    # "trail vs motion consistent" verdict computed from pure sky geometry over zero real pixels. A
+    # failed zoom stamp is all-zero and reads as "no source at this epoch => not a mover". Both
+    # mislead a vetter toward the WRONG conclusion, which is worse than a blank panel.
+    z_ok = z["ok"] if "ok" in z.files else None
+    w_ok = z["wide_ok"] if "wide_ok" in z.files else None
     w_pos, w_apx = z["wide_pos"], z["wide_apx"]
     wi = {int(w_al[i]): i for i in range(len(w_al))}
 
@@ -159,6 +168,10 @@ def render(alerts_path, cutouts_npz, out_dir, top_n=None, dpi=120, workers=1, _s
             if k is None:
                 ax.text(.5, .5, "no pixels", ha="center", va="center", fontsize=7); ax.axis("off")
                 continue
+            if z_ok is not None and k < len(z_ok) and not bool(z_ok[k]):
+                ax.text(.5, .5, "PANEL READ FAILED\n(not an empty field)", ha="center", va="center",
+                        fontsize=6.5, color="#f55"); ax.axis("off")
+                continue
             st = stamps[k].astype(np.float32)
             ax.imshow(st, origin="lower", cmap="gray", vmin=VMIN, vmax=VMAX, interpolation="nearest")
             if zends is not None and k < len(zends):
@@ -179,6 +192,9 @@ def render(alerts_path, cutouts_npz, out_dir, top_n=None, dpi=120, workers=1, _s
         else:
             W = wide[wk].astype(np.float32)
             axw.imshow(W, origin="lower", cmap="gray", vmin=VMIN, vmax=VMAX, interpolation="nearest")
+            if w_ok is not None and wk < len(w_ok) and not bool(w_ok[wk]):
+                axw.text(0.5, 0.97, "MOSTLY SYNTHETIC -- not real sky", ha="center", va="top",
+                         transform=axw.transAxes, fontsize=6.2, color="#f55")
             apx = float(w_apx[wk])                     # arcsec per wide pixel
             sc = PIXSCALE / apx if apx > 0 else 1.0    # source px -> wide px
             pts, angs = [], []

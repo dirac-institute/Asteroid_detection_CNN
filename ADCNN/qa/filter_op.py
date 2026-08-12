@@ -120,8 +120,17 @@ def filter_stream(alerts_path, dets_path, op_path, out_path, refcat_path=None, a
                  if refcat_path and op.get("bright_star_proximity") else set())
 
     def keep(ai, a):
+        # chi2 is None for 3+visit tracks -- they have no 2-visit orbit solve -- and `_G`'s default
+        # fires on None, so every one of them scored 99 and failed an 8.0 gate. That is a
+        # default-on-missing failure, not a threshold decision: all 52 real 3+visit alerts across the
+        # nine delivered nights were dropped, 39 of them blocked by this gate ALONE, and every
+        # delivered night reads multi_epoch_fraction = 0.0. The 3-sighting tier is the discovery tier
+        # (purity ~1.00 vs 0.17-0.56 for 2-sighting), and 7 of 9 nights deliver UNDER the 1000 budget
+        # (4,182 of 9,000 slots filled), so admitting them displaces nothing on those nights.
+        # rerank_alerts already handles this same field the same way; filter_op never got the fix.
+        _c = _G(a, "orbit", "chi2", d=None)
         return (_confident_fp(a) is None and ai not in artifact and ai not in near_star
-                and _G(a, "orbit", "chi2", d=99) <= CHI2
+                and (_c is None or float(_c) <= CHI2)
                 and _G(a, "vetting", "mfsnr_min", d=0) >= MF
                 and np.mean(_G(a, "vetting", "trail_len_px", d=[0]) or [0]) >= LEN
                 and RLO <= _G(a, "motion", "rate_degday", d=0) <= RHI)
@@ -147,7 +156,10 @@ def filter_stream(alerts_path, dets_path, op_path, out_path, refcat_path=None, a
     if surv and _n_pr < len(surv):
         print(f"[filter_op] WARNING: {len(surv)-_n_pr} of {len(surv)} survivors lack ranking.pReal "
               f"and will sort last within their class", flush=True)
-    surv.sort(key=lambda a: (_rank_class(a), -(_G(a, "ranking", "pReal", d=-1))))
+    # TIER before pReal, matching rerank_alerts: pReal is not computable for a 3+visit track (no
+    # 2-visit chi2), so keying on pReal alone sorts the ~100%-purity discovery tier LAST.
+    surv.sort(key=lambda a: (_rank_class(a), a.get("priority", 9),
+                             -(_G(a, "ranking", "pReal", d=-1))))
     with open(out_path, "w") as f:
         for a in surv:
             f.write(json.dumps(a) + "\n")

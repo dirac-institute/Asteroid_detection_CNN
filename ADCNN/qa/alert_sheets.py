@@ -89,9 +89,17 @@ def _assert_cache_matches(alerts_path, cutouts_npz, n_alerts):
     _fp = m.get("alerts_fingerprint")
     if _fp:
         import hashlib
+        # Hash the FIRST m_n lines, not the whole file: alert_cutouts records the fingerprint over
+        # `alerts[:limit]`, and run_night always passes --limit. Verifying over every line refused
+        # exactly the shape the count branch three lines above explicitly blesses
+        # (n_alerts <= m_n <= n_file) -- the two guards inside this one function contradicted each
+        # other, and every night whose stream exceeds stream_top_n was unrenderable.
         h = hashlib.sha256()
+        _cap = m.get("n_alerts")
         with open(alerts_path) as _f:
-            for _line in _f:
+            for _i, _line in enumerate(_f):
+                if isinstance(_cap, int) and _i >= _cap:
+                    break
                 _a = json.loads(_line)
                 for _e in (_a.get("epochs") or []):
                     h.update(f"{_e.get('visit',-1)}:{_e.get('detector',-1)};".encode())

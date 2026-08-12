@@ -92,9 +92,19 @@ def main(argv=None):
 
     out = a.out or a.alerts
     Path(out).parent.mkdir(parents=True, exist_ok=True)
-    with open(out, "w") as f:
+    # TEMP + ATOMIC RENAME. This rewrites alerts.jsonl IN PLACE, so a kill mid-write (SLURM timeout,
+    # OOM, node fault) truncates it -- and because the sort has already run, the survivors are the TOP
+    # N by rank, leaving a file that is valid JSONL, non-zero, and internally consistent all the way
+    # through cutouts, sheets, stream_summary and the .complete sentinel. It is simply SHORT, and
+    # run_night's reuse guard (`exists() and st_size > 0`) accepts it, silently discarding ~45 minutes
+    # of linking. Simulated: 400 alerts -> 137, 0 unparseable lines, guard returns "reuse".
+    _tmp = out + ".tmp"
+    with open(_tmp, "w") as f:
         for al in ranked:
             f.write(json.dumps(al, separators=(",", ":")) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(_tmp, out)
     ps = [al["ranking"]["pReal"] for al in ranked if al["ranking"]["pReal"] is not None]
     if ps:
         import numpy as np
