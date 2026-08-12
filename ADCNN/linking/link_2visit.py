@@ -94,6 +94,21 @@ CHI2_SIG_2V = dict(perp=0.127, resid=0.133, dsnr=0.558, dpa_tm=4.869, dspeed=0.2
 # worse than any alternative, and its only real cost is ~30% longer linking (38% more surviving
 # candidates). ADCNN_LEN_FIXED_EPOCH=1 restores the old max-over-both-epochs behaviour.
 LEN_BEST_EPOCH = not os.environ.get("ADCNN_LEN_FIXED_EPOCH")
+# mf_snr is not commensurable across `src` (stack = PSF point-source snr, adcnn = matched-filter
+# trail snr; median 1.43x offset with trail lengths 2-10x shorter). Compare within a source and
+# prefer the adcnn member on a mixed pair. =1 restores the old source-blind comparison.
+LEN_SRC_BLIND = os.environ.get("ADCNN_LEN_SRC_BLIND", "0") == "1"
+
+
+def _dra(ra_b, ra_a):
+    """RA difference wrapped to (-180, 180]. A raw subtraction reads a 0.05 deg step across RA=0 as
+    a 360 deg one, so the chord motion, its PA and the rate gate are all nonsense for any pair that
+    straddles the meridian. MEASURED: 4 straddling visits each on 0629, 0708 and 0711 (31,511
+    detections), and on one 0711 co-pointed pair 678 of 111,479 seed pairs straddle. None reached the
+    delivered gate at the current op -- a rigid 180 deg rotation changed no delivered alert on either
+    a control or a straddling field -- so this is a correctness fix with a measured live cost of
+    zero, not a completeness claim."""
+    return (np.asarray(ra_b, float) - np.asarray(ra_a, float) + 180.0) % 360.0 - 180.0
 
 # Hard pre-gate thresholds, overridable for measurement (ADCNN_PRE_DPA_TM / _DPA_TT / _DSPEED).
 # Defaults are the shipped values. They kill 37.2% of truth pairs that HAVE a detection in both
@@ -175,17 +190,41 @@ def pair_chi2(g, exptime_s=30.0, sig=None, pre_dpa_tm=None, pre_dpa_tt=None,
     dt = exptime_s / SOLARDAY
 
     def tv(r):
-        cd = np.cos(np.radians(r.dec)); return (r.ra1 - r.ra0) * cd / dt, (r.dec1 - r.dec0) / dt
+        # WRAP. This is a private duplicate of the module-level trail_velocity(), which HAS wrapped
+        # its RA difference since it was written -- this copy did not, so a trail whose endpoints
+        # straddle RA=0 got a ~360 deg/day velocity and the pair was scored on nonsense. Found by a
+        # test asserting that a rigid rotation about the pole leaves chi2 invariant, which it must:
+        # dec is unchanged and every cos-dec-scaled separation is exactly preserved.
+        cd = np.cos(np.radians(r.dec)); return _dra(r.ra1, r.ra0) * cd / dt, (r.dec1 - r.dec0) / dt
     cd = np.cos(np.radians(a.dec)); mdt = b.mjd - a.mjd
-    mx = (b.ra - a.ra) * cd / mdt; my = (b.dec - a.dec) / mdt
+    mx = _dra(b.ra, a.ra) * cd / mdt; my = (b.dec - a.dec) / mdt
     mpa = np.degrees(np.arctan2(my, mx)) % 180.0; mspeed = np.hypot(mx, my)
     tvs = [tv(a), tv(b)]
     pas = [np.degrees(np.arctan2(ty, tx)) % 180.0 for tx, ty in tvs]
     dpa_tm = max(abs(((pa - mpa + 90) % 180) - 90) for pa in pas)
     if LEN_BEST_EPOCH and "mf_snr" in g.columns:
         # FIX 1: trust the epoch that actually resolved the trail, not the noisier one.
+        #
+        # BUT `mf_snr` IS NOT THE SAME QUANTITY FOR BOTH SOURCES. ingest_diasource writes the stack's
+        # PSF POINT-SOURCE snr into this column, while an ADCNN row carries a matched-filter TRAIL
+        # snr. Measured on 150,277 stack<->ADCNN detections matched within 1" on 0706: the stack value
+        # is a median 1.43x LARGER, while the stack's trail length on the SAME source is 2-10x
+        # SHORTER (len ratio 0.464 at len_db 6-10 falling to 0.105 at 20-30). So on a mixed pair the
+        # stack member wins a comparison it should lose: on 125 real mixed pairs FIX 1 picked the
+        # stack epoch 86% of the time, and that was the WORSE-agreeing trail 59% of the time
+        # (dspeed median 0.372 for the epoch picked vs 0.250 for the one rejected). The rule selected
+        # exactly the member it was written to distrust.
+        #
+        # The offset is NOT a constant (1.371 -> 0.995 across length bins), so a scalar rescale is not
+        # the repair. Compare only WITHIN a source; when the pair is mixed, prefer the ADCNN member,
+        # which is the one that actually measured a trail. Set ADCNN_LEN_SRC_BLIND=1 for the old
+        # source-blind comparison.
         _sn = g.mf_snr.to_numpy(float)
         _best = tvs[0] if (len(_sn) > 1 and _sn[0] >= _sn[-1]) else tvs[-1]
+        if not LEN_SRC_BLIND and "src" in g.columns and len(tvs) > 1:
+            _src = [str(x) for x in g.src.to_numpy()]
+            if _src[0] != _src[-1]:
+                _best = tvs[0] if _src[0] == "adcnn" else tvs[-1]
         dspeed = abs(np.hypot(_best[0], _best[1]) - mspeed) / max(mspeed, 0.3)
     else:
         dspeed = max(abs(np.hypot(tx, ty) - mspeed) / max(mspeed, 0.3) for tx, ty in tvs)
@@ -209,7 +248,12 @@ def pair_chi2(g, exptime_s=30.0, sig=None, pre_dpa_tm=None, pre_dpa_tt=None,
     if dpa_tm > _ptm or dpa_tt > _ptt or dspeed > _pds:
         return np.inf, rej
     c0 = np.cos(np.radians(g.dec.mean()))
-    P = np.array([[(ra - g.ra.mean()) * c0 * 3600.0, (dec - g.dec.mean()) * 3600.0]
+    # RA is differenced against the pair's mean RA, and for a pair straddling RA=0 that mean falls on
+    # the OPPOSITE side of the sky (mean(359.99, 0.01) = 180), so both endpoints land ~180 deg away
+    # and the collinearity residual is meaningless. Wrap, and take the reference from the first row
+    # rather than a circular mean.
+    _ra_ref = float(g.ra.iloc[0])
+    P = np.array([[float(_dra(ra, _ra_ref)) * c0 * 3600.0, (dec - g.dec.mean()) * 3600.0]
                   for _, r in g.iterrows() for ra, dec in ((r.ra0, r.dec0), (r.ra1, r.dec1))])
     P = P - P.mean(0); perp = float(np.sqrt(np.mean((P @ np.linalg.svd(P)[2][1])**2)))
     from ADCNN.pipelines.heliolinc.orbit_check import orbit_ok
@@ -428,7 +472,14 @@ def chord_seed_pairs(dets, *, max_arc_min=40.0, rate_min=0.3, rate_max=10.0, max
         else:
             for i in ia:
                 cd = float(np.cos(np.radians(dec[i])))
-                for jp in tree.query_ball_point(radec_to_unit(ra[i], dec[i]), qmax):
+                # return_sorted=True is what makes this path ORDER-identical to the fast one above.
+                # Without it the KD tree returns neighbours in internal order, so the two paths agreed
+                # as SETS but not as SEQUENCES -- and `--claim-order seed` (the default for the frozen
+                # science product) breaks ties by seeding order, so a reordering can change which
+                # alert wins a contested detection. Measured: reversing the seed order changed 1 of 42
+                # alerts on a real 0706 field. The docstring claimed order-identity; now it holds.
+                for jp in tree.query_ball_point(radec_to_unit(ra[i], dec[i]), qmax,
+                                                return_sorted=True):
                     j = int(ib[jp])
                     dra = (ra[j] - ra[i] + 180.0) % 360.0 - 180.0
                     if np.hypot(dra * cd, dec[j] - dec[i]) >= dmin:   # rate floor (RA-wrap-safe)
@@ -514,7 +565,7 @@ def prefilter_2v_pairs(dets, pairs, chi2_max, exptime_s=30.0):
     tsp = np.hypot(tvx, tvy)
     mdt = mjd[J] - mjd[I]
     cdI = np.cos(np.radians(dec[I]))
-    mx = (ra[J] - ra[I]) * cdI / mdt
+    mx = _dra(ra[J], ra[I]) * cdI / mdt
     my = (dec[J] - dec[I]) / mdt
     mpa = np.degrees(np.arctan2(my, mx)) % 180.0
     msp = np.hypot(mx, my)
@@ -523,6 +574,14 @@ def prefilter_2v_pairs(dets, pairs, chi2_max, exptime_s=30.0):
     if LEN_BEST_EPOCH and "mf_snr" in d.columns:
         _s = d.mf_snr.to_numpy(float)
         _tsp_best = np.where(_s[I] >= _s[J], tsp[I], tsp[J])          # FIX 1, vectorised
+        # Same source-awareness as the scalar path -- these two MUST agree or the prefilter prunes
+        # pairs the full chi2 accepts, a recall loss with no trace in any log (that exact divergence
+        # has already happened once here, when a default flip left a stale guard behind).
+        if not LEN_SRC_BLIND and "src" in d.columns:
+            _sv = d.src.to_numpy().astype(str)
+            _mixed = _sv[I] != _sv[J]
+            if _mixed.any():
+                _tsp_best = np.where(_mixed, np.where(_sv[I] == "adcnn", tsp[I], tsp[J]), _tsp_best)
         dspeed = np.abs(_tsp_best - msp) / np.maximum(msp, 0.3)
     else:
         dspeed = np.maximum(np.abs(tsp[I] - msp), np.abs(tsp[J] - msp)) / np.maximum(msp, 0.3)
@@ -883,7 +942,7 @@ def stationarity_check(g, stat_trees, stat_mjd, *, tol_arcsec=3.0, min_disp_arcs
     a, b = g.iloc[0], g.iloc[-1]
     cd = float(np.cos(np.radians(g.dec.mean())))
     dt = float(b.mjd - a.mjd)
-    rate = (np.hypot((b.ra - a.ra) * cd, b.dec - a.dec) / dt) if dt > 0 else 0.0   # deg/day
+    rate = (np.hypot(_dra(b.ra, a.ra) * cd, b.dec - a.dec) / dt) if dt > 0 else 0.0  # deg/day
     disp_as = rate * dt * 3600.0                                                    # = member separation
     out = {"testable": bool(disp_as >= min_disp_arcsec), "minDispArcsec": float(min_disp_arcsec),
            "tolArcsec": float(tol_arcsec), "expectedDispArcsec": round(disp_as, 2)}

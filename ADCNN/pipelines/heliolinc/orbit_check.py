@@ -255,7 +255,13 @@ def orbit_ok(track, *, exptime_s=30.0, pos_tol_arcsec=2.0, rate_frac_tol=0.5,
     # the trail endpoints have a 180-deg ambiguity (don't know the sense of motion); orient each trail
     # velocity to point along the inter-epoch motion (a->b), which fixes the sign.
     mdt = (b_row.mjd - a_row.mjd)
-    mx = (b_row.ra - a_row.ra) * np.cos(np.radians(b_row.dec)) / mdt
+    # WRAP: a raw RA subtraction reads a small step across RA=0 as ~360 deg, so the chord rate fed to
+    # the bound-orbit fit is nonsense and `rate_resid` explodes. MEASURED on a self-consistent
+    # synthetic pair: chi2 4.52 at RA 10 and 4.53 at RA 190 (a genuine 180 deg rotation barely moves
+    # it, as it should) but 82.25 at RA 359.98 -- 10x over the shipped chi2_2v_max of 8.0, so a real
+    # mover straddling the meridian is rejected by arithmetic. Every geometric term was already
+    # invariant; this was the last unwrapped site.
+    mx = ((b_row.ra - a_row.ra + 180.0) % 360.0 - 180.0) * np.cos(np.radians(b_row.dec)) / mdt
     my = (b_row.dec - a_row.dec) / mdt
     if vx1 * mx + vy1 * my < 0:
         vx1, vy1 = -vx1, -vy1
