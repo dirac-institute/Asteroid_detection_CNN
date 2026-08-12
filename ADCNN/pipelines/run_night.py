@@ -497,6 +497,17 @@ def run(a):
                   f"--alerts-out {sd}/alerts.jsonl", a.dry_run)
         else:
             print(f"      (stream alerts.jsonl exists -- reusing; --force to relink)")
+        # RANK BEFORE CUTTING. rerank_alerts rewrites alerts.jsonl IN PLACE, permuting it, and the
+        # cutout cache is keyed by alert POSITION -- so cutting first and re-ranking second addresses
+        # every cached stamp to a different alert than the one whose caption it is rendered under.
+        # This shipped: on 20260710 only 13 of 18,009 positions survived the permutation, and the
+        # delivered sheet_0000.png is reproduced to 0.13% of pixels by re-rendering with a
+        # linker-order cache while differing from the correct render in 76.27% of pixels. Six of the
+        # nine delivered nights ran in that order. Ranking first costs nothing (it is a pure sort of
+        # a JSONL file, no pixels) and makes the cache correct by construction; the identity guard in
+        # alert_sheets then has nothing left to catch.
+        if not a.no_rerank:
+            _bash(f"python -m ADCNN.qa.rerank_alerts --alerts {sd}/alerts.jsonl", a.dry_run)
         if a.force or not (sd / "cutouts.npz").exists():
             _bash(f"python -m ADCNN.qa.alert_cutouts --alerts {sd}/alerts.jsonl "
                   f"--dets {_dets()} --out {sd}/cutouts.npz "
@@ -504,10 +515,6 @@ def run(a):
                   f"--limit {a.stream_top_n}", a.dry_run)
         else:
             print(f"      (stream cutouts.npz exists -- reusing; --force to re-cut)")
-        # rank by the CALIBRATED P(real) before rendering, so the images are produced in the order
-        # a human should look at them (post-hoc: no re-link, no re-cut -- see ADCNN/qa/rerank_alerts.py)
-        if not a.no_rerank:
-            _bash(f"python -m ADCNN.qa.rerank_alerts --alerts {sd}/alerts.jsonl", a.dry_run)
         _bash(f"python -m ADCNN.qa.alert_sheets --alerts {sd}/alerts.jsonl "
               f"--cutouts {sd}/cutouts.npz --out-dir {sd}/sheets "
               f"--per-sheet {a.stream_per_sheet} --limit {a.stream_top_n}", a.dry_run)

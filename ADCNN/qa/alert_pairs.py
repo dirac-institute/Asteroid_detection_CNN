@@ -106,6 +106,11 @@ def render(alerts_path, cutouts_npz, out_dir, top_n=None, dpi=120, workers=1, _s
     # never ran in --workers mode -- 20260713 kept 15,615 files for 8,273 alerts that way.
     if _slice is None:
         import glob as _glob
+        # VALIDATE BEFORE DESTROYING. The clear used to run ahead of _assert_cache_matches, so a
+        # mismatched cache deleted every existing render and THEN aborted -- measured on the real 0706
+        # product: "cleared 5 stale render(s)" followed by EXIT=1 and a pairs dir with 0 files. The
+        # invocation that fails must leave the previous product intact.
+        _assert_cache_matches(alerts_path, cutouts_npz, len(alerts))
         os.makedirs(out_dir, exist_ok=True)
         stale = _glob.glob(os.path.join(out_dir, "alert_*.png"))
         for f in stale:

@@ -42,7 +42,7 @@ def _member_artifact(alerts, dets_path):
     d = pd.read_csv(dets_path, usecols=lambda c: c in cols)
     have = [m for m in ARTIFACT_MASKS if m in d.columns]
     if not have:
-        return set()
+        return set(), False
     trees = {}
     for (v, det), g in d.groupby(["visit", "detector"]):
         cd = np.cos(np.radians(g.dec.values))
@@ -60,7 +60,7 @@ def _member_artifact(alerts, dets_path):
                                  distance_upper_bound=tol)
             if np.isfinite(dist) and flag[int(i)]:
                 hit.add(ai); break
-    return hit
+    return hit, True
 
 
 def _near_bright_star(alerts, refcat_path, radius_arcsec, mag_max):
@@ -107,7 +107,7 @@ def filter_stream(alerts_path, dets_path, op_path, out_path, refcat_path=None, a
     PROX_R = op.get("bright_star_radius_arcsec", 4.0)
     PROX_M = op.get("bright_star_mag_max", 16.0)
     alerts = [json.loads(l) for l in open(alerts_path)]
-    artifact = _member_artifact(alerts, dets_path) if dets_path else set()
+    artifact, _have_masks = _member_artifact(alerts, dets_path) if dets_path else (set(), False)
     # A veto enabled in the op but handed no catalogue is a NO-OP that prints "(0)" -- textually
     # identical to "0 flagged". MEASURED on 200 real alerts: with --refcat 10 survivors, without it
     # 84 (8.4x larger, ~88% ring-contaminated). This exact bug shipped once. Fail, do not degrade.
@@ -151,7 +151,11 @@ def filter_stream(alerts_path, dets_path, op_path, out_path, refcat_path=None, a
     with open(out_path, "w") as f:
         for a in surv:
             f.write(json.dumps(a) + "\n")
-    if not artifact and any(c.startswith("m_") for c in getattr(_d, "columns", [])) is False:
+    if not _have_masks:
+        # This warning referenced an undefined name and raised NameError in EXACTLY the case it
+        # exists for (dets with no m_* columns) -- after the survivors file was already written, so a
+        # caller guarding on `[ -s out ]` consumed a product whose mask veto had silently done
+        # nothing. _member_artifact now reports whether the columns were there.
         print("[filter_op] WARNING: dets carry no m_* mask columns -- the mask-artifact veto is OFF, "
               "not '0 flagged'", flush=True)
     print(f"[filter_op] chi2<={CHI2} + veto-drop + mask-artifact({len(artifact)}) + "

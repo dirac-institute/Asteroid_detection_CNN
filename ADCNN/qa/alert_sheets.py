@@ -55,9 +55,14 @@ def _assert_cache_matches(alerts_path, cutouts_npz, n_alerts):
     """
     meta = os.path.splitext(cutouts_npz)[0] + "_meta.json"
     if not os.path.exists(meta):
-        print(f"[pairs] WARN no {os.path.basename(meta)}; cannot verify the cache matches "
-              f"{os.path.basename(alerts_path)}", flush=True)
-        return
+        # Warning + return meant a cache with NO sidecar skipped the identity check entirely -- a
+        # deliberately mis-indexed cache rendered clean behind one WARN line. The sidecar is the only
+        # thing that makes the cache verifiable, so its absence is a refusal, not a note.
+        raise SystemExit(
+            f"cutout cache {cutouts_npz} has no {os.path.basename(meta)} sidecar, so it CANNOT be "
+            f"verified against {os.path.basename(alerts_path)}. The cache is indexed by alert "
+            f"position; rendering an unverifiable cache is how every image gets another object's "
+            f"caption. Rebuild it with ADCNN.qa.alert_cutouts (which writes the sidecar).")
     m = json.load(open(meta))
     # COUNT is compared against the UNTRUNCATED file, not the post---limit list: run_night passes the
     # same --limit to the cut and the render, so the two counts matched by construction and the guard
@@ -66,11 +71,16 @@ def _assert_cache_matches(alerts_path, cutouts_npz, n_alerts):
         n_file = sum(1 for _ in open(alerts_path))
     except OSError:
         n_file = n_alerts
-    if m.get("n_alerts") not in (n_alerts, n_file):
+    # A cache built for the top 20,000 of a 26,253-alert file is the SHIPPED shape, and asking it for
+    # the top 100 is legitimate -- an equality test refused that, so nobody could re-render a night's
+    # top-N from its own cache. What is actually required is that the cache covers the request and was
+    # built from a file no larger than this one.
+    m_n = m.get("n_alerts")
+    if not (isinstance(m_n, int) and n_alerts <= m_n <= n_file):
         raise SystemExit(
             f"cutout cache is STALE: {cutouts_npz} was built for {m.get('n_alerts')} alerts but "
-            f"{alerts_path} has {n_file}. The cache is indexed by alert position, so "
-            f"rendering would caption every image with the wrong alert. Rebuild it:\n"
+            f"{alerts_path} has {n_file} and {n_alerts} were requested. The cache is indexed by "
+            f"alert position, so rendering would caption every image with the wrong alert. Rebuild:\n"
             f"  python -m ADCNN.qa.alert_cutouts --alerts {alerts_path} --dets <masked dets> "
             f"--out {cutouts_npz}")
     # IDENTITY. A count check cannot see a PERMUTATION, and run_night rewrites alerts.jsonl in place
@@ -83,19 +93,21 @@ def _assert_cache_matches(alerts_path, cutouts_npz, n_alerts):
         if {"alert", "visit", "detector"} <= set(z.files):
             ai = _np.asarray(z["alert"]); vv = _np.asarray(z["visit"]); dd = _np.asarray(z["detector"])
             alerts = [json.loads(l) for l in open(alerts_path)]
+            # EVERY row, not a 400-row sample. The cache is ordered by rank, so a sample of the first
+            # 400 zoom rows covers ~200 alerts of 20,000 -- permuting only ranks >=500 mis-addressed
+            # 536 of 1,037 alerts and the guard PASSED, writing 22 sheets in which every caption past
+            # rank 500 was wrong. The comparison is a dict lookup per row; the full pass is cheap.
+            eps_of = [{(int(e.get("visit", -1)), int(e.get("detector", -1)))
+                       for e in (al.get("epochs") or [])} for al in alerts]
             bad = 0
-            for k in range(min(len(ai), 400)):          # sample: a permutation shows up immediately
+            for k in range(len(ai)):
                 j = int(ai[k])
-                if j >= len(alerts):
-                    bad += 1; continue
-                eps = alerts[j].get("epochs") or []
-                if not any(int(e.get("visit", -1)) == int(vv[k])
-                           and int(e.get("detector", -1)) == int(dd[k]) for e in eps):
+                if j >= len(alerts) or (int(vv[k]), int(dd[k])) not in eps_of[j]:
                     bad += 1
             if bad:
                 raise SystemExit(
-                    f"cutout cache does NOT MATCH {alerts_path}: {bad} of the first "
-                    f"{min(len(ai),400)} cached stamps name a (visit,detector) absent from the alert "
+                    f"cutout cache does NOT MATCH {alerts_path}: {bad} of {len(ai)} "
+                    f"cached stamps name a (visit,detector) absent from the alert "
                     f"they are indexed to. The counts agree, so this is a REORDERING -- every image "
                     f"would be captioned with the wrong alert. Rebuild the cache.")
     except SystemExit:

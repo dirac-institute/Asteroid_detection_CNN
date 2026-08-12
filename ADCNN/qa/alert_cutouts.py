@@ -179,7 +179,13 @@ def _wide_mosaic_one(members, endpoints, out_px, cand_paths, load_fn, affine, cr
             stamp[sel] = vals / sig                        # normalise by each detector's own sigma
             filled[sel] = True
     filled_frac = float(filled.mean())
-    stamp[~filled] = np.random.normal(0.0, 1.0, int((~filled).sum())).astype(np.float32)  # chip gaps
+    # Gaps are filled with SYNTHETIC noise so chip boundaries do not read as hard edges -- but the RNG
+    # was unseeded, so two identical calls produced different pixels and a re-render never reproduced
+    # the delivered image. Seed it on the mosaic centre: deterministic, and still decorrelated between
+    # alerts. Measured fabrication: 0.3-1.2% of a median-rate alert's wide view, 8-13% for the fastest
+    # (whose mosaic reaches past the focal plane), and 100% when every candidate panel is unreadable.
+    _rng = np.random.default_rng(abs(hash((round(float(cra), 6), round(float(cdec), 6), out_px))) % (2**32))
+    stamp[~filled] = _rng.normal(0.0, 1.0, int((~filled).sum())).astype(np.float32)  # chip gaps
     stamp = np.clip(stamp, -CLIP_SIGMA, CLIP_SIGMA).reshape(out_px, out_px).astype(np.float16)
     pos = np.full((MAXEP, 2), np.nan, np.float32)
     for i, (mra, mdec) in enumerate(members[:MAXEP]):
@@ -192,6 +198,8 @@ def _wide_mosaic_one(members, endpoints, out_px, cand_paths, load_fn, affine, cr
             wends[i, j] = _radec_to_grid(ra, dec, cra, cdec, apx, out_px)
     return stamp, pos, np.float32(apx), wends, filled_frac
 
+
+WIDE_MIN_FILLED = 0.5   # below this the mosaic is mostly fabricated noise, not pixels
 
 _PANEL_CACHE = {}                # per-worker LRU of loaded panels (mosaic neighbours are re-read
 _PANEL_CACHE_MAX = 12            # across anchors of the same visit; a small cache kills that cost)
@@ -295,7 +303,11 @@ def _wide_visit_job(args):
             cand_paths = [(d, p) for _dd, d, p in cands]
             stamp, pos, apx, wends, ff = _wide_mosaic_one(members, endpoints, kw, cand_paths, load_fn,
                                                           None, (bcra, bcdec))
-            out.append((ai, stamp, pos, apx, True, wends))
+            # `ff` was computed, returned, and then DISCARDED for a hardcoded True. The total-failure
+            # path (no candidate panel readable) yields filled_frac 0.0 -- a stamp of pure fabricated
+            # noise, std 0.997 with >4-sigma pixels against a VMAX of 6, so it renders as a source in
+            # an empty field. wide_ok now carries what was actually measured.
+            out.append((ai, stamp, pos, apx, bool(ff >= WIDE_MIN_FILLED), wends))
     except Exception as e:
         print(f"[cutouts] WARN wide visit {visit} failed ({e})", flush=True)
         for (ai, _m, _e) in wides:

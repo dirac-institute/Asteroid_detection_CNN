@@ -1287,6 +1287,36 @@ def main():
                  # one op parameter an op-point file could not state. Additive: the frozen alert op
                  # carries no such key, so its behaviour is byte-unchanged (floor stays 6.0).
                  "len_db_min": "--len-db-min"}
+        # An op key the linker has no flag for is SILENTLY DROPPED, and it reads as applied because
+        # the log line lists only what was consumed. op_2v_stream_1k.json -- the op written for the
+        # 1k deliverable -- carries 6 such keys (bright_star_*, morphology_dipole_veto,
+        # drop_confident_fp, drop_stationary_single); the one tool that honoured them was filter_op,
+        # whose caller was deleted with the stale launch scripts. Two of those six now have no
+        # implementation anywhere. An op file is a specification of the product, so state what is
+        # unenforceable rather than pretend otherwise.
+        _NOT_LINKER = {
+            "bright_star_proximity": "merge_dets --refcat (detection time)",
+            "bright_star_radius_arcsec": "merge_dets --refcat-radius",
+            "bright_star_mag_max": "merge_dets --refcat-mag-max",
+            "morphology_dipole_veto": "detection-time is_dipole + rank_alerts demotion",
+            "drop_confident_fp": "NOT IMPLEMENTED anywhere",
+            "drop_stationary_single": "NOT IMPLEMENTED anywhere (deliberately kept + labelled)",
+        }
+        # Op files also carry PROVENANCE -- what the op is for, what it was calibrated on, what it
+        # claims. Those are documentation, not parameters, and must not be mistaken for a dropped cut.
+        _PROVENANCE = {"claim", "notes", "product", "status", "model_version", "calibrated_on",
+                       "data_release", "links", "modes", "heliolinx", "score_min_note"}
+        _unknown = [k for k in _op if k not in _flag and k not in _NOT_LINKER
+                    and k not in _PROVENANCE and not k.startswith("_")]
+        if _unknown:
+            raise SystemExit(
+                f"[trail-link] op-point {a.op_point} sets keys the linker does not apply and would "
+                f"SILENTLY IGNORE: {sorted(_unknown)}. Either remove them or add them to the flag "
+                f"map -- an op file that states a cut the code never makes is worse than no file.")
+        _elsewhere = [f"{k} -> {_NOT_LINKER[k]}" for k in _op if k in _NOT_LINKER]
+        if _elsewhere:
+            print(f"[trail-link] op keys NOT enforced here (applied elsewhere in the chain): "
+                  f"{'; '.join(_elsewhere)}", flush=True)
         _applied = [f"{k}={_op[k]}" for k, fl in _flag.items()
                     if k in _op and fl not in sys.argv and (setattr(a, k, _op[k]) or True)]
         if _applied:
