@@ -1,6 +1,33 @@
 #!/usr/bin/env python3
 """END-TO-END delivered-at-1k completeness for ADCNN, the stack, and the merged product.
 
+*** THE MERGE PENALTY THIS SCRIPT MEASURED (8.01% -> 6.97%) IS A HARNESS ARTIFACT. DO NOT QUOTE IT. ***
+
+Traced 2026-08-12. The loss is at LINKING, not the budget (532 -> 448 movers linked; only 5 lost at
+the 1000-cut), and 75% of the lost movers' detections were claimed by an alert containing a stack
+member. Root cause: `stack_detect.py:155` hard-codes `score=1.0` for EVERY stack detection, so in the
+injection catalogue the stack's score is min = median = max = 1.000 against ADCNN's 0.500-0.999
+(median 0.607). P(real) is a logistic fit on (score_min, chi2, mfsnr_min), `--claim-order preal`
+claims the highest P(real) first, and a detection can be claimed once -- so stack-containing pairs
+outrank real ADCNN pairs and steal their detections. Stack-containing alerts are 27.8% of the merged
+stream but 97.3% of the top 2000 by priorityScore, despite WORSE chi2 (16.68 vs 14.43).
+
+PRODUCTION IS NOT LIKE THIS: in 0706 dets_merged.csv the stack score is a real distribution (median
+0.6228, only 0.6% exactly 1.0) because ingest_diasource reads the stack's `reliability`. Its
+`score=... if len(rel) == n0 else 1.0` fallback is a latent version of the same trap -- it would put
+every stack row at the maximum score if the reliability column were ever missing or mis-sized -- but
+it is not firing on the delivered nights.
+
+What DOES survive from this run, because it was measured on production data too: the stack's trail
+geometry deficit (only 1.1% of 559,683 production stack rows have len_db >= 6, against 82.1% of
+ADCNN's) and the mf_snr scale difference (production stack median 8.66 vs ADCNN 3.67). mf_snr is a
+P(real) input, so a milder version of the same ranking distortion is real in production -- but its
+size is UNMEASURED, and the number below is not an estimate of it.
+
+To measure the merge honestly, the harness stack catalogue needs realistic per-detection scores
+(stack_detect.py must carry reliability through, as ingest_diasource does) and the arms must be
+re-linked.
+
 This is the number the product actually delivers -- injected mover -> detected -> linked -> survives
 the full 1k op -> lands in the top 1000 by priorityScore. It is NOT the detection ceiling, which runs
 ~49% here and is the subject of completeness_hist.py.
