@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """END-TO-END delivered-at-1k completeness for ADCNN, the stack, and the merged product.
 
-*** THE MERGE PENALTY THIS SCRIPT MEASURED (8.01% -> 6.97%) IS A HARNESS ARTIFACT. DO NOT QUOTE IT. ***
+*** RESOLVED 2026-08-12. The 8.01% -> 6.97% "merge penalty" was a harness artifact and is RETRACTED.
+With realistic stack scores the merge is completeness-NEUTRAL: 7.93% vs 8.01% (gained 4, lost 7,
+p=0.55) and the flagship cell is IDENTICAL at 1.47% (gained 0, lost 0). Decisive detail: ADCNN alone
+and the rescored merge both link exactly 532 true movers, where the score=1.0 run linked only 448 --
+so the claim-competition theft was entirely the artifact. The merge also adds ZERO movers, consistent
+with the stack's missing trail geometry. ***
 
 Traced 2026-08-12. The loss is at LINKING, not the budget (532 -> 448 movers linked; only 5 lost at
 the 1000-cut), and 75% of the lost movers' detections were claimed by an alert containing a stack
