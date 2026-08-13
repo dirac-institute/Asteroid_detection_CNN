@@ -3,10 +3,9 @@
   "_scope": "NEO-focused: the 1-8 deg/day same-night rate band is KEPT (it is the physics scope of the 2-visit product, and the seeder+chi2 are calibrated inside it). Faster impactor-like rates (>8 deg/day) are OUT of this stream by construction -- widening the band is a separate, measured change (the seeder caps at rate_max 10).",
   "_volume": "Volume is NOT set by these gates. They are deliberately loose; the nightly count is fixed by taking the top --stream-top-n RANKED alerts for imaging (run_night default 10000), so the stream is the same size on a sparse night and a dense one. Measured on real night 20260630 (27 visits, 387,826 dets at score>=0.5): chi2<=5 -> 938 alerts, chi2<=15 -> 6,239. NOTE the count at a given chi2 must be MEASURED by running at that gate: chi2_2v_max also feeds the partial-chi2 prefilter and the pair dedup, so a looser run's chi2 distribution does NOT predict a tighter run's count (chi2<=5 subset of the chi2<=15 run = 645, vs 938 when actually run at 5).",
   "_ranking": "Alerts are ranked by the standard rank_alerts ordering (demotion class, then priorityScore = tier base + 0.95*weakest-member CNN score + dt bonus), so vetoed alerts sort last and the frozen science alerts keep their relative order. At stream volume this is dominated by the CNN score; a chi2/mfsnr-aware CALIBRATED reality probability is the intended upgrade.",
-
-  "score_min": 0.50,
+  "score_min": 0.5,
   "score_candidate_min": 0.0,
-  "score_hiconf": 0.80,
+  "score_hiconf": 0.8,
   "mfsnr_min_2v": 0.0,
   "chi2_2v_max": 30.0,
   "rate_lo_2v": 1.0,
@@ -20,5 +19,6 @@
   "promote_tol_arcsec": 5.0,
   "promote_from": "survivors",
   "seed_3v_arc_min": 120.0,
-  "alerts_top_n": 10000
+  "alerts_top_n": 10000,
+  "_score_min_CEMENTED": "score_min 0.70 CONFIRMED 2026-08-13 at the delivered 1k budget: 0.50/0.60/0.70 give IDENTICAL delivered completeness (flagship 2.09% on 20260706) while linking 36,974/19,537/9,668 alerts, so the floor buys tractability at zero science cost. 0.80 is the first value that degrades (flagship 1.73%). op_2v_stream.json's 0.50 is retained only for sparse-night experiments -- run_night defaults every night to the 0.70 op."
 }

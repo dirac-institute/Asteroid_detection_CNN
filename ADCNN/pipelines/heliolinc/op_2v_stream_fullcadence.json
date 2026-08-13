@@ -19,5 +19,6 @@
   "promote_tol_arcsec": 5.0,
   "promote_from": "survivors",
   "seed_3v_arc_min": 120.0,
-  "alerts_top_n": 20000
+  "alerts_top_n": 20000,
+  "_score_min_CEMENTED": "score_min 0.70 CONFIRMED 2026-08-13 at the delivered 1k budget: 0.50/0.60/0.70 give IDENTICAL delivered completeness (flagship 2.09% on 20260706) while linking 36,974/19,537/9,668 alerts, so the floor buys tractability at zero science cost. 0.80 is the first value that degrades (flagship 1.73%). op_2v_stream.json's 0.50 is retained only for sparse-night experiments -- run_night defaults every night to the 0.70 op."
 }

@@ -116,7 +116,7 @@ def grid_table(T, hit, label):
 
 
 def main():
-    arms = [(s, f"{V}/sweep_a_s{str(s).replace('.','')[:3]}.jsonl") for s in SCORES]
+    arms = [(s, f"{V}/sweep_a_s{int(round(s*100)):03d}.jsonl") for s in SCORES]
     T = pd.read_csv(f"{V}/truth_v3.csv").reset_index(drop=True)
     d = scan(f"{V}/truth_v3.csv", arms, "TUNE 0706")
     if not len(d):
@@ -136,7 +136,7 @@ def main():
     # the SNR x trail-length shape at the argmax cells
     op = json.load(open(OP1K))
     for tag, cell in (("BEST-ALL", b), ("BEST-FLAGSHIP", bf)):
-        path = f"{V}/sweep_a_s{str(cell.score).replace('.','')[:3]}.jsonl"
+        path = f"{V}/sweep_a_s{int(round(float(cell.score)*100)):03d}.jsonl"
         if not os.path.exists(path):
             continue
         oids, _ = deliver([json.loads(l) for l in open(path)], T, int(cell.chi2), op)

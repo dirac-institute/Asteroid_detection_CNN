@@ -1360,6 +1360,8 @@ def main():
             "morphology_dipole_veto": "detection-time is_dipole + rank_alerts demotion",
             "drop_confident_fp": "NOT IMPLEMENTED anywhere",
             "drop_stationary_single": "NOT IMPLEMENTED anywhere (deliberately kept + labelled)",
+            "budget": "ADCNN.qa.filter_op (delivered-alert budget, for chi2_2v_max=auto)",
+            "target_fill": "ADCNN.qa.filter_op (survivors/budget target, for chi2_2v_max=auto)",
         }
         # Op files also carry PROVENANCE -- what the op is for, what it was calibrated on, what it
         # claims. Those are documentation, not parameters. Discriminate by VALUE TYPE rather than by
@@ -1378,6 +1380,24 @@ def main():
         if _elsewhere:
             print(f"[trail-link] op keys NOT enforced here (applied elsewhere in the chain): "
                   f"{'; '.join(_elsewhere)}", flush=True)
+        # "auto" IS A filter_op CONCEPT, NOT A LINKER ONE. op_2v_stream_1k.json now carries
+        # chi2_2v_max: "auto" (filter_op picks the chi2 that fills the delivered budget, because the
+        # optimum does not transfer across nights -- 8 on 20260706, 16 on 20260713, same 1.9x fill).
+        # chi2_2v_max IS in the flag map above, so handing that op to the LINKER would assign the
+        # string and then compare it numerically. Refuse with the reason rather than crash later.
+        # ONLY the keys whose "auto" the linker cannot resolve. max_arc_2v_min='auto' is a
+        # LEGITIMATE long-standing value that the linker resolves itself, so a blanket
+        # "refuse any non-numeric string" check breaks every normal link -- it did, on the first run.
+        _AUTO_NOT_OURS = {"chi2_2v_max", "score_min", "mfsnr_min_2v", "len_db_min",
+                          "rate_lo_2v", "rate_hi_2v"}
+        for _k, _v in _op.items():
+            if _k in _AUTO_NOT_OURS and isinstance(_v, str) and not _v.replace(".", "", 1).isdigit():
+                raise SystemExit(
+                    f"[trail-link] op-point {a.op_point} sets {_k}={_v!r}, which is not a number. "
+                    f"'auto' values are resolved by ADCNN.qa.filter_op against a delivered budget, "
+                    f"not by the linker -- this looks like a DELIVERY op passed to the LINK stage. "
+                    f"The linker wants op_2v_stream_fullcadence.json; op_2v_stream_1k.json is the "
+                    f"filter_op op-point.")
         _applied = [f"{k}={_op[k]}" for k, fl in _flag.items()
                     if k in _op and fl not in sys.argv and (setattr(a, k, _op[k]) or True)]
         if _applied:

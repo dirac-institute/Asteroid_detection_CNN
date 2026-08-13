@@ -95,10 +95,64 @@ def _near_bright_star(alerts, refcat_path, radius_arcsec, mag_max):
     return hit
 
 
+TARGET_FILL = 1.9      # survivors / budget at the measured FLAGSHIP optimum (1.75 on 0706, 1.99 on 0713)
+
+
+def _auto_chi2(alerts_path, op, budget=1000, target_fill=TARGET_FILL, grid=None):
+    """Smallest chi2 whose survivor count reaches target_fill*budget, using only the cheap gates.
+
+    chi2 filters AFTER the orbit solve, so every candidate value is evaluated on the SAME linked
+    stream -- this costs one pass over the alerts, no relinking.
+    """
+    grid = grid or [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 22, 26, 30]
+    al = [json.loads(l) for l in open(alerts_path)]
+    want = target_fill * budget
+    counts = []
+    for c in grid:
+        n = sum(1 for a in al
+                if (_G(a, "orbit", "chi2", d=None) is None
+                    or float(_G(a, "orbit", "chi2", d=1e9)) <= c)
+                and _G(a, "vetting", "mfsnr_min", d=0) >= op["mfsnr_min_2v"]
+                and np.mean(_G(a, "vetting", "trail_len_px", d=[0]) or [0]) >= op["len_db_min"]
+                and op["rate_lo_2v"] <= _G(a, "motion", "rate_degday", d=0) <= op["rate_hi_2v"])
+        counts.append((c, n))
+        if n >= want:
+            break
+    pick = next((c for c, n in counts if n >= want), counts[-1][0])
+    n_at = dict(counts)[pick]
+    print(f"[filter_op] chi2_2v_max=auto -> {pick} ({n_at:,} survivors before the vetoes, "
+          f"target {want:,.0f} = {target_fill}x budget {budget}). A fixed chi2 does not transfer "
+          f"across cadence; the fill ratio does (measured optima 1.75 on 20260706, 1.99 on 20260713).",
+          flush=True)
+    if n_at < want:
+        print(f"[filter_op] NOTE: even chi2<={pick} yields only {n_at:,} -- this night cannot fill "
+              f"{want:,.0f}; the budget is not the binding constraint here, linking is.", flush=True)
+    return pick
+
+
 def filter_stream(alerts_path, dets_path, op_path, out_path, refcat_path=None, allow_unranked=False):
     from ADCNN.qa.select_clean import _confident_fp
     op = json.load(open(op_path))
     CHI2, MF, LEN = op["chi2_2v_max"], op["mfsnr_min_2v"], op["len_db_min"]
+    # chi2_2v_max: "auto" -- pick the chi2 that fills the delivered budget to TARGET_FILL.
+    #
+    # A FIXED chi2 IS THE WRONG PARAMETERISATION. Measured on two injected nights (5,315 and 4,267
+    # movers, uniform SNR 2-10 x seven trail lengths), scanning chi2 at the delivered 1k budget:
+    #
+    #     night   FLAGSHIP-optimal chi2   survivors   survivors/budget
+    #     0706            8                 1,749           1.75
+    #     0713           16                 1,991           1.99
+    #
+    # The optimal chi2 differs 2x between nights; the optimal FILL RATIO does not. Same for the ALL
+    # optimum (3.15 and 2.94). The mechanism is visible in the counts: chi2 too tight UNDER-FILLS the
+    # budget -- 0713 at the shipped chi2=8 ships 692 of 1,000 slots and delivers 2.72% flagship
+    # against 3.80% achievable, losing 28% relative for nothing -- while chi2 too loose OVER-fills and
+    # displaces faint-fast movers (0706 flagship 2.09% -> 1.44% going 8 -> 12, p=0.035 paired).
+    # Targeting the fill ratio is what transfers across cadence; a fixed chi2 is only ever tuned for
+    # the night it was tuned on.
+    if isinstance(CHI2, str) and CHI2.lower() == "auto":
+        CHI2 = _auto_chi2(alerts_path, op, budget=op.get("budget", 1000),
+                          target_fill=op.get("target_fill", TARGET_FILL))
     RLO, RHI = op["rate_lo_2v"], op["rate_hi_2v"]
     # Defaults are the PRE deep-refcat-fix values, so an op-point that enables proximity but omits
     # the depth keys silently loses 99.5% of the veto (MEASURED: 182 -> 1 flagged of 200 alerts).
