@@ -47,6 +47,10 @@ from pathlib import Path
 from ADCNN.config import OUTPUTS, load_pipeline, REPO
 
 HL = REPO / "ADCNN" / "pipelines" / "heliolinc"
+
+# linkable (len_db>=6) detections per visit that the stream needs to fill the 1k budget;
+# see _pick_score_min in run_night() for the measurement behind it.
+SCORE_FLOOR_TARGET_DENSITY = 2800
 DEFAULT_ALERT_OP = HL / "op_2v_alert.json"
 DISCOVERY_OP = HL / "link_op_point.json"
 FROZEN_ALERT_GOLDEN = {"score_min": 0.80, "chi2_2v_max": 5.0, "mfsnr_min_2v": 5.0,
@@ -221,6 +225,40 @@ def run(a):
     stream_op = a.stream_op_point or str(REPO / "ADCNN/pipelines/heliolinc/op_2v_stream_fullcadence.json")
     print(f"      stream op-point: {os.path.basename(stream_op)}"
           f"{' (explicit --stream-op-point)' if a.stream_op_point else ' (default: tractable on any cadence)'}")
+
+    # SCORE FLOOR ADAPTS TO DENSITY, for the same reason chi2 does: FILL THE BUDGET.
+    #
+    # The 2026-08-13 scan found score_min 0.50/0.60/0.70 give IDENTICAL delivered completeness, and
+    # concluded 0.70 was free. That holds only where the stream comfortably exceeds the budget, which
+    # is all the scan ever saw. On a genuinely sparse night it starves the product: 20260630 at 0.70
+    # linked 217 alerts and delivered 145 of 1,000 slots, against 12,114 alerts and a full budget at
+    # 0.50. Seeding goes as density^2, so the floor bites ~quadratically as a night thins out.
+    #
+    # MEASURED linkable (len_db>=6) detections per visit, and the alerts they produced:
+    #     20260706 injections  @0.70  6,289/visit  -> 9,668 alerts
+    #     20260630 real        @0.70  1,112/visit  ->   217 alerts
+    #     20260630 real        @0.60  2,859/visit
+    # Targeting ~1.9x the 1k budget in alerts, and using alerts ~ density^2, the density that
+    # delivers it is ~2,800/visit -- which is where 20260630 sits at 0.60. So: take the HIGHEST floor
+    # whose density clears the target (cheapest link that still fills the budget), else step down.
+    def _pick_score_min(dets_csv):
+        import pandas as _pd
+        try:
+            _d = _pd.read_csv(dets_csv, usecols=lambda c: c in ("score", "len_db", "visit"),
+                              low_memory=False)
+        except Exception as e:
+            print(f"      score floor: cannot read {dets_csv} ({type(e).__name__}) -- leaving the "
+                  f"op's own score_min"); return None
+        _lk = _d[_d.len_db.fillna(0) >= 6.0]
+        _nv = max(int(_d.visit.nunique()), 1)
+        for _s in (0.70, 0.60, 0.50):
+            _dens = int((_lk.score >= _s).sum()) / _nv
+            if _dens >= SCORE_FLOOR_TARGET_DENSITY or _s == 0.50:
+                print(f"      score floor: {_s:.2f} ({_dens:,.0f} linkable dets/visit vs target "
+                      f"{SCORE_FLOOR_TARGET_DENSITY:,.0f}; seeding goes as density^2, so too high a "
+                      f"floor starves a sparse night and too low makes a dense one intractable)")
+                return _s
+        return 0.50
     out = Path(a.out) if a.out else OUTPUTS / "runs" / f"run_night_{a.night}"
     out.mkdir(parents=True, exist_ok=True)
     manifest = out / "manifest.csv"
@@ -558,6 +596,8 @@ def run(a):
             # (8.39% vs 8.02%). The proxy is not truth; none of those 12 has an MPC match.
             _bash(f"python -m ADCNN.linking.link_2visit --dets {_dets()} "
                   f"--known {out}/known.csv --out {sd}/tracks.csv --op-point {stream_op} "
+                  + (f"--score-min {_sm} " if (_sm := _pick_score_min(_dets())) is not None else "")
+                  + 
                   f"--npt 2 --min-epochs 2 --seed-2v chord{static} --train-veto "
                   f"--claim-order preal --rank-by chi2 "
                   f"--alerts-out {sd}/alerts.jsonl", a.dry_run)
