@@ -252,6 +252,12 @@ def _panel_job(args):
                  np.full((2, 2), np.nan, np.float32)) for (ai, ei, _r, _d, _e) in zooms]
 
 
+def _anchor_det(entry):
+    """Anchor detector of a wide entry, or None for older 3-tuples (kept backward-compatible so a
+    half-written cache from a previous version still loads)."""
+    return entry[3] if len(entry) > 3 else None
+
+
 def _wide_visit_job(args):
     """All wide cuts of ONE visit, mosaicked across its detectors. Each visit's panels are loaded
     at most once (local cache), so cost is O(panels of the visit) not O(alerts). Undetected
@@ -293,7 +299,7 @@ def _wide_visit_job(args):
             pred_center = dict(det_centers)                # fall back to detected only
         tmpl = next(iter(det_paths.values())); tmpl_tok = _det_token(tmpl)
 
-        for (ai, members, endpoints) in wides:
+        for (ai, members, endpoints, _det) in wides:
             bcra = float(np.mean([m[0] for m in members])); bcdec = float(np.mean([m[1] for m in members]))
             cd = np.cos(np.radians(bcdec))
             cands = []
@@ -314,7 +320,7 @@ def _wide_visit_job(args):
             out.append((ai, stamp, pos, apx, bool(ff >= WIDE_MIN_FILLED), wends))
     except Exception as e:
         print(f"[cutouts] WARN wide visit {visit} failed ({e})", flush=True)
-        for (ai, _m, _e) in wides:
+        for (ai, _m, _e, _d) in wides:
             out.append((ai, np.zeros((kw, kw), np.float16), np.full((MAXEP, 2), np.nan, np.float32),
                         np.float32(np.nan), False, np.full((MAXEP, 2, 2), np.nan, np.float32)))
     return out
@@ -360,15 +366,41 @@ def build(alerts_path, dets_path, out_npz, stamp_px=96, wide_px=220, workers=8, 
                                      ends.get((ai, ei))))
         v0 = int(eps[0]["visit"])
         if v0 in det_paths_by_visit:                       # anchor visit has readable panels
+            # carry the anchor detector so the jobs below can be chunked on it
+            _d0 = eps[0].get("detector")
             wide_by_visit[v0].append((ai, [(float(e["ra"]), float(e["dec"])) for e in eps],
-                                      [ends.get((ai, j)) for j in range(len(eps))]))
+                                      [ends.get((ai, j)) for j in range(len(eps))],
+                                      int(_d0) if _d0 is not None else None))
 
     zoom_jobs = [(p, zoom_by_panel[p], stamp_px) for p in sorted(zoom_by_panel)]
-    wide_jobs = [(v, wide_by_visit[v], det_paths_by_visit[v], det_centers_by_visit.get(v, {}),
-                  det_tokens, wide_px, 0.5) for v in sorted(wide_by_visit)]
+    # WIDE JOBS ARE CHUNKED BY (visit, anchor detector), NOT BY VISIT.
+    #
+    # One job per visit made the stage serial on its biggest visit: MEASURED on 20260630, one visit
+    # held 8,998 of 13,406 wide mosaics (67%) while the other ten held 1,450 down to 1 -- and with
+    # the pool capped at 4 workers, three sat idle after ~2 minutes of CPU while one accumulated 66
+    # minutes and had still not emitted a single progress line after 70 wall-clock minutes. That one
+    # visit is the floor: no amount of extra workers could touch it.
+    #
+    # Chunking on the anchor DETECTOR is what makes this safe to split. The per-worker panel cache
+    # exists because a mosaic pulls its neighbouring detectors, so splitting a visit arbitrarily
+    # would re-read those panels in every chunk. Alerts sharing a detector share almost exactly the
+    # same neighbour set, so a detector-chunk touches the same panels a visit-chunk would have, just
+    # fewer times -- the cache hit rate is preserved and peak RAM per worker DROPS (a job now holds
+    # one detector's neighbourhood, not a whole focal plane).
+    #
+    # 20260630: 11 jobs (largest 8,998) -> 302 jobs (largest 126), a 71x lower serial floor.
+    wide_jobs = []
+    for v in sorted(wide_by_visit):
+        by_det = defaultdict(list)
+        for entry in wide_by_visit[v]:
+            by_det[_anchor_det(entry)].append(entry)
+        for det in sorted(by_det, key=lambda d: (d is None, d)):
+            wide_jobs.append((v, by_det[det], det_paths_by_visit[v],
+                              det_centers_by_visit.get(v, {}), det_tokens, wide_px, 0.5))
     print(f"[cutouts] {len(alerts)} alerts -> {sum(len(v) for v in zoom_by_panel.values())} zooms "
           f"over {len(zoom_jobs)} panels + {sum(len(v) for v in wide_by_visit.values())} wide "
-          f"over {len(wide_jobs)} visits ({n_missing} epochs with no panel path)", flush=True)
+          f"over {len(wide_jobs)} detector-chunks in {len(wide_by_visit)} visits "
+          f"({n_missing} epochs with no panel path)", flush=True)
 
     zres, wres = [], []
     if workers > 1 and (len(zoom_jobs) > 1 or len(wide_jobs) > 1):
@@ -380,12 +412,15 @@ def build(alerts_path, dets_path, out_npz, stamp_px=96, wide_px=220, workers=8, 
                 zres.extend(zo)
                 if n % 25 == 0 or n == len(zoom_jobs):
                     print(f"[cutouts] zoom {n}/{len(zoom_jobs)} panels", flush=True)
-        ww = max(1, min(workers, 4))                       # wide jobs each hold many ~200MB panels
+        # The cap of 4 was there because a per-VISIT job held many ~200MB panels at once. A
+        # per-DETECTOR job holds only that detector's neighbourhood, so the cap can go: the binding
+        # constraint is now the same worker count the zoom stage already runs at.
+        ww = max(1, workers)
         with ProcessPoolExecutor(max_workers=ww, mp_context=ctx) as ex:
             for n, wo in enumerate(ex.map(_wide_visit_job, wide_jobs), 1):
                 wres.extend(wo)
-                if n % 5 == 0 or n == len(wide_jobs):
-                    print(f"[cutouts] wide {n}/{len(wide_jobs)} visits", flush=True)
+                if n % 25 == 0 or n == len(wide_jobs):
+                    print(f"[cutouts] wide {n}/{len(wide_jobs)} detector-chunks", flush=True)
     else:
         for j in zoom_jobs:
             zres.extend(_panel_job(j))
