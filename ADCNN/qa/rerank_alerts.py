@@ -44,6 +44,13 @@ def p_real(alert, coef, domain=None):
     if not all(math.isfinite(x) for x in (s, c, m)):
         return None
     if domain:
+        # CLIP within reason, REFUSE beyond it. mf_snr from a degenerate panel reaches 5.6e9 --
+        # twelve orders outside the fit support -- and clipping that to the domain maximum hands the
+        # most corrupt panels the most "real"-looking feature value the model can produce (2 such
+        # alerts sat in a delivered top-1000). A value 100x past the calibration domain is not a
+        # measurement; return None so the alert sorts with the unrankable rather than the best.
+        if m > 100.0 * domain["mfsnr_min"][1]:
+            return None
         s = min(max(s, domain["score_min"][0]), domain["score_min"][1])
         c = min(max(c, domain["chi2"][0]), domain["chi2"][1])
         m = min(max(m, domain["mfsnr_min"][0]), domain["mfsnr_min"][1])

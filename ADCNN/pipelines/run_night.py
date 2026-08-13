@@ -416,20 +416,37 @@ def run(a):
         return merged_dets if _ok(merged_dets) else (out / 'adcnn_dets_masked.csv')
 
     def s_stack_merge():
-        """ALWAYS-ON union of the stack's DIA sources with ADCNN's detections.
+        """ALWAYS-ON union of the stack's DIA sources with ADCNN's detections, BOTH sides ring-cleaned.
 
-        The two detectors are complementary, measured on injected truth: detection is a TIE
-        (ADCNN 38.6% vs stack 39.1%) but 9.2% of movers are ADCNN-only and 9.7% stack-only; end-to-end
-        ADCNN 18.8% vs stack 7.2%, with 3.4% found ONLY by the stack. ADCNN owns the long-trail/faint
-        end (the stack's own trail plugins NaN above ~20px at ANY brightness); the stack owns the
-        short-trail/bright end. An ADCNN-only product forfeits ~3.4 points of real movers (~18%
-        relative). Rings are dropped from the ADCNN side BEFORE the union (chance links go as n1*n2).
-        Every row keeps `src`, so an alert member's provenance is always recoverable.
+        Numbers from the 2026-08-12/13 one-harness measurement (3,857 injected movers, trail-segment
+        matching), which SUPERSEDE the older figures that stood here. DETECTION both-epoch: ADCNN
+        49.8%, stack 37.0%, union 53.8% -- a tie on short trails (44.5 vs 44.2 at 0-8px), diverging
+        with length to 49.0 vs 23.1 at 44-60px; the stack contributes 154 movers ADCNN misses.
+        END-TO-END at the 1k budget the merge is NEUTRAL (9.26% vs 9.28%; flagship 2.06% vs 2.16%):
+        the stack's unique detections carry no usable trail geometry -- DPDD trailLength is NaN on
+        ~31% and near-PSF elsewhere on that population -- so the trail-based linker cannot pair them,
+        and re-measuring them with OUR estimator provably cannot fix that (the only gate that stops it
+        saturating is our own seg+stage-2, and what passes that gate IS what ADCNN already found).
+        The merge stays on because it is measured harmless at the budget, keeps the short-trail/bright
+        complementarity, and preserves the ceiling for a future geometry fix (running
+        lsst.meas.extensions.trailedSources ourselves, which the DRP does not).
+        merge_dets cleans BOTH sides with the deep refcat before the union -- the stack side measured
+        61.2% ring-positioned vs 10.4% chance and its own dipole columns are inert -- and dedups
+        against the FULL pre-cleaning catalogue so deleted rings' stack copies cannot re-enter.
+        Every row keeps `src`; unmeasured fields stay NaN, never defaulted to clean-looking values.
         Best-effort: if the stack ingest fails the merge falls back to ADCNN-only and says so."""
         if a.no_stack_merge:
             print("      (--no-stack-merge: ADCNN-only, forfeits the stack-only movers)"); return
+        # STALENESS, not just existence. dets_merged.csv is derived from adcnn_dets_masked.csv; the
+        # Aug-11 mf_snr repair reached the ADCNN catalogue and NOT the merge, and nothing noticed
+        # for four days because this guard reused on existence alone.
         if _ok(merged_dets) and not a.force:
-            print("      (dets_merged.csv exists; reuse)"); return
+            _src_m = (out / "adcnn_dets_masked.csv")
+            if _src_m.exists() and _src_m.stat().st_mtime > merged_dets.stat().st_mtime:
+                print("      dets_merged.csv is OLDER than adcnn_dets_masked.csv -- the ADCNN "
+                      "catalogue changed after the merge (e.g. a post-hoc repair). REBUILDING.")
+            else:
+                print("      (dets_merged.csv exists and is newer than its inputs; reuse)"); return
         if not a.collection:
             print("      WARN: no --collection, cannot ingest DIA sources -- ADCNN-only"); return
         try:

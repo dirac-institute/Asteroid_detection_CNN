@@ -1,18 +1,27 @@
 #!/usr/bin/env python3
 """Merge the STACK's DIA sources into the ADCNN detection catalogue. ALWAYS ON in production.
 
-The two detectors are complementary, measured against injected truth (3,857 movers, rate >1 deg/day,
-SNR 2-10, each system run with its OWN code; outputs/runs/pa_validate + the adcnn-vs-stack-truth note):
+Measured 2026-08-12/13 on 3,857 injected movers with ONE matching procedure over both catalogues
+(trail-segment matching; supersedes older figures produced by two different matchers):
 
-    DETECTION   ADCNN 38.6%   stack 39.1%   -- a TIE;  9.2% ADCNN-only,  9.7% stack-only
-    END-TO-END  ADCNN 18.8%   stack  7.2%           15.1% ADCNN-only,  3.4% stack-only
+    DETECTION both-epoch   ADCNN 49.8%   stack 37.0%   union 53.8%
+      (a TIE at 0-8px: 44.5 vs 44.2; diverging with trail length to 49.0 vs 23.1 at 44-60px;
+       the stack finds 154 both-epoch movers ADCNN misses)
+    END-TO-END at the 1k budget   ADCNN 9.26%   merged 9.28%   -- NEUTRAL (flagship 2.06% vs 2.16%)
 
-ADCNN owns the long-trail / faint end: its matched filter recovers trail length at 0.84-1.03x out to
-56px, while the stack's OWN ext_trailedSources Naive AND Veres plugins return NaN above ~20px
-REGARDLESS of brightness (verified at mag 19.0) -- so the stack detects long trails but cannot hand the
-linker usable geometry. The stack owns the short-trail / bright end (<=14px, 1-2 deg/day) where PSF
-detection is optimal. Neither subsumes the other: an ADCNN-only product forfeits the ~3.4 points of
-real movers only the stack finds (~18% relative), and the merged upper bound is ~22.2%.
+The union ceiling exceeds the delivered gain because the stack's unique detections carry no usable
+trail geometry: DPDD trailLength is NaN on ~31% of rows and near-PSF on the stack-only population,
+and this linker is built on trail-vs-chord agreement. Re-measuring those rows with ADCNN's template
+bank cannot unlock them -- the only gate that stops it saturating is ADCNN's own seg+stage-2 chain,
+and what passes that gate is what ADCNN already detected (measured: 2 rescuable of 992). Unlocking
+needs a trail measurement independent of our segmentation, e.g. running
+lsst.meas.extensions.trailedSources ourselves; the DRP does not run it.
+
+BOTH sides are ring-cleaned here, with the same deep-refcat cut, BEFORE the union: the ADCNN side via
+is_dipole/proximity, the stack side via proximity alone because its own dipole columns are inert on
+the DRP output (dipoleFluxDiff NaN or exactly 0 everywhere; measured 61.2% of stack rows
+ring-positioned vs 10.4% chance). The dedup runs against the FULL pre-cleaning ADCNN catalogue so the
+stack's copies of deleted rings cannot re-enter as "NEW".
 
 ORDER IS MANDATORY: ADCNN detections are ~18-35% bright-star RING residuals on a real night, and the
 chance-link rate goes as n1*n2 -- merging a clean external catalogue into an uncleaned one compounds
