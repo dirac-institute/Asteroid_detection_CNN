@@ -61,8 +61,11 @@ for N in "${NIGHTS[@]}"; do
     # Delete ONLY what the fixes invalidate. Detection stays.
     rm -f  "$D/dets_merged.csv" "$D/stack_dets.csv" "$D/.complete" "$D/SHEETS_INVALID.txt"
     rm -rf "$D/stream" "$D/stream_1k"
+    # --stream-workers 32: the wide stage now chunks by (visit, detector) rather than by visit, so
+    # its parallelism is bounded by chunk count (hundreds) instead of visit count (tens) and the old
+    # 4-worker RAM cap is gone. 32 of 128 cores leaves headroom for the linker's own pool.
     python -m ADCNN.pipelines.run_night --night "$N" --collection "$COLL" \
-        --visits auto --out "$D" --keep-cutouts
+        --visits auto --out "$D" --keep-cutouts --stream-workers 32
     RC=$?
     echo "### run_night rc=$RC"
     # ---- the ~1k clean deliverable, rebuilt from the corrected stream ----
@@ -72,7 +75,7 @@ for N in "${NIGHTS[@]}"; do
           --op "$OP1K" --out "$K/surv.jsonl" --refcat "$D/bright_refcat.parquet" \
         && head -n "$BUDGET" "$K/surv.jsonl" > "$K/topk.jsonl" \
         && python -m ADCNN.qa.alert_cutouts --alerts "$K/topk.jsonl" --dets "$D/dets_merged.csv" \
-              --out "$K/_cut.npz" --stamp-px 96 --workers 16 \
+              --out "$K/_cut.npz" --stamp-px 96 --workers 32 \
         && python -m ADCNN.qa.alert_morphology --alerts "$K/topk.jsonl" --cutouts "$K/_cut.npz" \
               --out "$K/_morph.npz" \
         && python -m ADCNN.qa.select_clean --alerts "$K/topk.jsonl" --morph "$K/_morph.npz" \
