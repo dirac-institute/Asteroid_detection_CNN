@@ -73,6 +73,32 @@ def merge(adcnn_path, stack_path, out_path, dedup_arcsec=1.5, drop_rings=True, v
         A.to_csv(out_path, index=False)
         return A
     S["src"] = "stack"
+    # CLEAN THE STACK SIDE TOO, symmetrically, before the union. It was never cleaned at all:
+    # ingest_diasource's dipole drop is INERT on the DRP output (dipoleFluxDiff NaN on 72.4% and
+    # exactly 0 on the rest -- nine nights, 3,880,041 sources, zero dropped), so the only working
+    # ring lever is the same deep-refcat proximity cut the ADCNN side gets. MEASURED on the real
+    # 0706 stack catalogue with the production ring_mask and an OFFSET NULL (positions shifted
+    # 20-60", the same calibration the ADCNN cut shipped with): 61.2% of stack rows sit within 2.5"
+    # of a mag<21 star against a 10.4% chance rate -- a 5.9x excess, 50.8 points of genuine
+    # star-locked contamination. On the linkable subset (len_db>=6, score>=0.5) it is 27.3%. The
+    # cost side of this cut was already established when it shipped for ADCNN: 2.7% of real movers
+    # (offset null), ~20:1. A merge that ring-cleans one side and not the other undoes its own
+    # cleaning through the other door.
+    if drop_rings and refcat:
+        s_ring = ring_mask(S, refcat_path=refcat, radius_arcsec=refcat_radius,
+                           mag_max=refcat_mag_max, use_dipole=("is_dipole" in S.columns
+                                                               and S.is_dipole.notna().any()),
+                           verbose=False)
+        S = S[~s_ring].reset_index(drop=True)
+        if verbose:
+            print(f"[merge] stack {len(S)+int(s_ring.sum()):,} -> {len(S):,} after dropping "
+                  f"{int(s_ring.sum()):,} ring-positioned rows ({100*s_ring.mean():.1f}%) via the "
+                  f"same deep-refcat cut the ADCNN side gets (measured excess over chance: 5.9x)",
+                  flush=True)
+    elif drop_rings and verbose:
+        print("[merge] WARNING: no --refcat, so the STACK side is merged UNCLEANED -- its own dipole "
+              "columns cannot flag anything (measured inert) and 61.2% of its rows are "
+              "ring-positioned. Pass --refcat.", flush=True)
     # keep only the stack detections ADCNN did not already find, so one object is one row
     tol = 2 * np.sin(np.radians(dedup_arcsec / 3600.0) / 2)
     keep = np.ones(len(S), bool)
