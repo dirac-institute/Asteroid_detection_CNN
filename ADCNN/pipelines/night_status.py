@@ -139,10 +139,23 @@ def status(run_dir):
         except (json.JSONDecodeError, OSError):
             fp = None
         if fp:
+            # HASH THE CUT PREFIX, not the whole file. alert_cutouts records the fingerprint over
+            # `alerts[:limit]` and run_night always passes --limit (default 20000), so hashing every
+            # line reports CACHE MISMATCH for any night whose stream exceeds the limit -- exactly the
+            # prefix bug already fixed in alert_sheets._assert_cache_matches, which I fixed there and
+            # not here. It fired on 20260711 (25,439 alerts, cache for 20,000) whose images were in
+            # fact correct: "20000 files, top 20000 expected, 0 dup, 0 missing, 0 orphan".
             import hashlib
             h = hashlib.sha256()
+            _cap = None
+            try:
+                _cap = json.load(open(mp)).get("n_alerts")
+            except (json.JSONDecodeError, OSError):
+                pass
             with open(ap) as f:
-                for line in f:
+                for _i, line in enumerate(f):
+                    if isinstance(_cap, int) and _i >= _cap:
+                        break
                     for e in (json.loads(line).get("epochs") or []):
                         h.update(f"{e.get('visit',-1)}:{e.get('detector',-1)};".encode())
                     h.update(b"|")
