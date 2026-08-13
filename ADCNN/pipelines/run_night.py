@@ -461,12 +461,25 @@ def run(a):
                 print("      (dets_merged.csv exists and is newer than its inputs; reuse)"); return
         if not a.collection:
             print("      WARN: no --collection, cannot ingest DIA sources -- ADCNN-only"); return
+        # THE PROMPT COLLECTIONS LIVE IN `embargo`, NOT IN THE DEFAULT SCIENCE REPO. Passing
+        # a.butler_repo (default dp2_prep) raised MissingCollectionError, the fail-safe below caught
+        # it, and the night silently linked ADCNN-only -- so the entire stack merge, and the measured
+        # 9.26% -> 9.75% delivered-completeness gain that comes with ring-cleaning both sides, was
+        # absent from the product with only a WARN line to show for it. build_static_refcat two
+        # stages earlier already hardcodes BUTLER_REPO=embargo for exactly this reason; this is the
+        # same repo split, applied consistently. Override with --diasrc-butler-repo.
+        _dia_repo = getattr(a, "diasrc_butler_repo", None) or (
+            "embargo" if "/runs/prompt/" in (a.collection or "") else a.butler_repo)
         try:
-            _bash(f"bash -c '{lsst}; cd {REPO}; BUTLER_REPO={a.butler_repo} "
-                  f"python -m ADCNN.linking.ingest_diasource --butler-repo {a.butler_repo} "
+            _bash(f"bash -c '{lsst}; cd {REPO}; BUTLER_REPO={_dia_repo} "
+                  f"python -m ADCNN.linking.ingest_diasource --butler-repo {_dia_repo} "
                   f"--collection {shlex.quote(a.collection)} --out {stack_dets}'", a.dry_run)
         except subprocess.CalledProcessError:
-            print("      WARN: DIA-source ingest failed -- linking ADCNN-only (documented fail-safe)")
+            # NOT silent. An ADCNN-only night is a materially different product; say what was lost.
+            print(f"      WARN: DIA-source ingest FAILED against repo '{_dia_repo}' -- this night "
+                  f"links ADCNN-ONLY, forfeiting the stack merge (measured worth +0.5 pts delivered "
+                  f"completeness at the 1k budget). Documented fail-safe, but check the repo/"
+                  f"collection pair before accepting the product.")
             return
         # pass the deep refcat so the ring-drop still happens on catalogues predating is_dipole
         _bash(f"python -m ADCNN.linking.merge_dets --adcnn {out}/adcnn_dets_masked.csv "
@@ -644,6 +657,10 @@ def main(argv=None):
                          "the shipped night product uses 0.5; 0 = single-floor op only")
     ap.add_argument("--no-known", action="store_true",
                     help="write a header-only known.csv (prompt/embargo recipe: label post-hoc)")
+    ap.add_argument("--diasrc-butler-repo", default=None,
+                    help="Butler repo holding the DIA-source collection (default: `embargo` for a "
+                         "/runs/prompt/ collection, else --butler-repo). The prompt products are not "
+                         "in the science repo.")
     ap.add_argument("--no-stack-merge", action="store_true",
                     help="do NOT merge the stack DIA sources; ADCNN-only. Measured cost: forfeits "
                          "the ~3.4%% of real movers only the stack finds (~18%% relative recall)")
