@@ -196,7 +196,31 @@ def _manifest_counts(manifest):
 def run(a):
     pipe = load_pipeline(a.pipeline)
     op_point = a.op_point or (str(DISCOVERY_OP) if a.discovery else str(pipe.alert_op_point or DEFAULT_ALERT_OP))
-    stream_op = a.stream_op_point or str(REPO / "ADCNN/pipelines/heliolinc/op_2v_stream.json")
+    # THE STREAM OP DEFAULTS TO THE FULL-CADENCE ONE, FOR EVERY NIGHT.
+    #
+    # The two stream ops differ in what they control, and only one of them is a safety property:
+    #   score_min  -> TRACTABILITY. Seeding cost goes as detection DENSITY SQUARED. The calibration
+    #                 (op_2v_stream_fullcadence._calibration) measured 0.70 cutting a pilot pointing
+    #                 group from 68,878 to 9,155 linkable dets -- ~57x the seeding cost at 0.50 --
+    #                 and op_2v_stream.json run unchanged on 20260629 DID NOT FINISH ONE POINTING
+    #                 GROUP IN 42 MINUTES, extrapolating to several hundred thousand alerts.
+    #   chi2       -> VOLUME. It filters AFTER the orbit solve, so loosening it is nearly free. Both
+    #                 ops already use chi2 <= 30, so they do not differ on the volume knob at all.
+    # And BOTH op files state that the nightly count is finally set by the top --stream-top-n RANK
+    # cut, not by these gates. So choosing the tighter score floor costs stream size that the rank
+    # cut and the downstream 1k op were going to impose anyway, while buying a link that finishes.
+    #
+    # It used to be selected per night by PANEL COUNT >= 3000, in a launcher that has since been
+    # deleted -- so every caller that forgot the flag silently got the intractable op. That is not a
+    # theoretical risk: it happened during the 2026-08-13 regeneration and inflated 20260711 from 837
+    # alerts to 25,439 before it was caught. Panel count is also a poor proxy for the quantity that
+    # actually drives the cost: MEASURED linkable dets/visit were 6,445 (20260630, 1,869 panels),
+    # 11,646 (20260711, 3,731) and 3,310 (20260712, 6,370) -- 20260712 has 3.4x the panels of
+    # 20260630 and HALF the density, so the threshold would have mis-ranked them.
+    # Default to the op that is tractable on the densest night; --stream-op-point still overrides.
+    stream_op = a.stream_op_point or str(REPO / "ADCNN/pipelines/heliolinc/op_2v_stream_fullcadence.json")
+    print(f"      stream op-point: {os.path.basename(stream_op)}"
+          f"{' (explicit --stream-op-point)' if a.stream_op_point else ' (default: tractable on any cadence)'}")
     out = Path(a.out) if a.out else OUTPUTS / "runs" / f"run_night_{a.night}"
     out.mkdir(parents=True, exist_ok=True)
     manifest = out / "manifest.csv"
@@ -679,7 +703,10 @@ def main(argv=None):
     ap.add_argument("--no-stream", action="store_true",
                     help="skip the low-threshold alert stream (the ~10k/night ranked QA product)")
     ap.add_argument("--stream-op-point", default=None,
-                    help="stream linking op-point JSON (default: ADCNN/pipelines/heliolinc/op_2v_stream.json)")
+                    help="stream linking op-point JSON. Default op_2v_stream_fullcadence.json, which "
+                         "is tractable at any cadence (score_min 0.70; seeding cost goes as density^2 "
+                         "and the 0.50 op does not finish a dense night). op_2v_stream.json is the "
+                         "0.50 variant, only safe on genuinely sparse nights.")
     ap.add_argument("--stream-top-n", type=int, default=20000,
                     help="how many top-ranked stream alerts get cutouts + sheets (linking keeps ALL; "
                          "this only bounds the image render)")
