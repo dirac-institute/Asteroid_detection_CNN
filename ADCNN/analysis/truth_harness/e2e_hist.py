@@ -37,6 +37,20 @@ This is the number the product actually delivers -- injected mover -> detected -
 the full 1k op -> lands in the top 1000 by priorityScore. It is NOT the detection ceiling, which runs
 ~49% here and is the subject of completeness_hist.py.
 
+RING-CLEANED MERGE RESULT (2026-08-13, the measurement the symmetric cleaning shipped on). Same
+harness, same 10 visit-pairs, delivered order (rerank -> filter_op), paired McNemar:
+
+    arm            linked (true movers)   op survivors   delivered movers    ALL      FLAGSHIP
+    ADCNN          30,692  (637)              2,989            357           9.26%    2.06%
+    merged         37,233  (638)              3,392            358           9.28%    2.16%
+    merged+CLEAN   26,152  (680)              3,735            376           9.75%    2.16%
+
+merged+CLEAN vs ADCNN: gained 20, lost 1, p=2.1e-05; vs the uncleaned merge: gained 19, lost 1,
+p=4.0e-05. FLAGSHIP unchanged. The mechanism is CONTENTION REMOVAL: 11,081 fewer alerts link, yet 42
+MORE true movers survive linking (638 -> 680), because ring pairs no longer claim real movers'
+detections (--claim-order preal, one detection one claim) or displace them at the budget. The ring
+cut pays its calibrated 2.7% of real movers and buys back more in claim relief.
+
 THREE ARMS, ONE VARIABLE. All three detection catalogues come from a SINGLE merge_dets run and are
 split by `src`, so the ADCNN arm is ring-cleaned exactly as the merged arm's ADCNN half is; and all
 three were linked with identical settings AND an identical visit-pair set. That last point mattered:
