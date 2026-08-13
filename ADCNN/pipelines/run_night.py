@@ -249,6 +249,18 @@ def run(a):
         dets = out / "adcnn_dets.csv"
         if dets.exists() and dets.stat().st_size > 0 and not a.force:
             print("      (adcnn_dets.csv exists; reuse)"); return
+        # THE MASKED CATALOGUE IS ALSO A VALID REUSE POINT. adcnn_dets.csv is DELETED after masking
+        # unless --keep-raw-dets, so a completed night keeps only adcnn_dets_masked.csv -- and this
+        # guard, looking for the raw file alone, re-submitted the GPU job for a night whose own
+        # status line said "detect: 1869/1869 panels (0.0% missing)". That is hours of GPU to
+        # reproduce a file we already hold the downstream product of, and on a busy queue it fails
+        # outright: measured, the ada partition rejected the submission and took the whole night's
+        # regeneration with it (rc=1 before any of the stages that actually needed rebuilding).
+        masked = out / "adcnn_dets_masked.csv"
+        if masked.exists() and masked.stat().st_size > 0 and not a.force:
+            print(f"      (adcnn_dets.csv gone but adcnn_dets_masked.csv is present "
+                  f"({masked.stat().st_size/1e6:.0f} MB) -- detection already done; reuse)")
+            return
         cmd = (f"cd {REPO} && RUN={out} sbatch --export=ALL,RUN --wait {HL/'sn_detect.slurm'}"
                f"   # GPU; per-panel .done resume; -> {out}/adcnn_dets.csv")
         _bash(cmd, a.dry_run)
