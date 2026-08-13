@@ -64,8 +64,20 @@ for N in "${NIGHTS[@]}"; do
     # --stream-workers 32: the wide stage now chunks by (visit, detector) rather than by visit, so
     # its parallelism is bounded by chunk count (hundreds) instead of visit count (tens) and the old
     # 4-worker RAM cap is gone. 32 of 128 cores leaves headroom for the linker's own pool.
+    # PER-NIGHT STREAM OP, CHOSEN BY PANEL COUNT -- what the deleted run_campaign.sh did
+    # (96bca3b lines 82-83). Dropping it was a regression. The two ops differ in score_min:
+    # fullcadence 0.70, default op_2v_stream.json 0.50. On a dense night 0.50 is not merely looser,
+    # it is a different regime -- the banked calibration measured 1,512,574 linkable dets at 0.50
+    # with the chord seed going O(N^2) (a 0.50-floor link once ran 5.3 h WITHOUT finishing) against
+    # 207,640 dets and 21 minutes at 0.70, and the delivered stream's own weakest member scores
+    # 0.700, so 0.70 is the consistent floor. Running the default inflated 20260711 from 837 alerts
+    # to 25,439 and would have made the two biggest nights effectively unfinishable.
+    NP=$(( $(wc -l < "$D/manifest.csv" 2>/dev/null || echo 1) - 1 ))
+    if [ "$NP" -ge 3000 ]; then OP=ADCNN/pipelines/heliolinc/op_2v_stream_fullcadence.json
+    else OP=ADCNN/pipelines/heliolinc/op_2v_stream.json; fi
+    echo "### $N: $NP panels -> $(basename $OP)"
     python -m ADCNN.pipelines.run_night --night "$N" --collection "$COLL" \
-        --visits auto --out "$D" --keep-cutouts --stream-workers 32
+        --visits auto --out "$D" --keep-cutouts --stream-workers 32 --stream-op-point "$OP"
     RC=$?
     echo "### run_night rc=$RC"
     # ---- the ~1k clean deliverable, rebuilt from the corrected stream ----
