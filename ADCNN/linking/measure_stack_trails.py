@@ -22,8 +22,32 @@ a DIASource table is dominated by stars and artifacts, on which a long line temp
 accumulates flux. Agreement with the catalogue is a steep function of trail-likeness -- Spearman 0.493
 over everything, 0.772 at score>=0.7, 0.924 at score>=0.9 where the medians agree to 0.01 px.
 
-*** STATUS: THE STACK-NATIVE GATE WAS TRIED AND IT IS NOT SUFFICIENT. DO NOT RUN THIS EXPECTING
-    USABLE LENGTHS. *** Validated on 2,738 real DIASource rows from
+*** STATUS: THE APPROACH DOES NOT DELIVER WHAT IT WAS BUILT FOR. Read this before investing further.
+    The gate and the reason a detection is stack-only are THE SAME THING, so any gate strong enough to
+    stop the estimator saturating also removes almost everything there was to rescue. ***
+
+    Validated on real inputs (prob AND agg regenerated for 6 real 0706 panels, 992 stack detections,
+    no placeholder arrays), gate = seg prob >= 0.45 AND stage-2 CNN >= 0.5886:
+
+        ungated                              median 69.01 px   33.9% at the 79 px ceiling
+        seg probability only                 median  6.20 px   24.0% at ceiling
+        seg + stage-2 (this module)          median  5.32 px    9.5% at ceiling   <- TRUSTWORTHY
+                                                          (ADCNN's own rows sit at 4.7-10%)
+
+    So the two-stage gate SOLVES saturation. But of the 84 detections that pass it, only **2** were
+    not already reported by ADCNN -- and both of those saturate. The rescuable population is 2 of 992.
+    That is the risk flagged before this was built, and it materialised: a detection is stack-only
+    PRECISELY BECAUSE ADCNN's segmentation did not fire on it, so gating on ADCNN's segmentation
+    selects almost exactly the sources ADCNN already has. Every weaker gate saturates instead.
+
+    CONSEQUENCE FOR THE MERGE. The stack's unique contribution -- 154 both-epoch movers ADCNN misses,
+    the gap between a 53.8% union ceiling and ADCNN's 49.8% -- CANNOT be unlocked by re-measuring its
+    trails with our estimator. Unlocking it needs either a trail measurement that does not depend on
+    our segmentation, or the stack's own trailed fit to work on that population (it does not: those
+    rows are the ones with NaN or ~2 px trailLength). Sample is 6 panels; the mechanism is not
+    sample-limited, but the exact 2/992 is.
+
+*** The stack-native gate (trailFlux/psfFlux + extendedness) is separately NOT sufficient either. *** Validated on 2,738 real DIASource rows from
     LSSTCam/runs/prompt/20260706/ApPipe (embargo repo) against the 64 cached 0706 panels:
 
         ungated                 n=2,666   median 50.25 px   27.2% AT THE 79 px CEILING
