@@ -594,13 +594,51 @@ def run(a):
             # science alerts -- that proxy preferred chi2 (11/12 vs 9/12 preserved) but truth prefers
             # P(real): 987 vs 936 real pairs recovered of 5,226 pairable, at higher purity too
             # (8.39% vs 8.02%). The proxy is not truth; none of those 12 has an MPC match.
-            _bash(f"python -m ADCNN.linking.link_2visit --dets {_dets()} "
-                  f"--known {out}/known.csv --out {sd}/tracks.csv --op-point {stream_op} "
-                  + (f"--score-min {_sm} " if (_sm := _pick_score_min(_dets())) is not None else "")
-                  + 
-                  f"--npt 2 --min-epochs 2 --seed-2v chord{static} --train-veto "
-                  f"--claim-order preal --rank-by chi2 "
-                  f"--alerts-out {sd}/alerts.jsonl", a.dry_run)
+            # LINK, CHECK, RELINK. _pick_score_min only PREDICTS the floor from detection density;
+            # the prediction has been wrong in the direction that costs completeness, so it is now
+            # the loop's STARTING POINT, not its answer. After each link we MEASURE what the 1k
+            # filter could ever deliver from the resulting stream, and step the floor down if the
+            # night cannot fill the budget.
+            #
+            # Why stepping DOWN is the only direction, and why it is safe: the 2026-08-13 2D scan
+            # measured score_min 0.50/0.60/0.70 to give IDENTICAL delivered completeness on the tune
+            # night (ALL 10.99%, flagship 2.09% at all three). So a lower floor costs runtime and
+            # nothing else, while too high a floor is pure loss -- 20260712 shipped 644 of 1,000
+            # slots and 20260711 shipped 834 under the density prediction alone. Asymmetric, so the
+            # loop only ever relaxes.
+            #
+            # The loop is self-limiting: it fires only when a night is SHORT, and a short night is
+            # by definition sparse, which is exactly where the lower floor is cheap to link. It can
+            # never fire on the dense nights where 0.50 is intractable, because those fill at 0.70.
+            from ADCNN.qa.filter_op import survivors_at as _surv, CHI2_GRID as _CG, TARGET_FILL as _TF
+            _op1k = json.load(open(REPO / "ADCNN/pipelines/heliolinc/op_2v_stream_1k.json"))
+            _budget = _op1k.get("budget", 1000)
+            _want = _op1k.get("target_fill", _TF) * _budget
+            _floors = [0.70, 0.60, 0.50]
+            _start = _pick_score_min(_dets())
+            _ladder = [f for f in _floors if _start is None or f <= _start + 1e-9] or [0.50]
+            for _i, _sm in enumerate(_ladder):
+                _bash(f"python -m ADCNN.linking.link_2visit --dets {_dets()} "
+                      f"--known {out}/known.csv --out {sd}/tracks.csv --op-point {stream_op} "
+                      f"--score-min {_sm} "
+                      f"--npt 2 --min-epochs 2 --seed-2v chord{static} --train-veto "
+                      f"--claim-order preal --rank-by chi2 "
+                      f"--alerts-out {sd}/alerts.jsonl", a.dry_run)
+                if a.dry_run or not ap.exists():
+                    break
+                # the LOOSEST chi2 in the grid: the most the filter could ever deliver from this
+                # link. If even that is short, no chi2 choice can fix it -- only more detections can.
+                _have = _surv(str(ap), _op1k, _CG[-1])
+                if _have >= _want or _i == len(_ladder) - 1:
+                    print(f"      stream fill: {_have:,} filterable alerts vs target {_want:,.0f} "
+                          f"({_op1k.get('target_fill', _TF)}x budget {_budget}) at score_min {_sm:.2f}"
+                          + ("" if _have >= _want else
+                             f" -- STILL SHORT at the lowest floor; this night is detection-limited, "
+                             f"not floor-limited, and will deliver under budget."))
+                    break
+                print(f"      stream fill: only {_have:,} filterable alerts vs target {_want:,.0f} at "
+                      f"score_min {_sm:.2f} -- the budget cannot be filled and a lower floor is "
+                      f"measured to cost NO completeness. Relinking at {_ladder[_i + 1]:.2f}.")
         else:
             print(f"      (stream alerts.jsonl exists -- reusing; --force to relink)")
         # RANK BEFORE CUTTING. rerank_alerts rewrites alerts.jsonl IN PLACE, permuting it, and the
@@ -746,7 +784,10 @@ def main(argv=None):
                     help="stream linking op-point JSON. Default op_2v_stream_fullcadence.json, which "
                          "is tractable at any cadence (score_min 0.70; seeding cost goes as density^2 "
                          "and the 0.50 op does not finish a dense night). op_2v_stream.json is the "
-                         "0.50 variant, only safe on genuinely sparse nights.")
+                         "legacy 0.50 variant: the 2026-08-13 scan measured 0.50 and 0.70 to deliver "
+                         "IDENTICAL completeness at the 1k budget, so it buys no recall -- it is only "
+                         "slower. The floor is lowered per night by _pick_score_min when a night "
+                         "cannot fill the budget, not by choosing this file.")
     ap.add_argument("--stream-top-n", type=int, default=20000,
                     help="how many top-ranked stream alerts get cutouts + sheets (linking keeps ALL; "
                          "this only bounds the image render)")

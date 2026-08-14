@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Audit EVERY cut in the shipped op-point against injected truth: what does each one actually cost?
 
-A cut is only worth its purity if it sits OUTSIDE the true-mover distribution. `chi2_2v_max: 8.0`
-turned out to sit at the MEDIAN of it (true-alert chi2 median 7.4), discarding ~46% of true movers
-before ranking -- the same failure mode as `rate_hi_2v: 8.0`. This checks the rest the same way.
+A cut is only worth its purity if it sits OUTSIDE the true-mover distribution. A FIXED
+`chi2_2v_max: 8.0` turned out to sit at the MEDIAN of it (true-alert chi2 median 7.4), discarding
+~46% of true movers before ranking -- the same failure mode as `rate_hi_2v: 8.0`. That is why the
+shipped op no longer carries a fixed chi2 at all: `chi2_2v_max` is "auto", picked per night by
+filter_op to fill the delivered budget (op_2v_stream_1k._chi2_CEMENTED). Read any chi2 number below
+as the value AUTO CHOSE for the night being audited, not as a threshold. This checks the rest the
+same way.
 
 For each cut, in isolation (all other cuts off), on the ungated alert stream:
     kill_true  -- fraction of TRUE alerts it removes      (the cost)

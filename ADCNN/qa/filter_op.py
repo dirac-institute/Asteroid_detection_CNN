@@ -19,7 +19,7 @@ Usage:
       --op op_2v_stream_1k.json --out survivors.jsonl
 """
 from __future__ import annotations
-import argparse, json, sys
+import argparse, json, os, sys
 import numpy as np
 
 ARTIFACT_MASKS = ("m_SPIKE", "m_CROSSTALK", "m_SAT_TEMPLATE", "m_SAT")
@@ -95,7 +95,38 @@ def _near_bright_star(alerts, refcat_path, radius_arcsec, mag_max):
     return hit
 
 
-TARGET_FILL = 1.9      # survivors / budget at the measured FLAGSHIP optimum (1.75 on 0706, 1.99 on 0713)
+# survivors/budget at the measured FLAGSHIP optimum: 1.75 on 20260706 (tune), 1.99 on 20260713
+# (held out). 1.9 is inside a PLATEAU on both, not a knife edge -- 1.6/1.75/1.9 all pick chi2<=8 on
+# the tune night and 1.75/1.9/2.0 all pick chi2<=16 on the held-out one, and each pick IS that
+# night's own flagship optimum. Do not "refine" this to a third decimal; the grid has no such
+# resolution. Targeting the ALL optimum instead would mean ~2.9-3.2, at a measured flagship cost.
+TARGET_FILL = 1.9
+
+
+CHI2_GRID = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 22, 26, 30]
+
+
+def _passes_cheap(a, op, chi2_max):
+    """The gates that cost nothing to evaluate on an already-linked alert.
+
+    chi2=None must PASS: it is the 3+visit discovery tier, which has no 2-visit orbit chi2 at all.
+    Treating None as failing once dropped that whole tier silently.
+    """
+    return ((_G(a, "orbit", "chi2", d=None) is None
+             or float(_G(a, "orbit", "chi2", d=1e9)) <= chi2_max)
+            and _G(a, "vetting", "mfsnr_min", d=0) >= op["mfsnr_min_2v"]
+            and np.mean(_G(a, "vetting", "trail_len_px", d=[0]) or [0]) >= op["len_db_min"]
+            and op["rate_lo_2v"] <= _G(a, "motion", "rate_degday", d=0) <= op["rate_hi_2v"])
+
+
+def survivors_at(alerts, op, chi2_max):
+    """How many alerts clear the cheap gates at `chi2_max`. Accepts a path or a parsed list.
+
+    Used both by _auto_chi2 (to pick chi2) and by run_night (to decide whether a night's LINK can
+    fill the budget at all, which is a score_min question, not a chi2 one).
+    """
+    al = [json.loads(l) for l in open(alerts)] if isinstance(alerts, (str, os.PathLike)) else alerts
+    return sum(1 for a in al if _passes_cheap(a, op, chi2_max))
 
 
 def _auto_chi2(alerts_path, op, budget=1000, target_fill=TARGET_FILL, grid=None):
@@ -104,17 +135,12 @@ def _auto_chi2(alerts_path, op, budget=1000, target_fill=TARGET_FILL, grid=None)
     chi2 filters AFTER the orbit solve, so every candidate value is evaluated on the SAME linked
     stream -- this costs one pass over the alerts, no relinking.
     """
-    grid = grid or [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 22, 26, 30]
+    grid = grid or CHI2_GRID
     al = [json.loads(l) for l in open(alerts_path)]
     want = target_fill * budget
     counts = []
     for c in grid:
-        n = sum(1 for a in al
-                if (_G(a, "orbit", "chi2", d=None) is None
-                    or float(_G(a, "orbit", "chi2", d=1e9)) <= c)
-                and _G(a, "vetting", "mfsnr_min", d=0) >= op["mfsnr_min_2v"]
-                and np.mean(_G(a, "vetting", "trail_len_px", d=[0]) or [0]) >= op["len_db_min"]
-                and op["rate_lo_2v"] <= _G(a, "motion", "rate_degday", d=0) <= op["rate_hi_2v"])
+        n = survivors_at(al, op, c)
         counts.append((c, n))
         if n >= want:
             break
@@ -122,8 +148,8 @@ def _auto_chi2(alerts_path, op, budget=1000, target_fill=TARGET_FILL, grid=None)
     n_at = dict(counts)[pick]
     print(f"[filter_op] chi2_2v_max=auto -> {pick} ({n_at:,} survivors before the vetoes, "
           f"target {want:,.0f} = {target_fill}x budget {budget}). A fixed chi2 does not transfer "
-          f"across cadence; the fill ratio does (measured optima 1.75 on 20260706, 1.99 on 20260713).",
-          flush=True)
+          f"across cadence -- the flagship optimum is chi2<=8 on 20260706 and chi2<=16 on 20260713 -- "
+          f"but the fill ratio does (1.75 and 1.99 at those optima).", flush=True)
     if n_at < want:
         print(f"[filter_op] NOTE: even chi2<={pick} yields only {n_at:,} -- this night cannot fill "
               f"{want:,.0f}; the budget is not the binding constraint here, linking is.", flush=True)
