@@ -31,6 +31,14 @@ adcnn_activate
 OUT_ROOT="${OUT_ROOT:-outputs/runs/10k_cadence}"
 LOG_DIR="outputs/logs"; mkdir -p "$LOG_DIR"
 BUDGET="${BUDGET:-1000}"
+# select_clean keeps the first N alerts that are NOT rings, so feeding it exactly BUDGET guarantees
+# the product lands BELOW budget by the ring fraction -- there is nothing left to backfill from.
+# MEASURED on 20260712: 11 of the top 1,000 were rings, delivering 989. Small, but it recurs on
+# every night and the whole point of the 1k op is to deliver the budget. Feed 25% headroom so the
+# ring drops are backfilled from the next-ranked clean alerts and select_clean cuts to exactly
+# BUDGET. 25% covers a ring fraction up to 20% against the ~1% measured, and costs only the cutout
+# + morphology passes over the extra rows (the 1k stage, not the stream).
+HEADROOM="${HEADROOM:-$(( BUDGET * 5 / 4 ))}"
 OP1K="ADCNN/pipelines/heliolinc/op_2v_stream_1k.json"
 
 collection_for() {   # the prompt-processing collection differs by night; wrong one = zero DIA sources
@@ -76,7 +84,7 @@ for N in "${NIGHTS[@]}"; do
       K="$D/stream_1k"; mkdir -p "$K"
       python -m ADCNN.qa.filter_op --alerts "$D/stream/alerts.jsonl" --dets "$D/dets_merged.csv" \
           --op "$OP1K" --out "$K/surv.jsonl" --refcat "$D/bright_refcat.parquet" \
-        && head -n "$BUDGET" "$K/surv.jsonl" > "$K/topk.jsonl" \
+        && head -n "$HEADROOM" "$K/surv.jsonl" > "$K/topk.jsonl" \
         && python -m ADCNN.qa.alert_cutouts --alerts "$K/topk.jsonl" --dets "$D/dets_merged.csv" \
               --out "$K/_cut.npz" --stamp-px 96 --workers 32 \
         && python -m ADCNN.qa.alert_morphology --alerts "$K/topk.jsonl" --cutouts "$K/_cut.npz" \
