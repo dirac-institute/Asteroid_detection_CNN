@@ -49,8 +49,35 @@ from ADCNN.config import OUTPUTS, load_pipeline, REPO
 HL = REPO / "ADCNN" / "pipelines" / "heliolinc"
 
 # linkable (len_db>=6) detections per visit that the stream needs to fill the 1k budget;
-# see _pick_score_min in run_night() for the measurement behind it.
+# see _pick_score_min in run_night() for the measurement behind it. This only PREDICTS a starting
+# floor -- the answer comes from measuring the linked stream and relinking (see relink_ladder).
 SCORE_FLOOR_TARGET_DENSITY = 2800
+SCORE_FLOORS = [0.70, 0.60, 0.50]
+
+
+def relink_ladder(start, prev=None, floors=None):
+    """Floors to try, in order, for a night whose stream must fill the delivered budget.
+
+    `start` is the density PREDICTION (a starting point, not an answer); `prev` is the floor an
+    existing stream was already linked at, if any.
+
+    The ladder only ever DESCENDS. The 2026-08-13 2D scan measured score_min 0.50/0.60/0.70 to give
+    identical delivered completeness (ALL 10.99%, flagship 2.09% at all three), so relaxing costs
+    runtime and nothing else, while too high a floor is pure loss -- 20260712 shipped 644 of 1,000
+    slots under the prediction alone. 0.80 is the first floor measured to cost completeness and is
+    never a rung.
+
+    A floor already tried is EXCLUDED: relinking at it would reproduce the same short stream
+    exactly. When that exhausts the ladder the night is detection-limited, not floor-limited, and
+    the caller is handed the lowest floor so it links once and reports rather than looping.
+    """
+    floors = list(floors if floors is not None else SCORE_FLOORS)
+    cap = min([f for f in (start, prev) if f is not None], default=None)
+    rungs = [f for f in floors
+             if (cap is None or f <= cap + 1e-9) and (prev is None or f < prev - 1e-9)]
+    return rungs or [min(floors)]
+
+
 DEFAULT_ALERT_OP = HL / "op_2v_alert.json"
 DISCOVERY_OP = HL / "link_op_point.json"
 FROZEN_ALERT_GOLDEN = {"score_min": 0.80, "chi2_2v_max": 5.0, "mfsnr_min_2v": 5.0,
@@ -587,7 +614,38 @@ def run(a):
         # after writing tracks.csv but before alerts.jsonl (20260705/06) left a tracks file and no
         # alerts, and an `exists`-only guard on a later stage would then render from nothing. The
         # cutout cache and sheets/pairs are downstream of this, so a truncated link must re-run.
-        if a.force or not (ap.exists() and ap.stat().st_size > 0):
+        from ADCNN.qa.filter_op import survivors_at as _surv, CHI2_GRID as _CG, TARGET_FILL as _TF
+        _op1k = json.load(open(REPO / "ADCNN/pipelines/heliolinc/op_2v_stream_1k.json"))
+        _budget = _op1k.get("budget", 1000)
+        _want = _op1k.get("target_fill", _TF) * _budget
+        _floors = SCORE_FLOORS
+        _floor_rec = sd / ".score_floor"      # what the EXISTING alerts.jsonl was linked at
+
+        _relink = a.force or not (ap.exists() and ap.stat().st_size > 0)
+        # FILL-CHECK A REUSED STREAM TOO. The relink loop below only runs when we link, so without
+        # this a night whose alerts.jsonl already exists is reused unchecked -- which is precisely
+        # how the under-filled 20260711/20260712 products would survive a re-run untouched. The
+        # check is one cheap pass over an existing file, so it costs nothing when the night is fine.
+        if not _relink and ap.exists():
+            _have = _surv(str(ap), _op1k, _CG[-1])
+            _prev = float(_floor_rec.read_text().strip()) if _floor_rec.exists() else None
+            if _have >= _want:
+                print(f"      stream fill: reused stream has {_have:,} filterable alerts vs target "
+                      f"{_want:,.0f} -- fills the budget, keeping it")
+            elif _prev is not None and _prev <= min(_floors) + 1e-9:
+                # already at the bottom of the ladder and still short: relinking cannot help, the
+                # night is detection-limited. Say so rather than burn a link to learn it again.
+                print(f"      stream fill: reused stream has only {_have:,} vs {_want:,.0f}, but it "
+                      f"was already linked at the lowest floor {_prev:.2f} -- detection-limited, "
+                      f"not floor-limited. Keeping it; it will deliver under budget.")
+            else:
+                print(f"      stream fill: reused stream has only {_have:,} filterable alerts vs "
+                      f"target {_want:,.0f}"
+                      + (f" at floor {_prev:.2f}" if _prev is not None else " (floor unrecorded)")
+                      + " -- RELINKING at a lower floor, which is measured to cost no completeness.")
+                _relink = True
+
+        if _relink:
             # claim-order + rank-by are what make a LOW-THRESHOLD stream trustworthy: at 11k alerts
             # the seeding-order claim loses real pairs to spurious ones. Which PRIORITY to claim by
             # was settled against INJECTED TRUTH on the calibration night, not against the 12 frozen
@@ -610,13 +668,10 @@ def run(a):
             # The loop is self-limiting: it fires only when a night is SHORT, and a short night is
             # by definition sparse, which is exactly where the lower floor is cheap to link. It can
             # never fire on the dense nights where 0.50 is intractable, because those fill at 0.70.
-            from ADCNN.qa.filter_op import survivors_at as _surv, CHI2_GRID as _CG, TARGET_FILL as _TF
-            _op1k = json.load(open(REPO / "ADCNN/pipelines/heliolinc/op_2v_stream_1k.json"))
-            _budget = _op1k.get("budget", 1000)
-            _want = _op1k.get("target_fill", _TF) * _budget
-            _floors = [0.70, 0.60, 0.50]
             _start = _pick_score_min(_dets())
-            _ladder = [f for f in _floors if _start is None or f <= _start + 1e-9] or [0.50]
+            _prev = (float(_floor_rec.read_text().strip())
+                     if (_floor_rec.exists() and not a.force) else None)
+            _ladder = relink_ladder(_start, _prev, _floors)
             for _i, _sm in enumerate(_ladder):
                 _bash(f"python -m ADCNN.linking.link_2visit --dets {_dets()} "
                       f"--known {out}/known.csv --out {sd}/tracks.csv --op-point {stream_op} "
@@ -626,6 +681,9 @@ def run(a):
                       f"--alerts-out {sd}/alerts.jsonl", a.dry_run)
                 if a.dry_run or not ap.exists():
                     break
+                # record the floor this stream was actually linked at, so a later re-entry knows
+                # whether stepping down is still possible or the night is detection-limited.
+                _floor_rec.write_text(f"{_sm}\n")
                 # the LOOSEST chi2 in the grid: the most the filter could ever deliver from this
                 # link. If even that is short, no chi2 choice can fix it -- only more detections can.
                 _have = _surv(str(ap), _op1k, _CG[-1])

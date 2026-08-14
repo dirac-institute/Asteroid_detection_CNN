@@ -16,6 +16,7 @@ import json
 
 import pytest
 
+from ADCNN.pipelines.run_night import SCORE_FLOORS, relink_ladder
 from ADCNN.qa.filter_op import (CHI2_GRID, TARGET_FILL, _auto_chi2, _passes_cheap,
                                 survivors_at)
 
@@ -108,11 +109,6 @@ def test_auto_chi2_agrees_with_survivors_at(tmp_path):
 
 # ---------------------------------------------------------------- the relink ladder
 
-def _ladder(start, floors=(0.70, 0.60, 0.50)):
-    """The rule run_night applies: start where the density prediction says, then only ever relax."""
-    return [f for f in floors if start is None or f <= start + 1e-9] or [0.50]
-
-
 @pytest.mark.parametrize("start,expect", [
     (0.70, [0.70, 0.60, 0.50]),
     (0.60, [0.60, 0.50]),
@@ -120,14 +116,41 @@ def _ladder(start, floors=(0.70, 0.60, 0.50)):
     (None, [0.70, 0.60, 0.50]),
 ])
 def test_ladder_only_ever_steps_down(start, expect):
-    assert _ladder(start) == expect
+    assert relink_ladder(start) == expect
 
 
 def test_ladder_never_raises_the_floor_above_the_prediction():
     """Raising is the one direction the scan does NOT license: 0.80 is the first floor measured to
     cost delivered completeness."""
     for start in (0.50, 0.60, 0.70):
-        assert max(_ladder(start)) <= start
+        assert max(relink_ladder(start)) <= start
+
+
+def test_ladder_never_offers_0_80_whatever_the_inputs():
+    for start in (None, 0.50, 0.60, 0.70, 0.90):
+        assert max(relink_ladder(start, prev=None)) <= 0.70
+
+
+@pytest.mark.parametrize("prev,expect", [
+    (0.70, [0.60, 0.50]),
+    (0.60, [0.50]),
+    (0.50, [0.50]),          # exhausted: hand back the lowest so the caller links once, not never
+])
+def test_a_floor_already_tried_is_not_repeated(prev, expect):
+    """Relinking at the floor the existing stream was built with would reproduce it exactly."""
+    assert relink_ladder(0.70, prev=prev) == expect
+
+
+def test_ladder_respects_whichever_of_prediction_and_prev_is_lower():
+    assert relink_ladder(0.60, prev=0.70) == [0.60, 0.50]
+    assert relink_ladder(0.70, prev=0.60) == [0.50]
+
+
+def test_ladder_is_never_empty():
+    """An empty ladder would silently skip the link entirely and leave the night with no stream."""
+    for start in (None, 0.50, 0.60, 0.70):
+        for prev in (None, 0.50, 0.60, 0.70):
+            assert relink_ladder(start, prev)
 
 
 def test_a_night_that_fills_stops_at_the_first_rung(tmp_path):
