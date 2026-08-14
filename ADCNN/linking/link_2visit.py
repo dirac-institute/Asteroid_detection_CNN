@@ -1729,12 +1729,23 @@ def main():
             # numeric orbit-fit columns for the (candidate-grade) 2-visit stream: chi2 is the geometry
             # gate statistic; a_au/ecc are the DEGENERATE argmin diagnostics (kept in tracks.csv for
             # audit only); the adm_* admissible-region ranges are what the alert packet publishes.
-            if n_ep == 2:
-                c2, ci = pair_chi2(g, a.exptime); chi2v, av, ev = c2, ci["a"], ci["e"]
-                adm = {k: ci.get(k, np.nan) for k in ADM_KEYS}
-            else:
-                chi2v, av, ev = np.nan, np.nan, np.nan
-                adm = dict.fromkeys(ADM_KEYS, np.nan)
+            # chi2 for BOTH tiers. pair_chi2 sorts by mjd and reads only iloc[0]/iloc[-1], so on a
+            # 3+ member set it scores the OUTER pair -- the widest arc, the strongest constraint
+            # available. It used to return NaN here, which left the whole 3+visit tier with no orbit
+            # statistic at all: unauditable, and it sorts to the top of the delivered product.
+            #
+            # POPULATED BUT NOT GATED (filter_op exempts tier 3+visit -- see its _TIER_EXEMPT note).
+            # MEASURED 2026-08-14 on the six delivered 3+visit alerts of 20260710/20260711: gating
+            # them at the shipped chi2<=10 would have dropped FOUR, and the two killed by the hard
+            # pre-gate are exactly the SHORT-TRAIL ones (len_db 6.8-12.2 px, dpa_tt 24.4 and 26.3
+            # against a 15 deg cut). That gate is 2-visit calibration: _PA_S gives sigma_PA ~17 deg
+            # at 6 px, so sigma(dpa_tt) ~24 deg and 15 deg rejects ~1 sigma of REAL short-trail
+            # scatter. Gating here would preferentially delete FAINT 3-sighting detections, which is
+            # the opposite of what the tier is for. The 3+ tier's real gate is the 3-point linear
+            # RMS < lin_rms_arcsec in physical_check, which a chance triplet cannot pass.
+            c2, ci = pair_chi2(g, a.exptime)
+            chi2v, av, ev = c2, ci["a"], ci["e"]
+            adm = {k: ci.get(k, np.nan) for k in ADM_KEYS}
             tier = "2visit" if n_ep == 2 else "3+visit"
             status = "CONFIRMED" if obj else "NEW"
             # 2v veto-stack annotations (FLAG, never drop): catalog stationarity + chance-link fpp

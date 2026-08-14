@@ -112,8 +112,10 @@ def _passes_cheap(a, op, chi2_max):
     chi2=None must PASS: it is the 3+visit discovery tier, which has no 2-visit orbit chi2 at all.
     Treating None as failing once dropped that whole tier silently.
     """
-    return ((_G(a, "orbit", "chi2", d=None) is None
-             or float(_G(a, "orbit", "chi2", d=1e9)) <= chi2_max)
+    # 3+visit is exempt from the chi2 gate -- see _TIER_EXEMPT in filter_stream. Kept identical
+    # here so survivor COUNTS (and therefore any budget/fill reasoning) match what ships.
+    _c = None if _G(a, "tier", d="") == "3+visit" else _G(a, "orbit", "chi2", d=None)
+    return ((_c is None or float(_c) <= chi2_max)
             and _G(a, "vetting", "mfsnr_min", d=0) >= op["mfsnr_min_2v"]
             and np.mean(_G(a, "vetting", "trail_len_px", d=[0]) or [0]) >= op["len_db_min"]
             and op["rate_lo_2v"] <= _G(a, "motion", "rate_degday", d=0) <= op["rate_hi_2v"])
@@ -216,7 +218,16 @@ def filter_stream(alerts_path, dets_path, op_path, out_path, refcat_path=None, a
         # (purity ~1.00 vs 0.17-0.56 for 2-sighting), and 7 of 9 nights deliver UNDER the 1000 budget
         # (4,182 of 9,000 slots filled), so admitting them displaces nothing on those nights.
         # rerank_alerts already handles this same field the same way; filter_op never got the fix.
-        _c = _G(a, "orbit", "chi2", d=None)
+        # _TIER_EXEMPT: the 3+visit tier is NOT gated on chi2. Since 2026-08-14 link_2visit
+        # POPULATES chi2 for it (outer-pair, widest arc) instead of leaving NaN, so the `_c is None`
+        # escape above no longer covers it -- without this exemption the tier would start being
+        # gated by a 2-VISIT calibration, which is measurably wrong for it. On the six delivered
+        # 3+visit alerts of 20260710/20260711, chi2<=10 drops FOUR, and the two killed by the hard
+        # pre-gate are precisely the SHORT-TRAIL ones (len_db 6.8-12.2px, dpa_tt 24.4/26.3 vs a 15
+        # deg cut) -- _PA_S gives sigma_PA ~17deg at 6px, so that cut rejects ~1 sigma of REAL
+        # short-trail scatter. Gating here would preferentially delete FAINT 3-sighting detections.
+        # The tier's real gate is physical_check's 3-point linear RMS, which a chance triplet fails.
+        _c = None if _G(a, "tier", d="") == "3+visit" else _G(a, "orbit", "chi2", d=None)
         return (_confident_fp(a) is None and ai not in artifact and ai not in near_star
                 and (_c is None or float(_c) <= CHI2)
                 and _G(a, "vetting", "mfsnr_min", d=0) >= MF

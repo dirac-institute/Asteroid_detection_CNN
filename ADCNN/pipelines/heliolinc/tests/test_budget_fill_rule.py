@@ -149,3 +149,41 @@ def test_fixed_chi2_admits_strictly_less_than_the_loosest(tmp_path):
     op = _shipped()
     al = [_alert(chi2=c) for c in (2, 6, 9, 11, 15, 25)]
     assert survivors_at(al, op, op["chi2_2v_max"]) < survivors_at(al, op, CHI2_GRID[-1])
+
+
+# ---------------------------------------------------------------- the 3+visit tier's chi2
+
+def test_pair_chi2_on_a_triplet_scores_the_OUTER_pair():
+    """link_2visit now calls pair_chi2 for n_ep>=3 instead of writing NaN. That is only meaningful
+    if pair_chi2 reads the outermost members -- the widest arc. Verified by running it, not read
+    off the source: a 3-row set must score identically to its own first+last rows."""
+    import pandas as pd
+    from ADCNN.linking.link_2visit import pair_chi2
+    rows = []
+    for k, (mjd, ra) in enumerate(((0.0, 10.0000), (0.0200, 10.0300), (0.0295, 10.0442))):
+        rows.append(dict(mjd=61000.0 + mjd, ra=ra, dec=-5.0 + 0.5 * (ra - 10.0),
+                         ra0=ra - 0.0009, dec0=-5.0 + 0.5 * (ra - 10.0) - 0.00045,
+                         ra1=ra + 0.0009, dec1=-5.0 + 0.5 * (ra - 10.0) + 0.00045,
+                         mf_snr=8.0, src="adcnn", len_db=30.0, score=0.9))
+    g3 = pd.DataFrame(rows)
+    c3, _ = pair_chi2(g3, 30.0)
+    c2, _ = pair_chi2(g3.iloc[[0, -1]].reset_index(drop=True), 30.0)
+    assert c3 == c2, "pair_chi2 on a triplet must equal pair_chi2 on its outer pair"
+
+
+def test_three_visit_tier_is_exempt_from_the_chi2_gate():
+    """Once chi2 is POPULATED for the tier, the `chi2 is None` escape stops covering it. Without an
+    explicit tier exemption the tier would be gated by a 2-VISIT calibration -- measured to drop 4
+    of the 6 delivered 3+visit alerts, and the two killed by the hard pre-gate are exactly the
+    SHORT-TRAIL (faint) ones. That is the opposite of what the tier exists for."""
+    a = _alert(chi2=99999.0)          # would fail any chi2 gate
+    a["tier"] = "3+visit"
+    assert _passes_cheap(a, OP, chi2_max=10.0), "3+visit must not be chi2-gated"
+    a["tier"] = "2visit"
+    assert not _passes_cheap(a, OP, chi2_max=10.0), "2visit MUST still be chi2-gated"
+
+
+def test_two_visit_tier_still_gated_when_chi2_absent():
+    """The original audit fix must survive: a genuinely unscoreable track still passes."""
+    a = _alert(chi2=None); a["tier"] = "2visit"
+    assert _passes_cheap(a, OP, chi2_max=3.0)
