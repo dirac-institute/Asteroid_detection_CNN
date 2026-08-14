@@ -48,36 +48,11 @@ from ADCNN.config import OUTPUTS, load_pipeline, REPO
 
 HL = REPO / "ADCNN" / "pipelines" / "heliolinc"
 
-# linkable (len_db>=6) detections per visit that the stream needs to fill the 1k budget;
-# see _pick_score_min in run_night() for the measurement behind it. This only PREDICTS a starting
-# floor -- the answer comes from measuring the linked stream and relinking (see relink_ladder).
-SCORE_FLOOR_TARGET_DENSITY = 2800
-SCORE_FLOORS = [0.70, 0.60, 0.50]
-
-
-def relink_ladder(start, prev=None, floors=None):
-    """Floors to try, in order, for a night whose stream must fill the delivered budget.
-
-    `start` is the density PREDICTION (a starting point, not an answer); `prev` is the floor an
-    existing stream was already linked at, if any.
-
-    The ladder only ever DESCENDS. The 2026-08-13 2D scan measured score_min 0.50/0.60/0.70 to give
-    identical delivered completeness (ALL 10.99%, flagship 2.09% at all three), so relaxing costs
-    runtime and nothing else, while too high a floor is pure loss -- 20260712 shipped 644 of 1,000
-    slots under the prediction alone. 0.80 is the first floor measured to cost completeness and is
-    never a rung.
-
-    A floor already tried is EXCLUDED: relinking at it would reproduce the same short stream
-    exactly. When that exhausts the ladder the night is detection-limited, not floor-limited, and
-    the caller is handed the lowest floor so it links once and reports rather than looping.
-    """
-    floors = list(floors if floors is not None else SCORE_FLOORS)
-    cap = min([f for f in (start, prev) if f is not None], default=None)
-    rungs = [f for f in floors
-             if (cap is None or f <= cap + 1e-9) and (prev is None or f < prev - 1e-9)]
-    return rungs or [min(floors)]
-
-
+# THE OPERATING POINT IS FIXED AND LIVES IN op_2v_stream_1k.json (score_min 0.70, chi2_2v_max 10).
+# It is NOT adapted per night. A predecessor picked the score floor from detection density and then
+# relinked when the budget came up short; both are deliberately gone (user decision 2026-08-14) --
+# a night thinner than full cadence delivers fewer than 1,000 alerts and that is the accepted
+# product, not a fault. See op_2v_stream_1k.json:_op_FIXED for the calibration and its measured cost.
 DEFAULT_ALERT_OP = HL / "op_2v_alert.json"
 DISCOVERY_OP = HL / "link_op_point.json"
 FROZEN_ALERT_GOLDEN = {"score_min": 0.80, "chi2_2v_max": 5.0, "mfsnr_min_2v": 5.0,
@@ -253,39 +228,6 @@ def run(a):
     print(f"      stream op-point: {os.path.basename(stream_op)}"
           f"{' (explicit --stream-op-point)' if a.stream_op_point else ' (default: tractable on any cadence)'}")
 
-    # SCORE FLOOR ADAPTS TO DENSITY, for the same reason chi2 does: FILL THE BUDGET.
-    #
-    # The 2026-08-13 scan found score_min 0.50/0.60/0.70 give IDENTICAL delivered completeness, and
-    # concluded 0.70 was free. That holds only where the stream comfortably exceeds the budget, which
-    # is all the scan ever saw. On a genuinely sparse night it starves the product: 20260630 at 0.70
-    # linked 217 alerts and delivered 145 of 1,000 slots, against 12,114 alerts and a full budget at
-    # 0.50. Seeding goes as density^2, so the floor bites ~quadratically as a night thins out.
-    #
-    # MEASURED linkable (len_db>=6) detections per visit, and the alerts they produced:
-    #     20260706 injections  @0.70  6,289/visit  -> 9,668 alerts
-    #     20260630 real        @0.70  1,112/visit  ->   217 alerts
-    #     20260630 real        @0.60  2,859/visit
-    # Targeting ~1.9x the 1k budget in alerts, and using alerts ~ density^2, the density that
-    # delivers it is ~2,800/visit -- which is where 20260630 sits at 0.60. So: take the HIGHEST floor
-    # whose density clears the target (cheapest link that still fills the budget), else step down.
-    def _pick_score_min(dets_csv):
-        import pandas as _pd
-        try:
-            _d = _pd.read_csv(dets_csv, usecols=lambda c: c in ("score", "len_db", "visit"),
-                              low_memory=False)
-        except Exception as e:
-            print(f"      score floor: cannot read {dets_csv} ({type(e).__name__}) -- leaving the "
-                  f"op's own score_min", flush=True); return None
-        _lk = _d[_d.len_db.fillna(0) >= 6.0]
-        _nv = max(int(_d.visit.nunique()), 1)
-        for _s in (0.70, 0.60, 0.50):
-            _dens = int((_lk.score >= _s).sum()) / _nv
-            if _dens >= SCORE_FLOOR_TARGET_DENSITY or _s == 0.50:
-                print(f"      score floor: {_s:.2f} ({_dens:,.0f} linkable dets/visit vs target "
-                      f"{SCORE_FLOOR_TARGET_DENSITY:,.0f}; seeding goes as density^2, so too high a "
-                      f"floor starves a sparse night and too low makes a dense one intractable)", flush=True)
-                return _s
-        return 0.50
     out = Path(a.out) if a.out else OUTPUTS / "runs" / f"run_night_{a.night}"
     out.mkdir(parents=True, exist_ok=True)
     manifest = out / "manifest.csv"
@@ -614,91 +556,41 @@ def run(a):
         # after writing tracks.csv but before alerts.jsonl (20260705/06) left a tracks file and no
         # alerts, and an `exists`-only guard on a later stage would then render from nothing. The
         # cutout cache and sheets/pairs are downstream of this, so a truncated link must re-run.
-        from ADCNN.qa.filter_op import survivors_at as _surv, CHI2_GRID as _CG, TARGET_FILL as _TF
+        from ADCNN.qa.filter_op import survivors_at as _surv, CHI2_GRID as _CG
         _op1k = json.load(open(REPO / "ADCNN/pipelines/heliolinc/op_2v_stream_1k.json"))
         _budget = _op1k.get("budget", 1000)
-        _want = _op1k.get("target_fill", _TF) * _budget
-        _floors = SCORE_FLOORS
-        _floor_rec = sd / ".score_floor"      # what the EXISTING alerts.jsonl was linked at
 
-        _relink = a.force or not (ap.exists() and ap.stat().st_size > 0)
-        # FILL-CHECK A REUSED STREAM TOO. The relink loop below only runs when we link, so without
-        # this a night whose alerts.jsonl already exists is reused unchecked -- which is precisely
-        # how the under-filled 20260711/20260712 products would survive a re-run untouched. The
-        # check is one cheap pass over an existing file, so it costs nothing when the night is fine.
-        if not _relink and ap.exists():
-            _have = _surv(str(ap), _op1k, _CG[-1])
-            _prev = float(_floor_rec.read_text().strip()) if _floor_rec.exists() else None
-            if _have >= _want:
-                print(f"      stream fill: reused stream has {_have:,} filterable alerts vs target "
-                      f"{_want:,.0f} -- fills the budget, keeping it", flush=True)
-            elif _prev is not None and _prev <= min(_floors) + 1e-9:
-                # already at the bottom of the ladder and still short: relinking cannot help, the
-                # night is detection-limited. Say so rather than burn a link to learn it again.
-                print(f"      stream fill: reused stream has only {_have:,} vs {_want:,.0f}, but it "
-                      f"was already linked at the lowest floor {_prev:.2f} -- detection-limited, "
-                      f"not floor-limited. Keeping it; it will deliver under budget.", flush=True)
-            else:
-                print(f"      stream fill: reused stream has only {_have:,} filterable alerts vs "
-                      f"target {_want:,.0f}"
-                      + (f" at floor {_prev:.2f}" if _prev is not None else " (floor unrecorded)")
-                      + " -- RELINKING at a lower floor, which is measured to cost no completeness.", flush=True)
-                _relink = True
-
-        if _relink:
+        if a.force or not (ap.exists() and ap.stat().st_size > 0):
             # claim-order + rank-by are what make a LOW-THRESHOLD stream trustworthy: at 11k alerts
             # the seeding-order claim loses real pairs to spurious ones. Which PRIORITY to claim by
             # was settled against INJECTED TRUTH on the calibration night, not against the 12 frozen
             # science alerts -- that proxy preferred chi2 (11/12 vs 9/12 preserved) but truth prefers
             # P(real): 987 vs 936 real pairs recovered of 5,226 pairable, at higher purity too
             # (8.39% vs 8.02%). The proxy is not truth; none of those 12 has an MPC match.
-            # LINK, CHECK, RELINK. _pick_score_min only PREDICTS the floor from detection density;
-            # the prediction has been wrong in the direction that costs completeness, so it is now
-            # the loop's STARTING POINT, not its answer. After each link we MEASURE what the 1k
-            # filter could ever deliver from the resulting stream, and step the floor down if the
-            # night cannot fill the budget.
             #
-            # Why stepping DOWN is the only direction, and why it is safe: the 2026-08-13 2D scan
-            # measured score_min 0.50/0.60/0.70 to give IDENTICAL delivered completeness on the tune
-            # night (ALL 10.99%, flagship 2.09% at all three). So a lower floor costs runtime and
-            # nothing else, while too high a floor is pure loss -- 20260712 shipped 644 of 1,000
-            # slots and 20260711 shipped 834 under the density prediction alone. Asymmetric, so the
-            # loop only ever relaxes.
-            #
-            # The loop is self-limiting: it fires only when a night is SHORT, and a short night is
-            # by definition sparse, which is exactly where the lower floor is cheap to link. It can
-            # never fire on the dense nights where 0.50 is intractable, because those fill at 0.70.
-            _start = _pick_score_min(_dets())
-            _prev = (float(_floor_rec.read_text().strip())
-                     if (_floor_rec.exists() and not a.force) else None)
-            _ladder = relink_ladder(_start, _prev, _floors)
-            for _i, _sm in enumerate(_ladder):
-                _bash(f"python -m ADCNN.linking.link_2visit --dets {_dets()} "
-                      f"--known {out}/known.csv --out {sd}/tracks.csv --op-point {stream_op} "
-                      f"--score-min {_sm} "
-                      f"--npt 2 --min-epochs 2 --seed-2v chord{static} --train-veto "
-                      f"--claim-order preal --rank-by chi2 "
-                      f"--alerts-out {sd}/alerts.jsonl", a.dry_run)
-                if a.dry_run or not ap.exists():
-                    break
-                # record the floor this stream was actually linked at, so a later re-entry knows
-                # whether stepping down is still possible or the night is detection-limited.
-                _floor_rec.write_text(f"{_sm}\n")
-                # the LOOSEST chi2 in the grid: the most the filter could ever deliver from this
-                # link. If even that is short, no chi2 choice can fix it -- only more detections can.
-                _have = _surv(str(ap), _op1k, _CG[-1])
-                if _have >= _want or _i == len(_ladder) - 1:
-                    print(f"      stream fill: {_have:,} filterable alerts vs target {_want:,.0f} "
-                          f"({_op1k.get('target_fill', _TF)}x budget {_budget}) at score_min {_sm:.2f}"
-                          + ("" if _have >= _want else
-                             f" -- STILL SHORT at the lowest floor; this night is detection-limited, "
-                             f"not floor-limited, and will deliver under budget."), flush=True)
-                    break
-                print(f"      stream fill: only {_have:,} filterable alerts vs target {_want:,.0f} at "
-                      f"score_min {_sm:.2f} -- the budget cannot be filled and a lower floor is "
-                      f"measured to cost NO completeness. Relinking at {_ladder[_i + 1]:.2f}.", flush=True)
+            # ONE FIXED OPERATING POINT (user decision 2026-08-14). No --score-min override: the
+            # link uses the op file's own score_min (0.70) on EVERY night, dense or thin. The floor
+            # is not predicted from density and not relinked -- a night that cannot fill the budget
+            # simply delivers fewer than 1,000, which is the accepted behaviour, not a fault.
+            # Rationale and the measured cost live in op_2v_stream_1k.json:_op_FIXED.
+            _bash(f"python -m ADCNN.linking.link_2visit --dets {_dets()} "
+                  f"--known {out}/known.csv --out {sd}/tracks.csv --op-point {stream_op} "
+                  f"--npt 2 --min-epochs 2 --seed-2v chord{static} --train-veto "
+                  f"--claim-order preal --rank-by chi2 "
+                  f"--alerts-out {sd}/alerts.jsonl", a.dry_run)
         else:
             print(f"      (stream alerts.jsonl exists -- reusing; --force to relink)")
+        # REPORT the fill, never act on it. Under a fixed op the number cannot change what we do,
+        # but it is the one line that says whether this night made budget and why -- and a night
+        # that is short is short because of DETECTIONS, not because a knob is mistuned.
+        if not a.dry_run and ap.exists():
+            _have = _surv(str(ap), _op1k, float(_op1k["chi2_2v_max"]))
+            print(f"      stream fill: {_have:,} alerts pass the fixed op (chi2<="
+                  f"{_op1k['chi2_2v_max']:g}, score_min {_op1k['score_min']:g}) against a budget of "
+                  f"{_budget:,}"
+                  + ("" if _have >= _budget else
+                     f" -- UNDER BUDGET; this night is detection-limited. Expected on a thin or "
+                     f"field-sparse night and accepted by the fixed operating point."), flush=True)
         # RANK BEFORE CUTTING. rerank_alerts rewrites alerts.jsonl IN PLACE, permuting it, and the
         # cutout cache is keyed by alert POSITION -- so cutting first and re-ranking second addresses
         # every cached stamp to a different alert than the one whose caption it is rendered under.
@@ -844,8 +736,8 @@ def main(argv=None):
                          "and the 0.50 op does not finish a dense night). op_2v_stream.json is the "
                          "legacy 0.50 variant: the 2026-08-13 scan measured 0.50 and 0.70 to deliver "
                          "IDENTICAL completeness at the 1k budget, so it buys no recall -- it is only "
-                         "slower. The floor is lowered per night by _pick_score_min when a night "
-                         "cannot fill the budget, not by choosing this file.")
+                         "slower. The score floor is FIXED at the op file's value on every night and "
+                         "is never adapted; see op_2v_stream_1k.json:_op_FIXED.")
     ap.add_argument("--stream-top-n", type=int, default=20000,
                     help="how many top-ranked stream alerts get cutouts + sheets (linking keeps ALL; "
                          "this only bounds the image render)")

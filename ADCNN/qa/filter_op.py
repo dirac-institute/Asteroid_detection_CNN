@@ -122,8 +122,8 @@ def _passes_cheap(a, op, chi2_max):
 def survivors_at(alerts, op, chi2_max):
     """How many alerts clear the cheap gates at `chi2_max`. Accepts a path or a parsed list.
 
-    Used both by _auto_chi2 (to pick chi2) and by run_night (to decide whether a night's LINK can
-    fill the budget at all, which is a score_min question, not a chi2 one).
+    Used by _auto_chi2 (an ANALYSIS helper -- the shipped op no longer adapts) and by run_night to
+    REPORT whether a night made budget. run_night only reports it; nothing acts on it.
     """
     al = [json.loads(l) for l in open(alerts)] if isinstance(alerts, (str, os.PathLike)) else alerts
     return sum(1 for a in al if _passes_cheap(a, op, chi2_max))
@@ -160,23 +160,26 @@ def filter_stream(alerts_path, dets_path, op_path, out_path, refcat_path=None, a
     from ADCNN.qa.select_clean import _confident_fp
     op = json.load(open(op_path))
     CHI2, MF, LEN = op["chi2_2v_max"], op["mfsnr_min_2v"], op["len_db_min"]
-    # chi2_2v_max: "auto" -- pick the chi2 that fills the delivered budget to TARGET_FILL.
+    # THE SHIPPED OP IS FIXED: chi2_2v_max = 10.0 on every night (op_2v_stream_1k.json:_op_FIXED).
     #
-    # A FIXED chi2 IS THE WRONG PARAMETERISATION. Measured on two injected nights (5,315 and 4,267
-    # movers, uniform SNR 2-10 x seven trail lengths), scanning chi2 at the delivered 1k budget:
+    # "auto" is still honoured below because the ANALYSIS harness uses it, but it is no longer the
+    # product. What it was for, and the cost of not using it, both stand as measurements:
     #
     #     night   FLAGSHIP-optimal chi2   survivors   survivors/budget
     #     0706            8                 1,749           1.75
     #     0713           16                 1,991           1.99
     #
-    # The optimal chi2 differs 2x between nights; the optimal FILL RATIO does not. Same for the ALL
-    # optimum (3.15 and 2.94). The mechanism is visible in the counts: chi2 too tight UNDER-FILLS the
-    # budget -- 0713 at the shipped chi2=8 ships 692 of 1,000 slots and delivers 2.72% flagship
-    # against 3.80% achievable, losing 28% relative for nothing -- while chi2 too loose OVER-fills and
-    # displaces faint-fast movers (0706 flagship 2.09% -> 1.44% going 8 -> 12, p=0.035 paired).
-    # Targeting the fill ratio is what transfers across cadence; a fixed chi2 is only ever tuned for
-    # the night it was tuned on.
+    # The optimal chi2 differs 2x between nights; the optimal FILL RATIO does not (same for the ALL
+    # optimum, 3.15 and 2.94). chi2 too tight UNDER-FILLS -- 0713 at chi2=8 ships 692 of 1,000 slots
+    # for 2.72% flagship against 3.80% achievable -- while chi2 too loose OVER-fills and displaces
+    # faint-fast movers (0706 flagship 2.09% -> 1.44% going 8 -> 12, p=0.035 paired). A single fixed
+    # 10.0 therefore gives up roughly a third of faint-fast completeness on the densest nights; that
+    # is a deliberate product decision (one unchanging operating point), not an oversight.
     if isinstance(CHI2, str) and CHI2.lower() == "auto":
+        print("[filter_op] WARNING: this op requests chi2_2v_max='auto'. The SHIPPED operating "
+              "point is FIXED (chi2_2v_max=10.0) and does not adapt per night. Auto is retained "
+              "for the analysis harness only -- if you are producing the nightly product, you are "
+              "using the wrong op file.", flush=True)
         CHI2 = _auto_chi2(alerts_path, op, budget=op.get("budget", 1000),
                           target_fill=op.get("target_fill", TARGET_FILL))
     RLO, RHI = op["rate_lo_2v"], op["rate_hi_2v"]

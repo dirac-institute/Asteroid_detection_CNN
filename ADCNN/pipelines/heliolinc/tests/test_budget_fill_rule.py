@@ -1,14 +1,12 @@
-"""The delivered-budget fill rule: chi2 auto-selection and the score-floor relink ladder.
+"""The FIXED operating point, and the chi2 gate machinery underneath it.
 
-These guard the two halves of the 2026-08-13 cemented op point:
+Two things are guarded here:
 
-  * chi2_2v_max = "auto" -- a FIXED chi2 does not transfer across cadence (the measured flagship
-    optimum is 8 on 20260706 and 16 on 20260713), but the BUDGET FILL RATIO does. filter_op picks
-    the chi2 reaching target_fill x budget.
-  * the score floor is chosen by LINK-CHECK-RELINK, not by predicting from detection density. The
-    prediction under-filled 3 of 3 sparse nights (20260712 shipped 644 of 1,000 slots), and the
-    scan measured score_min 0.50/0.60/0.70 to be completeness-IDENTICAL -- so relaxing is free and
-    the ladder only ever steps down.
+  * the chi2 machinery itself (cheap gates, monotonicity, the 3+visit chi2=None tier) still has to
+    be right whatever value is chosen -- _auto_chi2 survives as an ANALYSIS helper only.
+  * the operating point is now FIXED (score_min 0.70, chi2_2v_max 10.0) and never adapts per night
+    (user decision 2026-08-14). A thin night delivers fewer than 1,000 alerts and that is the
+    accepted product. These tests pin that down so adaptivity cannot creep back in.
 
 Every test RUNS the shipped functions on constructed alerts; none asserts on source text.
 """
@@ -16,7 +14,6 @@ import json
 
 import pytest
 
-from ADCNN.pipelines.run_night import SCORE_FLOORS, relink_ladder
 from ADCNN.qa.filter_op import (CHI2_GRID, TARGET_FILL, _auto_chi2, _passes_cheap,
                                 survivors_at)
 
@@ -107,63 +104,48 @@ def test_auto_chi2_agrees_with_survivors_at(tmp_path):
         assert survivors_at(p, OP, prev[-1]) < 1900
 
 
-# ---------------------------------------------------------------- the relink ladder
+# ---------------------------------------------------------------- the FIXED operating point
 
-@pytest.mark.parametrize("start,expect", [
-    (0.70, [0.70, 0.60, 0.50]),
-    (0.60, [0.60, 0.50]),
-    (0.50, [0.50]),
-    (None, [0.70, 0.60, 0.50]),
-])
-def test_ladder_only_ever_steps_down(start, expect):
-    assert relink_ladder(start) == expect
+OP_PATH = "ADCNN/pipelines/heliolinc/op_2v_stream_1k.json"
 
 
-def test_ladder_never_raises_the_floor_above_the_prediction():
-    """Raising is the one direction the scan does NOT license: 0.80 is the first floor measured to
-    cost delivered completeness."""
-    for start in (0.50, 0.60, 0.70):
-        assert max(relink_ladder(start)) <= start
+def _shipped():
+    return json.load(open(OP_PATH))
 
 
-def test_ladder_never_offers_0_80_whatever_the_inputs():
-    for start in (None, 0.50, 0.60, 0.70, 0.90):
-        assert max(relink_ladder(start, prev=None)) <= 0.70
+def test_shipped_op_is_fixed_not_auto():
+    """One unchanging operating point (user decision 2026-08-14). A regression to "auto" would make
+    the delivered chi2 depend on the night again."""
+    op = _shipped()
+    assert op["chi2_2v_max"] == 10.0
+    assert op["score_min"] == 0.70
+    assert "target_fill" not in op, "target_fill is the auto rule's knob; its presence implies adaptivity"
 
 
-@pytest.mark.parametrize("prev,expect", [
-    (0.70, [0.60, 0.50]),
-    (0.60, [0.50]),
-    (0.50, [0.50]),          # exhausted: hand back the lowest so the caller links once, not never
-])
-def test_a_floor_already_tried_is_not_repeated(prev, expect):
-    """Relinking at the floor the existing stream was built with would reproduce it exactly."""
-    assert relink_ladder(0.70, prev=prev) == expect
+def test_shipped_op_records_what_the_fixed_point_costs():
+    """The faint-fast cost of a fixed chi2 is real and measured. If the prose that records it is
+    dropped, the next reader will 'fix' the over-fill without knowing it was chosen."""
+    why = _shipped()["_op_FIXED"]
+    assert "6.2x" in why and "20260706" in why       # the worst over-fill, named
+    assert "721" in why                               # the night that comes in short, named
 
 
-def test_ladder_respects_whichever_of_prediction_and_prev_is_lower():
-    assert relink_ladder(0.60, prev=0.70) == [0.60, 0.50]
-    assert relink_ladder(0.70, prev=0.60) == [0.50]
+def test_run_night_no_longer_adapts_the_floor():
+    """The density prediction and the relink ladder are gone, not merely unused."""
+    import ADCNN.pipelines.run_night as rn
+    for gone in ("relink_ladder", "SCORE_FLOORS", "SCORE_FLOOR_TARGET_DENSITY"):
+        assert not hasattr(rn, gone), f"{gone} still present -- adaptivity can creep back"
 
 
-def test_ladder_is_never_empty():
-    """An empty ladder would silently skip the link entirely and leave the night with no stream."""
-    for start in (None, 0.50, 0.60, 0.70):
-        for prev in (None, 0.50, 0.60, 0.70):
-            assert relink_ladder(start, prev)
+def test_a_thin_night_is_allowed_to_under_deliver(tmp_path):
+    """Under the fixed op, short IS the product on a thin night -- nothing should try to rescue it."""
+    op = _shipped()
+    p = _write(tmp_path, [_alert(chi2=2.0)] * 300)
+    assert survivors_at(p, op, op["chi2_2v_max"]) < op.get("budget", 1000)
 
 
-def test_a_night_that_fills_stops_at_the_first_rung(tmp_path):
-    """The loop is self-limiting: it fires only on SHORT nights, which are sparse, which is exactly
-    where the lower floor is cheap. It must never fire on a dense night where 0.50 is intractable."""
-    p = _write(tmp_path, [_alert(chi2=2.0)] * 5000)
-    want = OP["target_fill"] * OP["budget"]
-    assert survivors_at(p, OP, CHI2_GRID[-1]) >= want
-
-
-def test_a_short_night_is_detected_as_short(tmp_path):
-    """20260712's failure mode: 1,125 alerts is under the 1,900 the budget needs, so the loop must
-    see it and relax rather than ship 644 of 1,000 slots."""
-    p = _write(tmp_path, [_alert(chi2=2.0)] * 1125)
-    want = OP["target_fill"] * OP["budget"]
-    assert survivors_at(p, OP, CHI2_GRID[-1]) < want
+def test_fixed_chi2_admits_strictly_less_than_the_loosest(tmp_path):
+    """Sanity that 10.0 is actually doing work: it must cut the stream, not pass everything."""
+    op = _shipped()
+    al = [_alert(chi2=c) for c in (2, 6, 9, 11, 15, 25)]
+    assert survivors_at(al, op, op["chi2_2v_max"]) < survivors_at(al, op, CHI2_GRID[-1])
