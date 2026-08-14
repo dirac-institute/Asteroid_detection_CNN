@@ -275,7 +275,7 @@ def run(a):
                               low_memory=False)
         except Exception as e:
             print(f"      score floor: cannot read {dets_csv} ({type(e).__name__}) -- leaving the "
-                  f"op's own score_min"); return None
+                  f"op's own score_min", flush=True); return None
         _lk = _d[_d.len_db.fillna(0) >= 6.0]
         _nv = max(int(_d.visit.nunique()), 1)
         for _s in (0.70, 0.60, 0.50):
@@ -283,7 +283,7 @@ def run(a):
             if _dens >= SCORE_FLOOR_TARGET_DENSITY or _s == 0.50:
                 print(f"      score floor: {_s:.2f} ({_dens:,.0f} linkable dets/visit vs target "
                       f"{SCORE_FLOOR_TARGET_DENSITY:,.0f}; seeding goes as density^2, so too high a "
-                      f"floor starves a sparse night and too low makes a dense one intractable)")
+                      f"floor starves a sparse night and too low makes a dense one intractable)", flush=True)
                 return _s
         return 0.50
     out = Path(a.out) if a.out else OUTPUTS / "runs" / f"run_night_{a.night}"
@@ -631,18 +631,18 @@ def run(a):
             _prev = float(_floor_rec.read_text().strip()) if _floor_rec.exists() else None
             if _have >= _want:
                 print(f"      stream fill: reused stream has {_have:,} filterable alerts vs target "
-                      f"{_want:,.0f} -- fills the budget, keeping it")
+                      f"{_want:,.0f} -- fills the budget, keeping it", flush=True)
             elif _prev is not None and _prev <= min(_floors) + 1e-9:
                 # already at the bottom of the ladder and still short: relinking cannot help, the
                 # night is detection-limited. Say so rather than burn a link to learn it again.
                 print(f"      stream fill: reused stream has only {_have:,} vs {_want:,.0f}, but it "
                       f"was already linked at the lowest floor {_prev:.2f} -- detection-limited, "
-                      f"not floor-limited. Keeping it; it will deliver under budget.")
+                      f"not floor-limited. Keeping it; it will deliver under budget.", flush=True)
             else:
                 print(f"      stream fill: reused stream has only {_have:,} filterable alerts vs "
                       f"target {_want:,.0f}"
                       + (f" at floor {_prev:.2f}" if _prev is not None else " (floor unrecorded)")
-                      + " -- RELINKING at a lower floor, which is measured to cost no completeness.")
+                      + " -- RELINKING at a lower floor, which is measured to cost no completeness.", flush=True)
                 _relink = True
 
         if _relink:
@@ -692,11 +692,11 @@ def run(a):
                           f"({_op1k.get('target_fill', _TF)}x budget {_budget}) at score_min {_sm:.2f}"
                           + ("" if _have >= _want else
                              f" -- STILL SHORT at the lowest floor; this night is detection-limited, "
-                             f"not floor-limited, and will deliver under budget."))
+                             f"not floor-limited, and will deliver under budget."), flush=True)
                     break
                 print(f"      stream fill: only {_have:,} filterable alerts vs target {_want:,.0f} at "
                       f"score_min {_sm:.2f} -- the budget cannot be filled and a lower floor is "
-                      f"measured to cost NO completeness. Relinking at {_ladder[_i + 1]:.2f}.")
+                      f"measured to cost NO completeness. Relinking at {_ladder[_i + 1]:.2f}.", flush=True)
         else:
             print(f"      (stream alerts.jsonl exists -- reusing; --force to relink)")
         # RANK BEFORE CUTTING. rerank_alerts rewrites alerts.jsonl IN PLACE, permuting it, and the
