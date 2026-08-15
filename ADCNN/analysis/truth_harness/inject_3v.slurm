@@ -31,11 +31,17 @@ if [ ! -f "$CFG" ]; then
 fi
 # shellcheck disable=SC1091
 source "$CFG"
-: "${INJ_RUN:?set INJ_RUN=<run_night dir with manifest.csv + adcnn_dets_masked.csv>}"
-: "${INJ_TAG:?set INJ_TAG=<truth/dets suffix, e.g. tri_n20260706>}"
 adcnn_activate || exit 1
 cd "$ADCNN_REPO"
 export INJ_EPOCHS=3
-# 30 arc-stratified triples x 15 detectors x 25 movers/panel
-PYTHONPATH="$PWD" python -m ADCNN.analysis.truth_harness.inject_night 30 15 25
-echo "[inj3v] DONE tag=$INJ_TAG"
+# BOTH nights sequentially in ONE allocation: the kipac:kipac@ada association is node-capped, so
+# two 1-GPU jobs pend on AssocGrpNodeLimit while one job with two sequential ~3 h passes fits the
+# 8 h wall. Tune night first so its truth lands earliest.
+for N in 20260706 20260713; do
+  export INJ_RUN="outputs/runs/10k_cadence/run_night_$N"
+  export INJ_TAG="tri_n$N"
+  echo "[inj3v] ===== night $N ====="
+  # 30 arc-stratified triples x 15 detectors x 25 movers/panel
+  PYTHONPATH="$PWD" python -m ADCNN.analysis.truth_harness.inject_night 30 15 25
+  echo "[inj3v] DONE tag=$INJ_TAG"
+done
