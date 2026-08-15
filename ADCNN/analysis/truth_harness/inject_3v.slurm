@@ -2,8 +2,8 @@
 #SBATCH --partition=ada
 #SBATCH --account=kipac:kipac
 #SBATCH --gres=gpu:l40s:1
-#SBATCH -c 16
-#SBATCH --mem=128G
+#SBATCH -c 8
+#SBATCH --mem=48G
 #SBATCH -t 8:00:00
 #SBATCH -J inj3v
 #SBATCH -o outputs/logs/%x_%j.log
