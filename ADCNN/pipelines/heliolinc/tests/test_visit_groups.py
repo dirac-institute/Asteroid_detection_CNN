@@ -105,3 +105,34 @@ def test_limit_is_applied_after_sorting():
     got = visit_groups(vc, 3, positions=np.array([[10.75, -4.6]]), limit=1)
     assert len(got) == 1 and got[0][1] == min(
         dt for _, dt in visit_groups(vc, 3, positions=np.array([[10.75, -4.6]])))
+
+
+# ---------------------------------------------------------------- gate_3v truth matching
+
+def test_gate_3v_classify_separates_true_from_chance():
+    """RUN the classifier on constructed data: an alert whose members all sit on one injected
+    mover's per-epoch positions is TRUE; sharing only two of three epochs is CHANCE."""
+    from ADCNN.analysis.truth_harness.gate_3v import classify
+    T = pd.DataFrame([dict(oid=1, raA=10.0, decA=-5.0, raB=10.1, decB=-5.0, raC=10.2, decC=-5.0,
+                           detA_ok=True, detB_ok=True, detC_ok=True)])
+    mk = lambda eps: dict(nEpochs=3, alertId="x",
+                          epochs=[dict(ra=r, dec=d) for r, d in eps])
+    true_alert = mk([(10.0, -5.0), (10.1, -5.0), (10.2, -5.0)])
+    chance_alert = mk([(10.0, -5.0), (10.1, -5.0), (11.5, -4.2)])   # 3rd member elsewhere
+    t, c, matched = classify([true_alert, chance_alert], T)
+    assert len(t) == 1 and len(c) == 1 and matched == {1}
+
+
+def test_gate_3v_all_members_must_match_the_SAME_mover():
+    """Three members each near a DIFFERENT injected mover must not count as TRUE -- that is
+    precisely a chance alignment of real injections."""
+    from ADCNN.analysis.truth_harness.gate_3v import classify
+    T = pd.DataFrame([
+        dict(oid=1, raA=10.0, decA=-5.0, raB=50.0, decB=0.0, detA_ok=True, detB_ok=True),
+        dict(oid=2, raA=10.1, decA=-5.0, raB=60.0, decB=0.0, detA_ok=True, detB_ok=True),
+        dict(oid=3, raA=10.2, decA=-5.0, raB=70.0, decB=0.0, detA_ok=True, detB_ok=True),
+    ])
+    a = dict(nEpochs=3, alertId="x",
+             epochs=[dict(ra=10.0, dec=-5.0), dict(ra=10.1, dec=-5.0), dict(ra=10.2, dec=-5.0)])
+    t, c, matched = classify([a], T)
+    assert len(t) == 0 and len(c) == 1 and matched == set()
