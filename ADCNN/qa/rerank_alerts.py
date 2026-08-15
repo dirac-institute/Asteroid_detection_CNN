@@ -87,10 +87,12 @@ def main(argv=None):
             n_missing += 1
         al["ranking"] = {"pReal": p, "model": os.path.basename(a.model),
                          "night_fit": model.get("night")}
-    # TIER before pReal. 3+visit tracks have orbit.chi2=None, so P(real) is not computable for them
-    # and pReal=None mapped to -1.0 -- sorting the ~100%-purity discovery tier LAST. On 0706 that put
-    # the night's only 3+visit alert at rank 4795 of 5790. `priority` is 1 for 3+visit, 2 for 2visit,
-    # so keying on it first preserves the tier precedence that priority_score establishes.
+    # TIER before pReal. Historically 3+visit tracks had orbit.chi2=None, P(real) was not
+    # computable, and pReal=None -> -1.0 sorted the ~100%-purity discovery tier LAST (on 0706 the
+    # night's only 3+visit alert landed at rank 4795 of 5790). Since 2026-08-14 the tier carries an
+    # outer-pair chi2 and pReal usually computes -- but it is a 2-VISIT-calibrated logistic, so it
+    # must only order WITHIN the tier: `priority` (1 for 3+visit, 2 for 2visit) keys first either
+    # way, and pre-gated tracks (chi2 null) still fall to the tier's tail via -1.0.
     _pr = lambda al: (al["ranking"]["pReal"] if al["ranking"]["pReal"] is not None else -1.0)
     key = ((lambda al: (al.get("priority", 9), -_pr(al)))
            if a.ignore_class else

@@ -255,8 +255,11 @@ def filter_stream(alerts_path, dets_path, op_path, out_path, refcat_path=None, a
     if surv and _n_pr < len(surv):
         print(f"[filter_op] WARNING: {len(surv)-_n_pr} of {len(surv)} survivors lack ranking.pReal "
               f"and will sort last within their class", flush=True)
-    # TIER before pReal, matching rerank_alerts: pReal is not computable for a 3+visit track (no
-    # 2-visit chi2), so keying on pReal alone sorts the ~100%-purity discovery tier LAST.
+    # TIER before pReal, matching rerank_alerts. Since 2026-08-14 a 3+visit track carries an
+    # outer-pair chi2, so pReal IS usually computable for it -- but it is a 2-VISIT-calibrated
+    # logistic, so it only orders WITHIN the tier; priority (1 for 3+visit) keys first so the
+    # discovery tier cannot be outranked by it. Pre-gated tracks (chi2 null) still sort last
+    # within the tier via pReal=None -> -1.
     surv.sort(key=lambda a: (_rank_class(a), a.get("priority", 9),
                              -(_G(a, "ranking", "pReal", d=-1))))
     with open(out_path, "w") as f:

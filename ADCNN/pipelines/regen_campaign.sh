@@ -66,8 +66,12 @@ for N in "${NIGHTS[@]}"; do
   echo "=== [$N] regenerating -> $LOG ==="
   {
     echo "### $(date -Is) regen $N  collection=$COLL"
-    # Delete ONLY what the fixes invalidate. Detection stays.
-    rm -f  "$D/dets_merged.csv" "$D/stack_dets.csv" "$D/.complete" "$D/SHEETS_INVALID.txt"
+    # Delete ONLY what the fixes invalidate. Detection stays; since 2026-08-15 the MERGE stays too:
+    # the current invalidation is the tangent-plane shear fix in physical_check/fit_residual, which
+    # lives entirely in the LINK -- dets_merged.csv is byte-identical either way, and re-ingesting
+    # the stack (~30-60 min/night of Butler IO) would buy nothing. The stream link, its renders and
+    # the 1k product are what the shear fix changes (the 3+visit tier was rejecting dec-movers).
+    rm -f  "$D/.complete" "$D/SHEETS_INVALID.txt"
     rm -rf "$D/stream" "$D/stream_1k"
     # --stream-workers 32: the wide stage now chunks by (visit, detector) rather than by visit, so
     # its parallelism is bounded by chunk count (hundreds) instead of visit count (tens) and the old
