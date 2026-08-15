@@ -130,8 +130,17 @@ def main():
     N_EPOCHS = int(os.environ.get("INJ_EPOCHS", "2"))
     _pos = dets[["ra", "dec"]].sample(min(30000, len(dets)), random_state=1).to_numpy() \
         if N_EPOCHS >= 3 else None
-    groups = visit_groups(vc, N_EPOCHS, positions=_pos, limit=n_pairs)
-    print(f"[v2] {len(groups)} visit group(s), {N_EPOCHS} epochs each", flush=True)
+    groups = visit_groups(vc, N_EPOCHS, positions=_pos,
+                          limit=(n_pairs if N_EPOCHS == 2 else None))
+    if N_EPOCHS >= 3 and len(groups) > n_pairs:
+        # STRATIFY ACROSS ARC, do not truncate. visit_groups sorts shortest-arc first, so a plain
+        # limit would select ONLY the ~1.3-min snap-adjacent triples -- and a gate tuned on 1-min
+        # arcs says nothing about the 4-52 min arcs the real tier lives on (measured 4.1-51.7 min).
+        # Take evenly spaced ranks across the sorted list: deterministic, spans the arc range.
+        idx = np.unique(np.linspace(0, len(groups) - 1, n_pairs).round().astype(int))
+        groups = [groups[i] for i in idx]
+    print(f"[v2] {len(groups)} visit group(s), {N_EPOCHS} epochs each; "
+          f"arcs {groups[0][1]:.1f}-{groups[-1][1]:.1f} min" if groups else "[v2] NO GROUPS", flush=True)
     rng = np.random.default_rng(12345)
     truth, cats = [], []
     oid = 0
