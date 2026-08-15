@@ -147,14 +147,31 @@ def _orbit_block(chi2, tier, adm):
         has_family = n is not None and np.isfinite(float(n)) and float(n) > 0
     except (TypeError, ValueError):
         has_family = False
+    # NULL chi2 IS AMBIGUOUS WITHOUT THIS. `_f` maps inf/NaN -> None, so a track REJECTED by
+    # pair_chi2's hard pre-gate (dpa_tm/dpa_tt/dspeed -> inf) becomes indistinguishable from one that
+    # was never scored. Since 2026-08-14 the 3+visit tier IS scored, so a bare null there would read
+    # as "not computed" when it means "computed and pre-gated". Say which. (repair_3v_chi2 writes the
+    # same marker post-hoc; keep the two in step or a null means different things by provenance.)
+    _c = _f(chi2)
+    _src = None
+    if _c is None:
+        try:
+            _src = ("outer-pair PRE-GATED (dpa_tm/dpa_tt/dspeed -> inf)"
+                    if np.isinf(float(chi2)) else None)
+        except (TypeError, ValueError):
+            _src = None
     if has_family:
         def rng(k):
             lo, hi = _f(adm.get(k + "_lo")), _f(adm.get(k + "_hi"))
             return [None if lo is None else round(lo, 4), None if hi is None else round(hi, 4)]
-        return dict(chi2=_f(chi2), degenerate=True, rho_au=rng("adm_rho"),
-                    a_au=rng("adm_a"), ecc=rng("adm_e"), q_au=rng("adm_q"))
-    return dict(chi2=_f(chi2), degenerate=True if tier == "2visit" else None,
-                rho_au=None, a_au=None, ecc=None, q_au=None)
+        out = dict(chi2=_c, degenerate=True, rho_au=rng("adm_rho"),
+                   a_au=rng("adm_a"), ecc=rng("adm_e"), q_au=rng("adm_q"))
+    else:
+        out = dict(chi2=_c, degenerate=True if tier == "2visit" else None,
+                   rho_au=None, a_au=None, ecc=None, q_au=None)
+    if _src:
+        out["chi2_source"] = _src
+    return out
 
 
 def priority_score(status, tier, chi2, score_min, mfsnr_min, dt_min=None):
