@@ -210,6 +210,48 @@ def rate_sigma_degday(rms_arcsec, arc_days):
     return float(np.sqrt(2.0) * (s / 3600.0) / dt)
 
 
+def _geometry_block(s, rms_arcsec, vra, vdec, exptime_s=30.0):
+    """The statistics the 3+visit tier is ACTUALLY gated on, published so the gate is auditable.
+
+    physical_check admits a 3+visit track on THREE tier-appropriate tests -- linear-fit RMS over all
+    member positions, each member's trail PA vs the fitted motion PA, and each member's trail SPEED
+    vs the fitted motion speed -- and then none of them reached the alert packet. `rms_arcsec` was
+    computed by fit_residual, handed to build_alert, consumed by _predict/rate_sigma_degday, and
+    dropped. So a reviewer looking at a delivered 3+visit alert could not see WHY it was admitted:
+    chi2 is the 2-visit statistic (and is not what gates this tier), fpp is 2-visit only, and the
+    real gate values were invisible. That is the same defect class as a bare null chi2.
+
+    MEASURED on the 23 3+visit tracks of the nine-night campaign: speedRatioMax sits in [0.85, 1.12]
+    (median 1.08) against a gate that allows +/-50%, so real tracks cluster far inside the threshold.
+    NB that spread is NOT an independent confirmation -- physical_check rule 4 already rejects
+    anything outside +/-50%, so the population is gate-censored by construction. The TIGHTNESS
+    relative to the allowed band is the informative part; it says the gate has headroom, not that
+    the gate is correct. Whether tightening is safe needs truth, which the pair-only injection
+    harness cannot yet supply.
+    """
+    out = dict(linRmsArcsec=_f(rms_arcsec), nPoints=int(len(s)))
+    need = {"ra0", "dec0", "ra1", "dec1", "dec"}
+    if not need <= set(s.columns) or len(s) < 2:
+        return out
+    mpa = np.degrees(np.arctan2(vdec, vra)) % 180.0
+    mspeed = float(np.hypot(vra, vdec))
+    dt = exptime_s / 86400.0
+    dpas, ratios = [], []
+    for _, r in s.iterrows():
+        tvx = (float(r.ra1) - float(r.ra0)) * np.cos(np.radians(float(r.dec))) / dt
+        tvy = (float(r.dec1) - float(r.dec0)) / dt
+        if not (np.isfinite(tvx) and np.isfinite(tvy)):
+            continue
+        tpa = np.degrees(np.arctan2(tvy, tvx)) % 180.0
+        dpas.append(abs(((tpa - mpa + 90) % 180) - 90))
+        ratios.append(np.hypot(tvx, tvy) / max(mspeed, 0.3))
+    if dpas:
+        out["trailMotionDpaMaxDeg"] = _f(max(dpas))
+        out["speedRatioMin"] = _f(min(ratios))
+        out["speedRatioMax"] = _f(max(ratios))
+    return out
+
+
 def build_alert(g, *, alert_id, night, obscode, status, tier, chi2, rms_arcsec, orbit_adm=None,
                 match_obj="", match_frac=0.0, offsets_days=PREDICT_OFFSETS_DAYS, thumbnails=None,
                 hiconf_score=0.80, stationarity=None, fpp=None, static_veto=None, train_veto=None,
@@ -299,6 +341,7 @@ def build_alert(g, *, alert_id, night, obscode, status, tier, chi2, rms_arcsec, 
         orbit=_orbit_block(chi2, tier, orbit_adm),
         match=dict(obj=match_obj or None, frac=_f(match_frac)),
         vetting=vetting,
+        geometry=_geometry_block(s, rms_arcsec, vra, vdec),
         stationarity=stationarity,                       # catalog veto block (link_2visit); None if untested
         fpp=fpp,                                         # null-calibrated chance-link block; None if no calib
         staticVeto=static_veto,                          # bright-static template-footprint block; None if no catalog

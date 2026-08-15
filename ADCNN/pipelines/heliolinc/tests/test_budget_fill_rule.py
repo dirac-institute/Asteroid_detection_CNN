@@ -187,3 +187,61 @@ def test_two_visit_tier_still_gated_when_chi2_absent():
     """The original audit fix must survive: a genuinely unscoreable track still passes."""
     a = _alert(chi2=None); a["tier"] = "2visit"
     assert _passes_cheap(a, OP, chi2_max=3.0)
+
+
+# ---------------------------------------------------------------- the 3+visit gate is auditable
+
+def _track(rate_degday, n=3, trail_pa_offset_deg=0.0, trail_scale=1.0):
+    """A synthetic mover: n epochs due east at `rate`, each with a trail consistent with that motion
+    unless deliberately perturbed."""
+    import numpy as np, pandas as pd
+    dt = 30.0 / 86400.0
+    rows = []
+    for k, tm in enumerate(np.linspace(0.0, 0.0292, n)):
+        ra, dec = 10.0 + rate_degday * tm, -5.0
+        half = rate_degday * dt / 2 * trail_scale
+        th = np.radians(trail_pa_offset_deg)
+        dra, ddec = half * np.cos(th), half * np.sin(th)
+        rows.append(dict(mjd=61000 + tm, ra=ra, dec=dec, visit=100 + k, detector=7,
+                         ra0=ra - dra, dec0=dec - ddec, ra1=ra + dra, dec1=dec + ddec,
+                         mf_snr=8.0, len_db=31.0, score=0.9, mag=22.0, art_frac=0.0))
+    return pd.DataFrame(rows)
+
+
+def _alert_for(g, tier="3+visit", rms=0.08):
+    from ADCNN.linking.rank_alerts import build_alert
+    return build_alert(g, alert_id="T", night=61000, obscode="I11", status="NEW",
+                       tier=tier, chi2=float("inf"), rms_arcsec=rms)
+
+
+def test_three_visit_gate_statistics_are_published():
+    """physical_check admits the tier on linear-RMS + trail-vs-motion PA + trail-vs-motion SPEED, and
+    none of those reached the packet -- rms_arcsec was computed, passed to build_alert, consumed by
+    _predict, and dropped. A reviewer could not see WHY a 3+visit alert was admitted."""
+    a = _alert_for(_track(5.0))
+    gm = a["geometry"]
+    assert gm["linRmsArcsec"] == 0.08 and gm["nPoints"] == 3
+    assert gm["trailMotionDpaMaxDeg"] < 1e-6          # trails parallel to the fitted motion
+    assert 0.99 < gm["speedRatioMax"] < 1.01          # trail length consistent with the motion
+
+
+def test_geometry_block_flags_trail_motion_disagreement():
+    """The discriminator must actually move when the trails do NOT match the fitted motion -- that is
+    the failure mode a chance triplet has and a real mover does not."""
+    gm = _alert_for(_track(5.0, trail_pa_offset_deg=40.0))["geometry"]
+    assert gm["trailMotionDpaMaxDeg"] > 30.0
+    gm2 = _alert_for(_track(5.0, trail_scale=3.0))["geometry"]
+    assert gm2["speedRatioMax"] > 2.5                 # trails 3x too long for the motion
+
+
+def test_geometry_block_present_for_two_visit_too():
+    """Auditability is not tier-specific; the 2-visit product carries the same statistics."""
+    gm = _alert_for(_track(5.0, n=2), tier="2visit")["geometry"]
+    assert gm["nPoints"] == 2 and "speedRatioMax" in gm
+
+
+def test_geometry_block_survives_missing_trail_endpoints():
+    """Stack-sourced rows carry no ra0/dec0/ra1/dec1. The block must degrade, never raise."""
+    g = _track(5.0).drop(columns=["ra0", "dec0", "ra1", "dec1"])
+    gm = _alert_for(g)["geometry"]
+    assert gm["nPoints"] == 3 and "trailMotionDpaMaxDeg" not in gm

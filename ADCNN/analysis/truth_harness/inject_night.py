@@ -36,6 +36,66 @@ def mag_for_snr(snr, m5, trail_px):
     return m5 - 2.5 * np.log10(np.maximum(snr, 1e-3) * dil / 5.0)
 
 
+FOV_DEG = 1.75          # LSSTCam field radius
+
+
+def visit_groups(vc, n_epochs=2, win_min=52.0, dt_min_min=10.0, sep_deg=0.3,
+                 positions=None, fov_deg=FOV_DEG, limit=None):
+    """Visit groups to inject a mover into: PAIRS (n_epochs=2) or common-footprint TRIPLES (3).
+
+    n_epochs=2 keeps the original criterion exactly -- two visits whose BORESIGHTS sit within
+    `sep_deg`, separated by (dt_min_min, win_min] minutes -- so the validated 2-epoch truth sets
+    reproduce unchanged.
+
+    n_epochs=3 CANNOT use that criterion, and this is the whole reason the 3+visit tier had never
+    been truth-validated. Requiring three boresights within 0.3 deg of each other yields ZERO triples
+    on every night measured (0 at 1.0 deg too), yet the pipeline finds 23 real 3+visit tracks across
+    the nine embargo nights -- because three ~3.5 deg-wide fields can share a footprint with their
+    BORESIGHTS up to 3.5 deg apart. Boresight proximity is simply the wrong test for a triple.
+
+    The right test is a COMMON FOOTPRINT: three visits that all cover the same sky, with the widest
+    leg still inside the linking window. Measured that way the same nights offer 353-850 triples
+    each, over 44-60% of detections, with arcs 4.4-45 min -- matching the real tracks' 4.1-51.7 min.
+
+    `positions` is an (N,2) array of real (ra, dec) used to sample where the sky was actually
+    observed; a triple counts only if it co-covers at least one such position. Returns a list of
+    (visits_tuple, widest_dt_min), shortest-arc first.
+    """
+    import itertools
+    vs = vc.index.to_numpy()
+    ra, dec, mjd = vc.ra.to_numpy(), vc.dec.to_numpy(), vc.mjd.to_numpy()
+
+    def _dt(i, j):
+        return abs(mjd[j] - mjd[i]) * 1440.0
+
+    if n_epochs == 2:
+        out = []
+        for i in range(len(vs)):
+            for j in range(i + 1, len(vs)):
+                dt = _dt(i, j)
+                if not (dt_min_min < dt <= win_min):
+                    continue
+                if np.hypot((ra[i] - ra[j]) * np.cos(np.radians(dec[i])), dec[i] - dec[j]) < sep_deg:
+                    out.append(((vs[i], vs[j]), dt))
+        out.sort(key=lambda t: t[1])
+        return out[:limit] if limit else out
+
+    if positions is None or not len(positions):
+        raise ValueError("n_epochs=3 needs `positions` (observed sky) to find common footprints")
+    seen = {}
+    for pra, pdec in np.asarray(positions, float):
+        d = np.hypot((ra - pra) * np.cos(np.radians(pdec)), dec - pdec)
+        m = np.flatnonzero(d < fov_deg)
+        if len(m) < 3:
+            continue
+        for c in itertools.combinations(m.tolist(), 3):
+            span = (mjd[list(c)].max() - mjd[list(c)].min()) * 1440.0
+            if span <= win_min:
+                seen.setdefault(tuple(vs[list(c)]), span)
+    out = sorted(seen.items(), key=lambda t: t[1])
+    return out[:limit] if limit else out
+
+
 def sky_trail_to_pixel(w, ra, dec, L_deg, pa_deg):
     cd = np.cos(np.radians(dec))
     dra = 0.5 * L_deg * np.cos(np.radians(pa_deg)) / max(cd, 1e-6)
@@ -65,22 +125,23 @@ def main():
     dets = pd.read_csv(f"{RUN}/adcnn_dets_masked.csv",
                        usecols=["visit", "detector", "ra", "dec", "mjd"])
     vc = dets.groupby("visit").agg(ra=("ra", "median"), dec=("dec", "median"), mjd=("mjd", "median"))
-    vs = vc.index.to_numpy(); pairs = []
-    for i in range(len(vs)):
-        for j in range(i+1, len(vs)):
-            a, b = vc.loc[vs[i]], vc.loc[vs[j]]
-            dt = abs(b.mjd - a.mjd)*1440.0
-            if not (10 < dt <= 52): continue
-            if np.hypot((a.ra-b.ra)*np.cos(np.radians(a.dec)), a.dec-b.dec) < 0.3:
-                pairs.append((vs[i], vs[j], dt))
-    pairs.sort(key=lambda t: t[2]); pairs = pairs[:n_pairs]
-    print(f"[v2] {len(pairs)} visit pairs", flush=True)
+    # N_EPOCHS=3 injects a mover into a COMMON-FOOTPRINT visit TRIPLE, which is what makes the
+    # 3+visit tier truth-testable at all (see visit_groups: the boresight rule finds zero triples).
+    N_EPOCHS = int(os.environ.get("INJ_EPOCHS", "2"))
+    _pos = dets[["ra", "dec"]].sample(min(30000, len(dets)), random_state=1).to_numpy() \
+        if N_EPOCHS >= 3 else None
+    groups = visit_groups(vc, N_EPOCHS, positions=_pos, limit=n_pairs)
+    print(f"[v2] {len(groups)} visit group(s), {N_EPOCHS} epochs each", flush=True)
     rng = np.random.default_rng(12345)
     truth, cats = [], []
     oid = 0
-    for (vA, vB, dtmin) in pairs:
-        dt_day = dtmin/1440.0
-        dA = dets[dets.visit == vA]; dB = dets[dets.visit == vB]
+    for (_grp, _span) in groups:
+        vA, followups = _grp[0], list(_grp[1:])
+        # TAGS follow the existing truth-column convention: detB_* for the 2nd epoch, detC_* for the
+        # 3rd. Epoch A is always the earliest of the group.
+        _tags = ["B", "C", "D"][:len(followups)]
+        _mjdA = float(vc.loc[vA].mjd)
+        dA = dets[dets.visit == vA]
         for det in dA.detector.value_counts().head(n_dets).index.tolist():
             rowA = man[(man.visit == vA) & (man.detector == det)]
             if not len(rowA): continue
@@ -102,11 +163,15 @@ def main():
                 x, y, Lpx, beta = sky_trail_to_pixel(wA, ra0, dec0, L_deg, pa)
                 mag = float(np.clip(mag_for_snr(snr_t, M5, Lpx), 16.0, 28.0))
                 cd = np.cos(np.radians(dec0))
-                raB = ra0 + rate*dt_day*np.cos(np.radians(pa))/cd
-                decB = dec0 + rate*dt_day*np.sin(np.radians(pa))
                 injA.append(dict(x=x, y=y, trail_length=Lpx, beta=beta, mag=mag))
-                plan.append(dict(oid=oid, rate=rate, L_target=L_target, mag=mag, snr_t=snr_t, pa=pa, raA=ra0, decA=dec0, raB=raB,
-                                 decB=decB, L_px=Lpx, visitA=int(vA), visitB=int(vB), detA=int(det)))
+                _p = dict(oid=oid, rate=rate, L_target=L_target, mag=mag, snr_t=snr_t, pa=pa,
+                          raA=ra0, decA=dec0, L_px=Lpx, visitA=int(vA), detA=int(det))
+                for _tg, _vf in zip(_tags, followups):
+                    _dtd = float(vc.loc[_vf].mjd) - _mjdA
+                    _p[f"ra{_tg}"] = ra0 + rate*_dtd*np.cos(np.radians(pa))/cd
+                    _p[f"dec{_tg}"] = dec0 + rate*_dtd*np.sin(np.radians(pa))
+                    _p[f"visit{_tg}"] = int(_vf)
+                plan.append(_p)
                 oid += 1
             imgA2 = add_trails(np.array(imgA, copy=True), injA)
             prob, _, _, agg = predict_panel_overlap_3ch_full(seg, imgA2, np.zeros(imgA.shape, np.uint16), device=dev)
@@ -126,47 +191,67 @@ def main():
                     p["detA_snr"] = float(cA["mf_snr"].to_numpy()[kk]) if p["detA_ok"] else np.nan
             else:
                 for p in plan: p["detA_ok"] = False
-            for detB in dB.detector.unique():
-                gB = dB[dB.detector == detB]
-                if len(gB) < 50: continue
-                inB = [p for p in plan if gB.ra.min() < p["raB"] < gB.ra.max() and gB.dec.min() < p["decB"] < gB.dec.max()]
-                if not inB: continue
-                rowB = man[(man.visit == vB) & (man.detector == detB)]
-                if not len(rowB): continue
-                try:
-                    with open_diffim(rowB.fits_path.iloc[0], memmap=False) as h:
-                        imgB = np.nan_to_num(h[1].data.astype(np.float32)); wB = WCS(h[1].header)
-                except Exception: continue
-                injB, keptB = [], []
-                for p in inB:
-                    x, y, Lpx, beta = sky_trail_to_pixel(wB, p["raB"], p["decB"], p["rate"]*(EXPTIME/SOLARDAY), p["pa"])
-                    if not (200 < x < imgB.shape[1]-200 and 200 < y < imgB.shape[0]-200): continue
-                    injB.append(dict(x=x, y=y, trail_length=Lpx, beta=beta, mag=p["mag"]))
-                    p["detB_x"], p["detB_y"] = x, y; p["detB"] = int(detB); keptB.append(p)
-                if not injB: continue
-                imgB2 = add_trails(np.array(imgB, copy=True), injB)
-                prob, _, _, agg = predict_panel_overlap_3ch_full(seg, imgB2, np.zeros(imgB.shape, np.uint16), device=dev)
-                cB = panel_to_catalog_rows(0, prob, imgB2, agg, np.zeros(imgB.shape, np.uint16), cnn, cfg)
-                if cB is not None and len(cB):
-                    sky = wB.all_pix2world(cB[["x", "y"]].to_numpy(), 0)
-                    cB["ra"], cB["dec"] = sky[:, 0], sky[:, 1]
-                    cB["visit"] = int(vB); cB["detector"] = int(detB); cB["mjd"] = float(gB.mjd.median())
-                    cats.append(cB)
-                    for p in keptB:
-                        d2 = (cB["x"].to_numpy()-p["detB_x"])**2 + (cB["y"].to_numpy()-p["detB_y"])**2
-                        kk = int(np.argmin(d2))
-                        p["detB_ok"] = bool(d2[kk] <= 25.0)
-                        p["detB_len"] = float(cB["length"].to_numpy()[kk]) if p["detB_ok"] else np.nan
-                        p["detB_score"] = float(cB["score"].to_numpy()[kk]) if p["detB_ok"] else np.nan
-                        p["detB_snr"] = float(cB["mf_snr"].to_numpy()[kk]) if p["detB_ok"] else np.nan
-                else:
-                    for p in keptB: p["detB_ok"] = False
-                truth.extend(keptB)
-        print(f"[v2] pair {vA}/{vB}: truth {len(truth)}", flush=True)
+            # FOLLOW-UP EPOCHS. Identical logic per epoch (propagate -> find the covering detector ->
+            # inject -> detect -> record), so it runs once per tag instead of being duplicated. With
+            # INJ_EPOCHS=2 this executes exactly the original single B pass.
+            _seen_this_panel = set()
+            for _tg, _vf in zip(_tags, followups):
+                dF = dets[dets.visit == _vf]
+                for detF in dF.detector.unique():
+                    gF = dF[dF.detector == detF]
+                    if len(gF) < 50: continue
+                    inF = [p for p in plan
+                           if gF.ra.min() < p[f"ra{_tg}"] < gF.ra.max()
+                           and gF.dec.min() < p[f"dec{_tg}"] < gF.dec.max()]
+                    if not inF: continue
+                    rowF = man[(man.visit == _vf) & (man.detector == detF)]
+                    if not len(rowF): continue
+                    try:
+                        with open_diffim(rowF.fits_path.iloc[0], memmap=False) as h:
+                            imgF = np.nan_to_num(h[1].data.astype(np.float32)); wF = WCS(h[1].header)
+                    except Exception: continue
+                    injF, keptF = [], []
+                    for p in inF:
+                        x, y, Lpx, beta = sky_trail_to_pixel(wF, p[f"ra{_tg}"], p[f"dec{_tg}"],
+                                                             p["rate"]*(EXPTIME/SOLARDAY), p["pa"])
+                        if not (200 < x < imgF.shape[1]-200 and 200 < y < imgF.shape[0]-200): continue
+                        injF.append(dict(x=x, y=y, trail_length=Lpx, beta=beta, mag=p["mag"]))
+                        p[f"det{_tg}_x"], p[f"det{_tg}_y"] = x, y
+                        p[f"det{_tg}"] = int(detF); keptF.append(p)
+                    if not injF: continue
+                    imgF2 = add_trails(np.array(imgF, copy=True), injF)
+                    prob, _, _, agg = predict_panel_overlap_3ch_full(seg, imgF2, np.zeros(imgF.shape, np.uint16), device=dev)
+                    cF = panel_to_catalog_rows(0, prob, imgF2, agg, np.zeros(imgF.shape, np.uint16), cnn, cfg)
+                    if cF is not None and len(cF):
+                        sky = wF.all_pix2world(cF[["x", "y"]].to_numpy(), 0)
+                        cF["ra"], cF["dec"] = sky[:, 0], sky[:, 1]
+                        cF["visit"] = int(_vf); cF["detector"] = int(detF); cF["mjd"] = float(gF.mjd.median())
+                        cats.append(cF)
+                        for p in keptF:
+                            d2 = (cF["x"].to_numpy()-p[f"det{_tg}_x"])**2 + (cF["y"].to_numpy()-p[f"det{_tg}_y"])**2
+                            kk = int(np.argmin(d2))
+                            ok = bool(d2[kk] <= 25.0)
+                            p[f"det{_tg}_ok"] = ok
+                            p[f"det{_tg}_len"] = float(cF["length"].to_numpy()[kk]) if ok else np.nan
+                            p[f"det{_tg}_score"] = float(cF["score"].to_numpy()[kk]) if ok else np.nan
+                            p[f"det{_tg}_snr"] = float(cF["mf_snr"].to_numpy()[kk]) if ok else np.nan
+                    else:
+                        for p in keptF: p[f"det{_tg}_ok"] = False
+                    # a mover is recorded ONCE per panel-group, not once per follow-up epoch --
+                    # otherwise a 3-epoch injection would appear twice in truth and double-count.
+                    for p in keptF:
+                        if p["oid"] not in _seen_this_panel:
+                            _seen_this_panel.add(p["oid"]); truth.append(p)
+        print(f"[v2] group {_grp} (arc {_span:.1f} min): truth {len(truth)}", flush=True)
     T = pd.DataFrame(truth)
-    for c in ("detA_ok", "detB_ok"):
-        if c not in T: T[c] = False
-    T[c] = T[c].fillna(False)
+    # One column per epoch actually injected. The fillna was OUTSIDE this loop, so only the LAST
+    # column was ever filled -- detA_ok kept its NaNs. Latent (both A branches assign it) but wrong,
+    # and with a third epoch it would stop being latent.
+    _okcols = ["detA_ok"] + [f"det{t}_ok" for t in ["B", "C", "D"][:max(0, N_EPOCHS - 1)]]
+    for c in _okcols:
+        if c not in T:
+            T[c] = False
+        T[c] = T[c].fillna(False).astype(bool)
     T.to_csv(f"{V}/truth_{TAG}.csv", index=False)
     C = pd.concat(cats, ignore_index=True)
     # TRAIL ENDPOINTS: `beta` is the IMAGE-frame angle, so the half-length offset must be applied in
@@ -196,15 +281,18 @@ def main():
     C.to_csv(f"{V}/inj_dets_{TAG}.csv", index=False)
     print(f"[v2] TRUTH {len(T)} | DETS {len(C)}", flush=True)
     print("\nDETECTION cascade (fraction of injected movers):")
-    print(f"{'SNR bin':>10} {'rate':>5} {'n':>5} {'detA%':>7} {'detB%':>7} {'both%':>7}")
+    # ALL-epoch recovery is the number that matters for the 3+visit tier: the tier is rare because
+    # it needs the SAME faint object found in every epoch, so its yield goes as (per-epoch p)^N.
+    hdr = "".join(f"{c[:-3]+'%':>8}" for c in _okcols)
+    print(f"{'SNR bin':>10} {'rate':>5} {'n':>5}{hdr}{'ALL%':>8}")
     T["snr_bin"] = pd.cut(T.snr_t, [2,4,6,8,10], right=False)
     for mag in sorted(T.snr_bin.dropna().unique()):
         for rate in sorted(T.L_target.unique()):
             m = (T.snr_bin == mag) & (T.L_target == rate)
             if m.sum() < 5: continue
-            a = 100*T.detA_ok[m].mean(); bb = 100*T.detB_ok[m].fillna(False).mean()
-            both = 100*(T.detA_ok[m] & T.detB_ok[m].fillna(False)).mean()
-            print(f"{str(mag):>10} {rate:5.1f} {int(m.sum()):5d} {a:6.1f}% {bb:6.1f}% {both:6.1f}%")
+            cells = "".join(f"{100*T[c][m].mean():7.1f}%" for c in _okcols)
+            alls = np.logical_and.reduce([T[c][m].to_numpy() for c in _okcols])
+            print(f"{str(mag):>10} {rate:5.1f} {int(m.sum()):5d}{cells}{100*alls.mean():7.1f}%")
 
 
 if __name__ == "__main__":
