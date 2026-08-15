@@ -849,9 +849,22 @@ def physical_check(dets, members, exptime_s=30.0, pa_tol_deg=20.0, speed_frac=0.
             return False, f"2v chi2 {c2:.1f}>{chi2_2v_max}", n_ep
         return True, f"OK 2v chi2 {c2:.1f} a{ci['a']:.2f} e{ci['e']:.2f}", n_ep
     # 2. LINEAR fit residual over ALL member detections (degenerate only for <=2 points)
+    #
+    # ONE PROJECTION, ONE REFERENCE. This used to be `x = ra * cos(dec)` with a PER-POINT cos --
+    # which is not a projection: it multiplies the ABSOLUTE RA (hundreds of degrees) by a varying
+    # cos(dec), injecting a spurious x-velocity of -ra*sin(dec)*ddec/dt. MEASURED on an injected
+    # triplet at RA 318, dec -22.7 moving at PA 132.6: true tangent-plane x-slope +2.17 deg/day,
+    # sheared slope -2.89 -- SIGN-FLIPPED, fitted motion PA 39 deg instead of 133. Every member's
+    # (correct) trail PA then disagreed with that sheared motion by 30-90 deg and rule 3 below
+    # rejected 90% of TRUE injected triplets (64 of 71), preferentially the DEC-MOVING ones --
+    # the shear vanishes when ddec ~ 0, so the survivors were the RA-movers. The 2-visit path never
+    # had this bug (it differences first, one cos); only the >=3-point fit did. Same failure class
+    # as the truth-matcher shear already recorded in measurement-discipline rule 11.
     tt = (g.mjd.to_numpy() - g.mjd.mean())
-    cosd = np.cos(np.radians(g.dec.to_numpy()))
-    x = g.ra.to_numpy() * cosd; y = g.dec.to_numpy()
+    _ra = g.ra.to_numpy(); _ra_ref = float(_ra[0])
+    cosd = float(np.cos(np.radians(g.dec.mean())))
+    x = np.array([float(_dra(v, _ra_ref)) for v in _ra]) * cosd
+    y = g.dec.to_numpy()
     px = np.polyfit(tt, x, 1); py = np.polyfit(tt, y, 1)
     if len(g) <= 2:
         rms = 0.0
@@ -1097,8 +1110,12 @@ def fit_residual(dets, members, exptime_s=30.0):
     RMS (arcsec) and the fitted deg/day speed. Short-arc: linear+quadratic in each coord vs time."""
     g = dets.iloc[members]
     t = g.mjd.to_numpy(); t = t - t.mean()
-    cosd = np.cos(np.radians(g.dec.to_numpy()))
-    x = g.ra.to_numpy() * cosd; y = g.dec.to_numpy()
+    # one projection, one reference -- see the same fix in physical_check (per-point ra*cos(dec)
+    # shears the fitted velocity by -ra*sin(dec)*ddec/dt; sign-flips the slope for dec-movers).
+    _ra = g.ra.to_numpy(); _ra_ref = float(_ra[0])
+    cosd = float(np.cos(np.radians(g.dec.mean())))
+    x = np.array([float(_dra(v, _ra_ref)) for v in _ra]) * cosd
+    y = g.dec.to_numpy()
     deg = 2 if len(g) >= 4 else 1
     rx = x - np.polyval(np.polyfit(t, x, deg), t)
     ry = y - np.polyval(np.polyfit(t, y, deg), t)

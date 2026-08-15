@@ -245,3 +245,50 @@ def test_geometry_block_survives_missing_trail_endpoints():
     g = _track(5.0).drop(columns=["ra0", "dec0", "ra1", "dec1"])
     gm = _alert_for(g)["geometry"]
     assert gm["nPoints"] == 3 and "trailMotionDpaMaxDeg" not in gm
+
+
+# ---------------------------------------------------------------- the projection shear
+
+def test_dec_moving_triplet_passes_physical_check():
+    """THE 3+VISIT SHEAR BUG. physical_check's >=3-point fit used x = ra * cos(dec) with a PER-POINT
+    cos -- absolute RA (hundreds of degrees) times a varying cos(dec) injects a spurious x-velocity
+    of -ra*sin(dec)*ddec/dt. On an injected triplet at RA 318 moving at PA 133 the fitted x-slope
+    SIGN-FLIPPED (+2.17 -> -2.89 deg/day) and rule 3 rejected 64 of 71 TRUE triplets,
+    preferentially the DEC-MOVERS (the shear vanishes at ddec=0). This constructs exactly that
+    geometry -- far-from-zero RA, motion mostly in dec, trails laid along the true motion -- and
+    must PASS. It fails under the per-point-cos code."""
+    import numpy as np
+    import pandas as pd
+    from ADCNN.linking.link_2visit import physical_check, SOLARDAY
+    rate, pa = 3.2, 132.6                      # deg/day, sky PA (math convention, mod 180)
+    dt = 30.0 / SOLARDAY
+    vx, vy = rate * np.cos(np.radians(pa)), rate * np.sin(np.radians(pa))
+    rows = []
+    for k, tm in enumerate((0.0, 0.0019, 0.0258)):     # the real triple's cadence: 2.7 + 34.5 min
+        dec = -22.72 + vy * tm
+        cd = np.cos(np.radians(dec))
+        ra = 317.94 + vx * tm / cd
+        rows.append(dict(mjd=61228.32 + tm, ra=ra, dec=dec, visit=691 + k, detector=183,
+                         ra0=ra - vx * dt / 2 / cd, dec0=dec - vy * dt / 2,
+                         ra1=ra + vx * dt / 2 / cd, dec1=dec + vy * dt / 2,
+                         mf_snr=8.0, len_db=20.0, score=0.95))
+    d = pd.DataFrame(rows)
+    ok, info, n_ep = physical_check(d, [0, 1, 2], 30.0, pa_tol_deg=20.0, lin_rms_arcsec=1.0,
+                                    min_epochs=2, pa_tol_2v_deg=10.0, mfsnr_min_2v=3.0,
+                                    rate_lo_2v=1.0, rate_hi_2v=8.0, len_db_min=6.0)
+    assert n_ep == 3
+    assert ok, f"dec-moving triplet at high RA must pass; got: {info}"
+
+
+def test_fit_residual_speed_is_unsheared():
+    """fit_residual had the same per-point-cos bug; its speed feeds rate_sigma and the geometry
+    block. A pure-dec mover must come back at its true rate, not the sheared one."""
+    import pandas as pd
+    from ADCNN.linking.link_2visit import fit_residual
+    rate = 4.0
+    rows = []
+    for tm in (0.0, 0.01, 0.028):
+        rows.append(dict(mjd=61228.3 + tm, ra=318.0, dec=-22.7 + rate * tm))
+    r, speed = fit_residual(pd.DataFrame(rows), [0, 1, 2])
+    assert abs(speed - rate) < 0.05 * rate, f"speed {speed} vs true {rate}"
+    assert r < 0.05
