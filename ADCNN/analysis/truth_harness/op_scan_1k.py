@@ -115,7 +115,15 @@ def grid_table(T, hit, label):
     print(row + f"{100*hit.mean():>8.1f}%")
 
 
-def main():
+def main(argv=None):
+    # No parameters by design (the scan's axes are the module constants above, deliberately fixed
+    # so tune and held-out arms are byte-identical invocations) -- but a CLI must still answer
+    # --help without touching the filesystem; without this, `--help` fell through into the scan
+    # and died on whatever outputs/ happened to hold.
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.parse_args(argv)
     arms = [(s, f"{V}/sweep_a_s{int(round(s*100)):03d}.jsonl") for s in SCORES]
     T = pd.read_csv(f"{V}/truth_v3.csv").reset_index(drop=True)
     d = scan(f"{V}/truth_v3.csv", arms, "TUNE 0706")

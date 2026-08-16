@@ -31,9 +31,19 @@ import argparse, glob, json, os, re, sys
 from pathlib import Path
 
 MISS_TOL = 0.05
-IMAGE_CAP = 20000            # run_night renders the top --stream-pairs-top-n alerts (default 20000);
-                            # a night with MORE alerts images only the top IMAGE_CAP, so the
-                            # verifier must require images for min(n_alerts, IMAGE_CAP), not all n.
+IMAGE_CAP = 20000            # FALLBACK for streams predating pairs_top_n.json: run_night renders
+                            # the top --stream-pairs-top-n alerts and now RECORDS that cap beside
+                            # the pairs dir; _image_cap() prefers the record, because verifying
+                            # against a hardcoded copy of a CLI default breaks the moment the flag
+                            # is passed. Beyond the cap is intentionally un-rendered, not missing.
+
+
+def _image_cap(stream_dir):
+    """The render cap run_night recorded for this stream (pairs_top_n.json), else IMAGE_CAP."""
+    try:
+        return int(json.load(open(Path(stream_dir) / "pairs_top_n.json"))["top_n"])
+    except Exception:
+        return IMAGE_CAP
 STAGES = ["detect", "link", "images", "summary", "deliver"]
 _IMG_RE = re.compile(r"^alert_\d+_p[\d.NA]+_(.+)_[A-Z']+\.png$")
 
@@ -105,7 +115,7 @@ def status(run_dir):
             for _adir, _apath in ((R / "stream" / "pairs", R / "stream" / "alerts.jsonl"),
                                   (R / "stream_1k" / "pairs", R / "stream_1k" / "alerts.jsonl")):
                 if _adir.is_dir() and _apath.exists():
-                    _nal = min(sum(1 for _ in open(_apath)), IMAGE_CAP)
+                    _nal = min(sum(1 for _ in open(_apath)), _image_cap(_adir.parent))
                     if len(glob.glob(str(_adir / "alert_*.png"))) < _nal:
                         _missing.append(_adir)
                         break
@@ -167,9 +177,9 @@ def status(run_dir):
     n = len(ids)
     st["detail"]["link"] = f"{n} alerts"
 
-    # images: one file per alertId for the TOP min(n, IMAGE_CAP) ranked alerts (alerts.jsonl is
+    # images: one file per alertId for the TOP min(n, cap) ranked alerts (alerts.jsonl is
     # rank-ordered), no dup, no orphan. Beyond the cap is intentionally un-rendered, not missing.
-    want_img = set(ids[:min(n, IMAGE_CAP)])
+    want_img = set(ids[:min(n, _image_cap(sd))])
     imgs = glob.glob(str(sd / "pairs" / "alert_*.png"))
     fids = [m.group(1) for m in (_IMG_RE.match(os.path.basename(p)) for p in imgs) if m]
     fidset = set(fids)

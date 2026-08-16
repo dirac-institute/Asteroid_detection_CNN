@@ -1379,18 +1379,19 @@ def main():
                  "len_db_min": "--len-db-min"}
         # An op key the linker has no flag for is SILENTLY DROPPED, and it reads as applied because
         # the log line lists only what was consumed. op_2v_stream_1k.json -- the op written for the
-        # 1k deliverable -- carries 6 such keys (bright_star_*, morphology_dipole_veto,
-        # drop_confident_fp, drop_stationary_single); the one tool that honoured them was filter_op,
-        # whose caller was deleted with the stale launch scripts. Two of those six now have no
-        # implementation anywhere. An op file is a specification of the product, so state what is
-        # unenforceable rather than pretend otherwise.
+        # 1k deliverable -- carries keys owned by OTHER stages (bright_star_*, budget); name the
+        # owner so a reader of the link log knows where each cut is enforced. It once also carried
+        # three booleans (drop_confident_fp / drop_stationary_single / morphology_dipole_veto) that
+        # NO stage read -- the drops they described are UNCONDITIONAL in filter_op._confident_fp and
+        # the morphology chain -- removed from the op 2026-08-16; entries kept here so an archived
+        # op file naming them still gets an honest answer instead of "silently dropped".
         _NOT_LINKER = {
-            "bright_star_proximity": "merge_dets --refcat (detection time)",
+            "bright_star_proximity": "merge_dets --refcat (detection time) + ADCNN.qa.filter_op",
             "bright_star_radius_arcsec": "merge_dets --refcat-radius",
             "bright_star_mag_max": "merge_dets --refcat-mag-max",
-            "morphology_dipole_veto": "detection-time is_dipole + rank_alerts demotion",
-            "drop_confident_fp": "NOT IMPLEMENTED anywhere",
-            "drop_stationary_single": "NOT IMPLEMENTED anywhere (deliberately kept + labelled)",
+            "morphology_dipole_veto": "UNCONDITIONAL (alert_morphology/select_clean); key ignored",
+            "drop_confident_fp": "UNCONDITIONAL (filter_op._confident_fp); key ignored",
+            "drop_stationary_single": "IGNORED -- singles are FLAG-not-drop by design",
             "budget": "ADCNN.qa.filter_op (delivered-alert budget, for chi2_2v_max=auto)",
             "target_fill": "ADCNN.qa.filter_op (survivors/budget target, for chi2_2v_max=auto)",
         }

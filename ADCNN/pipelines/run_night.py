@@ -229,7 +229,11 @@ def run(a):
           f"{' (explicit --stream-op-point)' if a.stream_op_point else ' (default: tractable on any cadence)'}")
 
     out = Path(a.out) if a.out else OUTPUTS / "runs" / f"run_night_{a.night}"
-    out.mkdir(parents=True, exist_ok=True)
+    # --dry-run must not MATERIALISE anything: a dry-run against a fresh --out used to leave an
+    # empty run_night_<N>/ behind, which downstream tooling (night_status --all, the campaign
+    # driver's "detection artifacts missing" guard) then treated as a real-but-broken night.
+    if not a.dry_run:
+        out.mkdir(parents=True, exist_ok=True)
     manifest = out / "manifest.csv"
 
     # Idempotent re-entry. A night is done only when night_status finds every artifact present AND
@@ -269,6 +273,15 @@ def run(a):
     def s_manifest():
         if manifest.exists() and manifest.stat().st_size > 0 and not a.force:
             print("      (manifest exists; reuse)"); return
+        # --visits auto means "the manifest already exists; I am not choosing visits" (it is what
+        # regen_campaign passes, since its nights are regenerated from kept detection artifacts).
+        # Reaching this point with auto therefore means the manifest is MISSING, and forwarding the
+        # literal string would die deep in build_manifest's int() parse. Fail here, with the cause.
+        if a.visits == "auto":
+            raise SystemExit(
+                f"[run_night] --visits auto requires an existing manifest, but {manifest} is "
+                f"missing or empty. Pass explicit --visits/--tracts to build one, or restore the "
+                f"night's detection artifacts.")
         sel = (f"--visits {a.visits}" if a.visits else
                f"--tracts {a.tracts} --day-start {a.night} --day-end {int(a.night)+1}")
         cmd = (f"bash -c '{lsst}; cd {REPO}; python -m ADCNN.pipelines.heliolinc.build_manifest "
@@ -360,7 +373,10 @@ def run(a):
 
     def s_known():
         kn = out / "known.csv"
-        if _ok(kn, min_bytes=0) and not a.force:
+        # min_bytes default (1): with min_bytes=0 this reduced to bare .exists(), so a 0-byte
+        # known.csv from a crashed build_known_catalog was "reused" and the linker died on a
+        # headerless file. A legitimate empty catalogue is header-only (17 bytes), never 0.
+        if _ok(kn) and not a.force:
             print("      (known.csv exists; reuse)"); return
         if a.no_known:
             # embargo/prompt recipe: header-only catalog; label post-hoc (SkyBoT / mpc-crossmatch).
@@ -547,7 +563,8 @@ def run(a):
         if a.no_stream:
             print("      (--no-stream: skipped)"); return
         sd = out / "stream"
-        sd.mkdir(parents=True, exist_ok=True)
+        if not a.dry_run:
+            sd.mkdir(parents=True, exist_ok=True)
         static = f" --static-catalog {static_catalog}" if _ok(static_catalog) and not a.no_static_veto else ""
         # per-substage resume: a re-run after an interrupted night must not redo the ~45 min link
         # or the S3 cutout pass. --force redoes everything (same convention as manifest/known).
@@ -616,6 +633,12 @@ def run(a):
         _bash(f"python -m ADCNN.qa.alert_pairs --alerts {sd}/alerts.jsonl "
               f"--cutouts {sd}/cutouts.npz --out-dir {sd}/pairs "
               f"--top-n {a.stream_pairs_top_n}", a.dry_run)
+        # Record the ACTUAL render cap so night_status verifies against what was asked for, not a
+        # hardcoded copy of this flag's default -- a non-default --stream-pairs-top-n used to make
+        # the verifier demand images that were deliberately never rendered (or, worse, certify a
+        # partial render on a raised cap).
+        if not a.dry_run:
+            (sd / "pairs_top_n.json").write_text(json.dumps({"top_n": a.stream_pairs_top_n}))
         _bash(f"python -m ADCNN.qa.stream_summary --alerts {sd}/alerts.jsonl "
               f"--out {sd}/stream_summary.json"
               + (f" --static-catalog {static_catalog}" if _ok(static_catalog) else ""), a.dry_run)
@@ -656,10 +679,13 @@ def run(a):
     rep = tm.report(n_visits, n_passes)
     rep.update({"night": a.night, "tracts": a.tracts, "collection": a.collection,
                 "pipeline": pipe.name, "op_point": op_point, "dry_run": bool(a.dry_run)})
-    (out / "runtime_report.json").write_text(json.dumps(rep, indent=2))
-    print(f"  runtime_report.json -> per-visit {rep['per_visit_seconds']}s, "
-          f"per-detector-pass {rep['per_detector_pass_seconds']}s, night {rep['per_night_seconds']}s")
-    _plot_runtime(out, rep, a.dry_run)
+    if a.dry_run:
+        print("  (--dry-run: runtime_report.json not written; nothing was materialised)")
+    else:
+        (out / "runtime_report.json").write_text(json.dumps(rep, indent=2))
+        print(f"  runtime_report.json -> per-visit {rep['per_visit_seconds']}s, "
+              f"per-detector-pass {rep['per_detector_pass_seconds']}s, night {rep['per_night_seconds']}s")
+        _plot_runtime(out, rep, a.dry_run)
 
     # Sentinel: write .complete ONLY if every artifact now verifies, so re-entry is a cheap stat
     # and a half-finished night is never mistaken for done. If it does not verify, say what is
@@ -699,7 +725,8 @@ def main(argv=None):
     ap.add_argument("--night", required=True, help="day_obs, e.g. 20250718")
     sel = ap.add_mutually_exclusive_group(required=True)
     sel.add_argument("--tracts", help="tract list/ranges, e.g. 8489 or 8487-8493 (DRP night)")
-    sel.add_argument("--visits", help="visit id list/ranges (prompt/embargo night; from queryDatasets)")
+    sel.add_argument("--visits", help="visit id list/ranges (prompt/embargo night; from queryDatasets), "
+                                      "or 'auto' to require the run dir's existing manifest")
     ap.add_argument("--out", default=None,
                     help="output run dir (default: <outputs>/runs/run_night_<night>)")
     ap.add_argument("--op-point", default=None, help="override the link op-point JSON")
