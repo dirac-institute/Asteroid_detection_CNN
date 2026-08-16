@@ -12,7 +12,7 @@
 #     4 GPUs -> 5.4 h/night      10 GPUs -> 2.2 h/night
 # The old header comment claiming "~11 h on 4 GPUs" predates the inference optimisation.
 #SBATCH --gres=gpu:l40s:10
-#SBATCH -c 90
+#SBATCH -c 72
 #SBATCH --mem=600G
 #SBATCH -t 6:00:00   # real cost is ~2.2 h on 10 GPUs; a 24 h ask blocked backfill for nothing
                       # 8 h wall killed 20260629 at ~70%% (per-shard .done makes a resubmit

@@ -91,8 +91,6 @@ for N in "${NIGHTS[@]}"; do
         && python -m ADCNN.qa.select_clean --alerts "$K/topk.jsonl" --morph "$K/_morph.npz" \
               --cutouts "$K/_cut.npz" --n "$BUDGET" --mode rings \
               --out-alerts "$K/alerts.jsonl" --out-cutouts "$K/cutouts.npz" \
-        && python -m ADCNN.qa.alert_sheets --alerts "$K/alerts.jsonl" --cutouts "$K/cutouts.npz" \
-              --out-dir "$K/sheets" --per-sheet 48 \
         && python -m ADCNN.qa.alert_pairs --alerts "$K/alerts.jsonl" --cutouts "$K/cutouts.npz" \
               --out-dir "$K/pairs" --workers 12 \
         && python -m ADCNN.qa.stream_summary --alerts "$K/alerts.jsonl" --out "$K/stream_summary.json"
@@ -105,9 +103,13 @@ for N in "${NIGHTS[@]}"; do
       if [ "$K_RC" -ne 0 ]; then rm -f "$K/alerts.jsonl"; fi
     fi
     # ---- verify before declaring the night done ----
-    python -m ADCNN.pipelines.night_status --json "$D" > "$D/regen_status.json" 2>&1
+    # stdout -> the JSON report; stderr -> this night's log. Capturing BOTH into the file put
+    # night_status diagnostics inside the JSON and the parse below died on them, so a COMPLETE
+    # night was reported NOT verified and the next pass rebuilt it from scratch.
+    python -m ADCNN.pipelines.night_status --json "$D" > "$D/regen_status.json"
     # night_status --json emits a LIST of night records, not a dict
-    if python -c "import json,sys; r=json.load(open('$D/regen_status.json')); r=r[0] if isinstance(r,list) else r; sys.exit(0 if r.get('complete') else 1)" 2>/dev/null; then
+    # NB no 2>/dev/null: a parse failure here previously hid the cause of every non-verification.
+    if python -c "import json,sys; r=json.load(open('$D/regen_status.json')); r=r[0] if isinstance(r,list) else r; sys.exit(0 if r.get('complete') else 1)"; then
       : > "$D/.regen_complete"; echo "### $N VERIFIED COMPLETE"
     else
       echo "### $N NOT verified -- see regen_status.json (re-run this script to retry)"

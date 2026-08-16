@@ -537,7 +537,7 @@ def run(a):
 
     def s_stream():
         """Low-threshold ALERT STREAM: a SECOND, additive linking pass at the stream op-point,
-        ranked and rendered to browsable contact sheets for nightly visual QA.
+        ranked and rendered to per-alert pair images for nightly visual QA.
 
         Deliberately separate from the frozen alert product above: that one stays byte-for-byte
         the validated science output, this one trades purity for volume (~10k/night) so the night
@@ -609,9 +609,10 @@ def run(a):
                   f"--limit {a.stream_top_n}", a.dry_run)
         else:
             print(f"      (stream cutouts.npz exists -- reusing; --force to re-cut)")
-        _bash(f"python -m ADCNN.qa.alert_sheets --alerts {sd}/alerts.jsonl "
-              f"--cutouts {sd}/cutouts.npz --out-dir {sd}/sheets "
-              f"--per-sheet {a.stream_per_sheet} --limit {a.stream_top_n}", a.dry_run)
+        # CONTACT SHEETS ARE NOT PRODUCED (user decision 2026-08-16). The per-alert pair images
+        # below are the reviewed artifact; the sheets were a grid view of the same pixels costing
+        # 2.4 GB across nine nights. ADCNN.qa.alert_sheets still exists and can be run by hand
+        # against a rebuilt cutout cache if a bulk view is ever wanted.
         _bash(f"python -m ADCNN.qa.alert_pairs --alerts {sd}/alerts.jsonl "
               f"--cutouts {sd}/cutouts.npz --out-dir {sd}/pairs "
               f"--top-n {a.stream_pairs_top_n}", a.dry_run)
@@ -739,7 +740,7 @@ def main(argv=None):
                          "reason). The score floor is FIXED at the op file's value on every night and "
                          "is never adapted; see op_2v_stream_1k.json:_op_FIXED.")
     ap.add_argument("--stream-top-n", type=int, default=20000,
-                    help="how many top-ranked stream alerts get cutouts + sheets (linking keeps ALL; "
+                    help="how many top-ranked stream alerts get cutouts + pair images (linking keeps ALL; "
                          "this only bounds the image render)")
     ap.add_argument("--stream-per-sheet", type=int, default=48)
     ap.add_argument("--stream-pairs-top-n", type=int, default=20000,
