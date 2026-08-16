@@ -208,8 +208,8 @@ def run(a):
     #   score_min  -> TRACTABILITY. Seeding cost goes as detection DENSITY SQUARED. The calibration
     #                 (op_2v_stream_fullcadence._calibration) measured 0.70 cutting a pilot pointing
     #                 group from 68,878 to 9,155 linkable dets -- ~57x the seeding cost at 0.50 --
-    #                 and op_2v_stream.json run unchanged on 20260629 DID NOT FINISH ONE POINTING
-    #                 GROUP IN 42 MINUTES, extrapolating to several hundred thousand alerts.
+    #                 and the (since-removed) 0.50 op run unchanged on 20260629 DID NOT FINISH ONE
+    #                 POINTING GROUP IN 42 MINUTES, extrapolating to several hundred thousand alerts.
     #   chi2       -> VOLUME. It filters AFTER the orbit solve, so loosening it is nearly free. Both
     #                 ops already use chi2 <= 30, so they do not differ on the volume knob at all.
     # And BOTH op files state that the nightly count is finally set by the top --stream-top-n RANK
@@ -733,10 +733,10 @@ def main(argv=None):
     ap.add_argument("--stream-op-point", default=None,
                     help="stream linking op-point JSON. Default op_2v_stream_fullcadence.json, which "
                          "is tractable at any cadence (score_min 0.70; seeding cost goes as density^2 "
-                         "and the 0.50 op does not finish a dense night). op_2v_stream.json is the "
-                         "legacy 0.50 variant: the 2026-08-13 scan measured 0.50 and 0.70 to deliver "
-                         "IDENTICAL completeness at the 1k budget, so it buys no recall -- it is only "
-                         "slower. The score floor is FIXED at the op file's value on every night and "
+                         "and a 0.50 floor does not finish a dense night -- the 2026-08-13 scan also "
+                         "measured 0.50/0.60/0.70 completeness-IDENTICAL at the 1k budget, so a lower "
+                         "floor buys no recall; the legacy 0.50 op file was removed for exactly that "
+                         "reason). The score floor is FIXED at the op file's value on every night and "
                          "is never adapted; see op_2v_stream_1k.json:_op_FIXED.")
     ap.add_argument("--stream-top-n", type=int, default=20000,
                     help="how many top-ranked stream alerts get cutouts + sheets (linking keeps ALL; "

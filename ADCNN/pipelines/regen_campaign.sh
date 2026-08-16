@@ -1,16 +1,11 @@
 #!/usr/bin/env bash
-# Regenerate every embargo night end to end with the post-audit pipeline.
+# Regenerate the embargo nights' STREAM + 1k products with the current pipeline.
 #
-# WHY A REGENERATION IS NEEDED (all three fixed since the delivered products were made):
-#   * six nights' contact sheets show the WRONG alert's pixels -- the cutout cache is keyed by alert
-#     POSITION and rerank_alerts permuted alerts.jsonl after the cut (see SHEETS_INVALID.txt);
-#     run_night now ranks BEFORE it cuts and the cache carries a sequence fingerprint
-#   * the merge never ring-cleaned the stack side (61.2% ring-positioned vs 10.4% chance) and
-#     re-imported deleted rings; cleaning both sides measured 9.26% -> 9.75% delivered completeness
-#     at the 1k budget (gained 20, lost 1, p=2.1e-05)
-#   * filter_op dropped the ENTIRE 3+visit discovery tier (chi2 is None there, and the default was
-#     99 against an 8.0 gate) -- 52 alerts across nine nights, every delivered
-#     multi_epoch_fraction = 0.0
+# This is the standing regeneration driver, re-run whenever a link-or-downstream fix invalidates the
+# delivered products (its history: the sheet-identity permutation, the unclean stack merge, the
+# dropped 3+visit tier, and the 2026-08-15 tangent-plane shear -- each documented in its own commit
+# and in memory). What it deletes is governed by WHERE the current fix lives; see the rm lines below
+# and keep them honest when the invalidation changes.
 #
 # WHAT IS REUSED: detection. adcnn_dets.csv / adcnn_dets_masked.csv / manifest.csv / known.csv /
 # bright_refcat.parquet are kept, so no GPU time is spent. Only the stale stages are deleted, and
@@ -101,8 +96,13 @@ for N in "${NIGHTS[@]}"; do
         && python -m ADCNN.qa.alert_pairs --alerts "$K/alerts.jsonl" --cutouts "$K/cutouts.npz" \
               --out-dir "$K/pairs" --workers 12 \
         && python -m ADCNN.qa.stream_summary --alerts "$K/alerts.jsonl" --out "$K/stream_summary.json"
-      echo "### stream_1k rc=$?"
+      K_RC=$?
+      echo "### stream_1k rc=$K_RC"
       rm -f "$K/_cut.npz" "$K/_morph.npz"
+      # a failed 1k chain must BLOCK the sentinel: night_status's deliver stage catches artifact
+      # inconsistency, but an rc!=0 with (by chance) consistent-looking leftovers should not certify
+      # either -- delete the half-product so deliver sees "stream_1k present but no alerts".
+      if [ "$K_RC" -ne 0 ]; then rm -f "$K/alerts.jsonl"; fi
     fi
     # ---- verify before declaring the night done ----
     python -m ADCNN.pipelines.night_status --json "$D" > "$D/regen_status.json" 2>&1

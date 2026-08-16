@@ -17,6 +17,11 @@ Stages, in order, with the consistency check each must pass:
   images   one stream/pairs/*.png per alertId, no duplicate ids, no orphan files
   sheets   stream/sheets/index.html + at least one sheet PNG
   summary  stream/stream_summary.json parses and its n_alerts matches alerts.jsonl
+  deliver  stream_1k/ (the ~1k clean product), WHEN PRESENT: alerts.jsonl parses, one pairs image
+           per alert, sheets exist, summary count matches. An absent stream_1k is NOT a failure --
+           run_night alone does not build it (regen_campaign does) -- but a half-built one must
+           never certify: the campaign wrote .regen_complete off this module's verdict while the
+           1k build's rc was logged and IGNORED, so a failed 1k stage was skipped forever.
 
 Usage:
   python -m ADCNN.pipelines.night_status outputs/runs/run_night_20260705      # one night
@@ -30,7 +35,7 @@ MISS_TOL = 0.05
 IMAGE_CAP = 20000            # run_night renders the top --stream-pairs-top-n alerts (default 20000);
                             # a night with MORE alerts images only the top IMAGE_CAP, so the
                             # verifier must require images for min(n_alerts, IMAGE_CAP), not all n.
-STAGES = ["detect", "link", "images", "sheets", "summary"]
+STAGES = ["detect", "link", "images", "sheets", "summary", "deliver"]
 _IMG_RE = re.compile(r"^alert_\d+_p[\d.NA]+_(.+)_[A-Z']+\.png$")
 
 
@@ -65,8 +70,11 @@ def status(run_dir):
         _required_dirs = (R / "stream" / "pairs", R / "stream" / "sheets")
         _missing = [f for f in _required if not (f.exists() and f.stat().st_size > 0)]
         _missing += [d for d in _required_dirs if not (d.is_dir() and any(d.iterdir()))]
+        # stream_1k is in the NEWER list but not the REQUIRED list: its absence is a legitimate
+        # state (run_night alone does not build it), but a 1k product rebuilt after the sentinel
+        # must force re-verification or the deliver stage below is bypassable by a stale sentinel.
         _newer = [f for f in (R / "adcnn_dets_masked.csv", R / "dets_merged.csv",
-                              R / "stream" / "alerts.jsonl")
+                              R / "stream" / "alerts.jsonl", R / "stream_1k" / "alerts.jsonl")
                   if f.exists() and f.stat().st_mtime > _sent.stat().st_mtime]
         if _missing:
             print(f"[night_status] .complete is INVALID (missing/empty "
@@ -180,6 +188,40 @@ def status(run_dir):
             ok = False
     if not ok:
         st["first_missing"] = "summary"; st["detail"]["summary"] = "missing/mismatch"; return st
+
+    # deliver: the ~1k clean product, verified WHEN PRESENT. run_night alone does not build
+    # stream_1k (regen_campaign does), so absence is a legitimate state -- but a half-built one must
+    # never certify. Before this stage the campaign wrote .regen_complete off this module's verdict
+    # while the 1k chain's rc was logged and IGNORED: a night whose 1k build died mid-way was marked
+    # VERIFIED COMPLETE and skipped by every later re-entry.
+    kd = R / "stream_1k"
+    if kd.is_dir():
+        kap = kd / "alerts.jsonl"
+        if not (kap.exists() and kap.stat().st_size > 0):
+            st["first_missing"] = "deliver"; st["detail"]["deliver"] = "stream_1k present but no alerts"
+            return st
+        try:
+            kids = [json.loads(l)["alertId"] for l in open(kap)]
+        except (json.JSONDecodeError, KeyError, UnicodeDecodeError) as e:
+            st["first_missing"] = "deliver"
+            st["detail"]["deliver"] = f"unreadable ({type(e).__name__})"
+            return st
+        kimgs = glob.glob(str(kd / "pairs" / "alert_*.png"))
+        kfids = {m.group(1) for m in (_IMG_RE.match(os.path.basename(p_)) for p_ in kimgs) if m}
+        k_missing = set(kids) - kfids
+        k_orphan = kfids - set(kids)
+        k_sheets = (kd / "sheets" / "index.html").exists() and glob.glob(str(kd / "sheets" / "*.png"))
+        k_sum = None
+        try:
+            k_sum = json.load(open(kd / "stream_summary.json")).get("n_alerts")
+        except Exception:
+            pass
+        st["detail"]["deliver"] = (f"{len(kids)} delivered, {len(kimgs)} pair files, "
+                                   f"{len(k_missing)} missing, {len(k_orphan)} orphan, "
+                                   f"summary={'ok' if k_sum == len(kids) else k_sum}")
+        if k_missing or k_orphan or not k_sheets or k_sum != len(kids):
+            st["first_missing"] = "deliver"
+            return st
 
     st["complete"] = True
     # Re-write the sentinel after a successful re-verification, so the cheap stat path is restored
