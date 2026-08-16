@@ -327,3 +327,30 @@ def test_cluster_seeder_clusters_a_dec_mover_at_high_RA():
     _, tracks = link(d, npt=3, pos_tol_deg=0.05, min_visits=3)
     assert any(set(t) >= {0, 1, 2} for t in tracks), \
         f"dec-mover did not cluster; tracks={tracks}"
+
+
+def test_alerts_csv_flattens_and_preserves_rank(tmp_path):
+    """The CSV is the human-facing view of the delivered product; it must preserve the file's rank
+    order, flatten epochs, and carry the gate statistics -- verified by RUNNING the exporter."""
+    import csv, json, subprocess, sys, os
+    src = tmp_path / "alerts.jsonl"
+    rows = [dict(alertId=f"a{i}", night=61000, tier="3+visit" if i == 0 else "2visit",
+                 status="NEW", nEpochs=3 if i == 0 else 2, arcMin=40.0,
+                 motion=dict(rate_degday=2.0 + i, pa_deg=90.0, rate_sigma_degday=0.01),
+                 orbit=dict(chi2=5.0), ranking=dict(pReal=0.9 - 0.1 * i),
+                 geometry=dict(linRmsArcsec=0.1, trailMotionDpaMaxDeg=3.0, speedRatioMax=1.1),
+                 vetting=dict(score_min=0.8, mfsnr_min=4.0, trail_len_px=[10.0, 12.0]),
+                 epochs=[dict(mjd=61000.1 + k, ra=10.0 + k, dec=-5.0, snr=6.0, trail_len_px=10.0)
+                         for k in range(3 if i == 0 else 2)])
+            for i in range(3)]
+    src.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    repo = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    r = subprocess.run([sys.executable, "-m", "ADCNN.qa.alerts_csv", "--alerts", str(src)],
+                       env=dict(os.environ, PYTHONPATH=os.path.dirname(repo)),
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    got = list(csv.DictReader(open(tmp_path / "alerts.csv")))
+    assert [g["alertId"] for g in got] == ["a0", "a1", "a2"]
+    assert got[0]["tier"] == "3+visit" and got[0]["rank"] == "0"
+    assert got[0]["ep2_ra"] and not got[1]["ep2_ra"]        # 3rd epoch only where it exists
+    assert float(got[0]["linRmsArcsec"]) == 0.1
