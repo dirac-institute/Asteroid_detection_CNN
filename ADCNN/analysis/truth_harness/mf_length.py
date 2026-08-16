@@ -80,7 +80,7 @@ def main(n_panels=40):
     V = "outputs/runs/pa_validate"
     T = pd.read_csv(f"{V}/truth_snr.csv")
     T["detA_ok"] = T.detA_ok.fillna(False)
-    man = pd.read_csv("outputs/runs/10k_cadence/run_night_20260706/manifest.csv")
+    man = pd.read_csv("outputs/runs/10k_cadence/run_night_20260706/work/manifest.csv")
     SIG = float(os.environ.get("MF_SIGMA", PSF_SIGMA_PX))
     TPL, META = build_templates(sigma_px=SIG)
     print(f"[mf] {len(TPL):,} templates ({len(L_GRID)} lengths x {len(B_GRID)} angles), stamp {STAMP}px, tmpl sigma {SIG} (injector {PSF_SIGMA_PX})",

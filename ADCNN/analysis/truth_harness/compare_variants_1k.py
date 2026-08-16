@@ -52,7 +52,7 @@ from scipy.stats import binomtest
 
 V = "outputs/runs/pa_validate"
 OP = "ADCNN/pipelines/heliolinc/op_2v_stream_1k.json"
-REFCAT = "outputs/runs/10k_cadence/run_night_20260706/bright_refcat.parquet"
+REFCAT = "outputs/runs/10k_cadence/run_night_20260706/work/bright_refcat.parquet"
 DETS = f"{V}/inj_dets_v3.csv"
 TRUTH = f"{V}/truth_v3.csv"
 BUDGET = 1000

@@ -56,13 +56,18 @@ def _members(d, alert, tol_arcsec=MATCH_TOL_ARCSEC):
 def repair(night_dir, check=False, exptime=30.0):
     from ADCNN.linking.link_2visit import pair_chi2, ADM_KEYS
     nd = str(night_dir).rstrip("/")
-    dets = os.path.join(nd, "dets_merged.csv")
-    if not os.path.exists(dets):
+    # 2026-08-16 layout: machinery under work/, the delivered ~1k alerts.jsonl at the TOP of the
+    # night dir. Pre-layout dirs (archived runs) keep everything at the top; support both.
+    _w = os.path.join(nd, "work")
+    dets = next((p for p in (os.path.join(_w, "dets_merged.csv"),
+                             os.path.join(nd, "dets_merged.csv")) if os.path.exists(p)), None)
+    if dets is None:
         print(f"[repair3v] {nd}: no dets_merged.csv -- cannot recover trail endpoints, skipping")
         return 0
     d = pd.read_csv(dets, usecols=lambda c: c in NEED, low_memory=False)
     total = 0
-    for rel in ("stream/alerts.jsonl", "stream_1k/alerts.jsonl"):
+    for rel in ("work/stream/alerts.jsonl", "alerts.jsonl",           # current layout
+                "stream/alerts.jsonl", "stream_1k/alerts.jsonl"):     # pre-2026-08-16 layout
         p = os.path.join(nd, rel)
         if not os.path.exists(p) or os.path.getsize(p) == 0:
             continue

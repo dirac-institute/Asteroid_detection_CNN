@@ -40,6 +40,7 @@ def test_visits_auto_without_manifest_fails_at_the_guard(tmp_path):
     assert r.returncode != 0, "auto with no manifest must fail"
     assert "--visits auto requires an existing manifest" in (r.stderr + r.stdout), (
         f"expected the guard's message, got:\n{r.stderr[-1500:]}")
-    # and it must have failed BEFORE any stage side effect: at most the empty run dir exists
-    left = [p for p in out.rglob("*")] if out.exists() else []
+    # and it must have failed BEFORE any stage side effect: empty dirs (the run's own mkdir of
+    # work/ at entry) are fine, FILES are not -- a file means a stage ran.
+    left = [p for p in out.rglob("*") if p.is_file()] if out.exists() else []
     assert not left, f"the failed run left artifacts: {left}"

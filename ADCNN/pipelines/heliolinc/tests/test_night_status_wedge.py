@@ -17,11 +17,12 @@ CONTRACT = ("night", "complete", "first_missing", "detail")
 
 def _night(tmp_path, alerts_bytes=None, dets=True):
     d = tmp_path / "run_night_20260706"
-    (d / "stream").mkdir(parents=True)
+    w = d / "work"                       # 2026-08-16 layout: machinery under work/
+    (w / "stream").mkdir(parents=True)
     if dets:
-        (d / "adcnn_dets_masked.csv").write_text("detid,ra,dec\n1,10.0,-20.0\n")
+        (w / "adcnn_dets_masked.csv").write_text("detid,ra,dec\n1,10.0,-20.0\n")
     if alerts_bytes is not None:
-        (d / "stream" / "alerts.jsonl").write_bytes(alerts_bytes)
+        (w / "stream" / "alerts.jsonl").write_bytes(alerts_bytes)
     return d
 
 
@@ -52,12 +53,14 @@ def test_every_return_path_satisfies_the_contract(tmp_path):
 # ---------------------------------------------------------------- the deliver stage
 
 def _complete_night(tmp_path, with_1k=None):
-    """A night whose STREAM chain fully verifies; with_1k adds a stream_1k in the given state."""
+    """A night whose STREAM chain fully verifies; with_1k adds the DELIVERED product (top-level
+    alerts.jsonl + alerts.csv + pairs/, machinery in work/stream_1k) in the given state."""
     import json
     d = tmp_path / "run_night_20260706"
-    sd = d / "stream"
+    w = d / "work"
+    sd = w / "stream"
     (sd / "pairs").mkdir(parents=True)
-    (d / "adcnn_dets_masked.csv").write_text("detid,ra,dec\n1,10.0,-20.0\n")
+    (w / "adcnn_dets_masked.csv").write_text("detid,ra,dec\n1,10.0,-20.0\n")
     alerts = [{"alertId": f"2v_61227_{i:06d}",
                "epochs": [{"visit": 1 + i, "detector": 2 + i,
                            "ra": 10.0 + i * 0.01, "dec": -5.0 - i * 0.01}]}
@@ -67,19 +70,23 @@ def _complete_night(tmp_path, with_1k=None):
         (sd / "pairs" / f"alert_{i:05d}_p0.90_{a['alertId']}_CLEAN.png").write_bytes(b"png")
     (sd / "stream_summary.json").write_text(json.dumps({"n_alerts": 3}))
     if with_1k is not None:
-        kd = d / "stream_1k"
-        (kd / "pairs").mkdir(parents=True)
+        (d / "pairs").mkdir()
+        (w / "stream_1k").mkdir()
         kalerts = alerts[:2]
-        (kd / "alerts.jsonl").write_text("".join(json.dumps(a) + "\n" for a in kalerts))
+        (d / "alerts.jsonl").write_text("".join(json.dumps(a) + "\n" for a in kalerts))
+        (d / "alerts.csv").write_text("rank,alertId\n" +
+                                      "".join(f"{i},{a['alertId']}\n" for i, a in enumerate(kalerts)))
         for i, a in enumerate(kalerts):
-            (kd / "pairs" / f"alert_{i:05d}_p0.90_{a['alertId']}_CLEAN.png").write_bytes(b"png")
-        (kd / "stream_summary.json").write_text(json.dumps({"n_alerts": 2}))
+            (d / "pairs" / f"alert_{i:05d}_p0.90_{a['alertId']}_CLEAN.png").write_bytes(b"png")
+        (w / "stream_1k" / "stream_summary.json").write_text(json.dumps({"n_alerts": 2}))
         if with_1k == "missing_pair":
-            next(iter((kd / "pairs").iterdir())).unlink()
+            next(iter((d / "pairs").iterdir())).unlink()
         elif with_1k == "summary_mismatch":
-            (kd / "stream_summary.json").write_text(json.dumps({"n_alerts": 99}))
+            (w / "stream_1k" / "stream_summary.json").write_text(json.dumps({"n_alerts": 99}))
         elif with_1k == "empty_alerts":
-            (kd / "alerts.jsonl").write_text("")
+            (d / "alerts.jsonl").write_text("")
+        elif with_1k == "csv_mismatch":
+            (d / "alerts.csv").write_text("rank,alertId\n0,only_one_row\n" * 5)
     return d
 
 
@@ -94,7 +101,8 @@ def test_consistent_stream_1k_certifies(tmp_path):
     assert s["complete"] is True and "deliver" in s["detail"]
 
 
-@pytest.mark.parametrize("state", ["missing_pair", "summary_mismatch", "empty_alerts"])
+@pytest.mark.parametrize("state", ["missing_pair", "summary_mismatch", "empty_alerts",
+                                   "csv_mismatch"])
 def test_half_built_stream_1k_never_certifies(tmp_path, state):
     """THE HOLE THIS STAGE CLOSES: the campaign wrote .regen_complete off this module's verdict
     while the 1k build's rc was logged and ignored -- a night whose 1k chain died mid-way was
@@ -111,7 +119,7 @@ def test_stale_sentinel_cannot_bypass_the_deliver_stage(tmp_path):
     (d / ".complete").write_text("")
     past = time.time() - 3600
     os.utime(d / ".complete", (past, past))          # sentinel predates the 1k product
-    (d / "stream_1k" / "alerts.jsonl").write_text("")   # ...which is now broken
+    (d / "alerts.jsonl").write_text("")              # ...which is now broken
     s = status(str(d))
     assert s["complete"] is False and s["first_missing"] == "deliver"
 
@@ -122,8 +130,8 @@ def test_recorded_zero_cap_needs_no_stream_images(tmp_path):
     status() walk and the sentinel fast path -- with no stream/pairs directory at all."""
     import json, shutil
     d = _complete_night(tmp_path, with_1k="ok")
-    shutil.rmtree(d / "stream" / "pairs")
-    (d / "stream" / "pairs_top_n.json").write_text(json.dumps({"top_n": 0}))
+    shutil.rmtree(d / "work" / "stream" / "pairs")
+    (d / "work" / "stream" / "pairs_top_n.json").write_text(json.dumps({"top_n": 0}))
     s = status(str(d))
     assert s["complete"] is True, s["detail"]
     (d / ".complete").write_text("")                  # sentinel path must agree
@@ -135,7 +143,7 @@ def test_no_record_still_requires_stream_images(tmp_path):
     Deleting the record must NOT quietly excuse missing images."""
     import shutil
     d = _complete_night(tmp_path)
-    shutil.rmtree(d / "stream" / "pairs")
+    shutil.rmtree(d / "work" / "stream" / "pairs")
     s = status(str(d))
     assert s["complete"] is False and s["first_missing"] == "images", s["detail"]
 
@@ -162,7 +170,7 @@ def test_valid_sentinel_cannot_hide_deleted_delivered_images(tmp_path):
     images gone -- and run_night returns immediately on COMPLETE, so the night never self-heals."""
     d = _complete_night(tmp_path, with_1k="ok")
     (d / ".complete").write_text("")
-    for p in list((d / "stream_1k" / "pairs").iterdir())[:-1]:
+    for p in list((d / "pairs").iterdir())[:-1]:
         p.unlink()                                    # leave exactly one -> dir still "non-empty"
     s = status(str(d))
     assert s["complete"] is False, "deleted delivered images certified COMPLETE"
@@ -172,7 +180,7 @@ def test_valid_sentinel_cannot_hide_a_missing_delivered_product(tmp_path):
     """Same hole, coarser: the whole stream_1k/alerts.jsonl removed after certification."""
     d = _complete_night(tmp_path, with_1k="ok")
     (d / ".complete").write_text("")
-    (d / "stream_1k" / "alerts.jsonl").unlink()
+    (d / "alerts.jsonl").unlink()
     assert status(str(d))["complete"] is False
 
 
@@ -181,10 +189,10 @@ def test_permuted_DELIVERED_product_is_caught_by_the_fingerprint(tmp_path):
     UNGUARDED on the delivered product. Reversing stream_1k/alerts.jsonl must not certify."""
     import json as _j
     d = _complete_night(tmp_path, with_1k="ok")
-    kap = d / "stream_1k" / "alerts.jsonl"
+    kap = d / "alerts.jsonl"
     lines = open(kap).read().splitlines(keepends=True)
     # cache fingerprint recorded for the ORIGINAL order...
-    (d / "stream_1k" / "cutouts_meta.json").write_text(
+    (d / "work" / "stream_1k" / "cutouts_meta.json").write_text(
         _j.dumps({"alerts_fingerprint": _fingerprint(kap), "n_alerts": len(lines),
                   "fingerprint_version": _FPV}))
     assert status(str(d))["complete"] is True, "unpermuted product must still certify"
@@ -199,7 +207,7 @@ def test_permuted_DELIVERED_product_is_caught_by_the_fingerprint(tmp_path):
 def test_absent_delivered_cache_is_not_a_failure(tmp_path):
     """A cache is deleted after a successful night; its absence must never be read as mismatch."""
     d = _complete_night(tmp_path, with_1k="ok")
-    assert not (d / "stream_1k" / "cutouts_meta.json").exists()
+    assert not (d / "work" / "stream_1k" / "cutouts_meta.json").exists()
     assert status(str(d))["complete"] is True
 
 

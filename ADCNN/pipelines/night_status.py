@@ -11,17 +11,23 @@ inconsistent -- from the artifacts alone. A campaign driver resumes there; a hum
 verdict. A night is COMPLETE only when every downstream artifact is present AND mutually
 consistent, at which point a `.complete` sentinel is written so the common case is a cheap stat.
 
+Night-dir layout (2026-08-16, user decision): the TOP level is the reviewed product only --
+pairs/ + alerts.jsonl + alerts.csv (the ~1k clean product) plus the hidden sentinels; ALL
+machinery (manifest, dets, refcat, stream/, the 1k chain's cache) lives under work/.
+
 Stages, in order, with the consistency check each must pass:
-  detect   adcnn_dets_masked.csv covers >= (1 - miss_tol) of the manifest panels
-  link     stream/alerts.jsonl exists and is non-empty
-  images   one stream/pairs/*.png per alertId up to the RECORDED render cap (pairs_top_n.json;
-           0 = stream renders deliberately off, the default since 2026-08-16), no dup, no orphan
-  summary  stream/stream_summary.json parses and its n_alerts matches alerts.jsonl
-  deliver  stream_1k/ (the ~1k clean product), WHEN PRESENT: alerts.jsonl parses, one pairs image
-           per alert, summary count matches. An absent stream_1k is NOT a failure --
-           run_night alone does not build it (regen_campaign does) -- but a half-built one must
-           never certify: the campaign wrote .regen_complete off this module's verdict while the
-           1k build's rc was logged and IGNORED, so a failed 1k stage was skipped forever.
+  detect   work/adcnn_dets_masked.csv covers >= (1 - miss_tol) of the manifest panels
+  link     work/stream/alerts.jsonl exists and is non-empty
+  images   one work/stream/pairs/*.png per alertId up to the RECORDED render cap
+           (pairs_top_n.json; 0 = stream renders deliberately off, the default since
+           2026-08-16), no dup, no orphan
+  summary  work/stream/stream_summary.json parses and its n_alerts matches alerts.jsonl
+  deliver  the TOP-LEVEL ~1k product, WHEN PRESENT: alerts.jsonl parses, alerts.csv row count
+           matches, one pairs/ image per alert, work/stream_1k summary count matches. An absent
+           product is NOT a failure -- run_night alone does not build it (regen_campaign does) --
+           but a half-built one must never certify: the campaign wrote .regen_complete off this
+           module's verdict while the 1k build's rc was logged and IGNORED, so a failed 1k stage
+           was skipped forever.
 
 Usage:
   python -m ADCNN.pipelines.night_status outputs/runs/run_night_20260705      # one night
@@ -82,7 +88,8 @@ def status(run_dir):
     """-> dict(night, complete, first_missing, detail). first_missing is the earliest STAGE to
     (re)run, or None when COMPLETE."""
     R = Path(run_dir)
-    sd = R / "stream"
+    W = R / "work"                # machinery; the top level is the reviewed product + sentinels
+    sd = W / "stream"
     st = {"night": R.name.replace("run_night_", ""), "complete": False,
           "first_missing": None, "detail": {}}
     # The sentinel is a CACHE, not proof. It was a one-way latch: `touch .complete` on an empty
@@ -103,31 +110,35 @@ def status(run_dir):
         # re-entry returns immediately on COMPLETE, so such a night could never self-heal. Presence
         # of stream_1k stays optional (run_night alone does not build it), but ONCE IT EXISTS its
         # artifacts are required, or the deliver stage below is bypassable by a valid sentinel.
-        _required = [R / "adcnn_dets_masked.csv", R / "stream" / "alerts.jsonl",
-                     R / "stream" / "stream_summary.json"]
-        # stream/pairs is required only when a render was ASKED FOR (recorded cap > 0). Since
-        # 2026-08-16 the default stream renders nothing -- the delivered stream_1k/pairs is the
-        # image product, and ITS pairs dir stays unconditionally required below.
-        _required_dirs = [R / "stream" / "pairs"] if _image_cap(R / "stream") > 0 else []
-        if (R / "stream_1k").is_dir():
-            _required += [R / "stream_1k" / "alerts.jsonl", R / "stream_1k" / "stream_summary.json"]
-            _required_dirs += [R / "stream_1k" / "pairs"]
+        _required = [W / "adcnn_dets_masked.csv", sd / "alerts.jsonl",
+                     sd / "stream_summary.json"]
+        # work/stream/pairs is required only when a render was ASKED FOR (recorded cap > 0). Since
+        # 2026-08-16 the default stream renders nothing -- the top-level pairs/ is the image
+        # product, and IT stays unconditionally required below once the product exists.
+        _required_dirs = [sd / "pairs"] if _image_cap(sd) > 0 else []
+        if (R / "alerts.jsonl").exists() or (R / "pairs").is_dir():
+            _required += [R / "alerts.jsonl", R / "alerts.csv"]
+            _required_dirs += [R / "pairs"]
         _missing = [f for f in _required if not (f.exists() and f.stat().st_size > 0)]
         _missing += [d for d in _required_dirs if not (d.is_dir() and any(d.iterdir()))]
         # ...and a 1:1 COUNT check: "directory is non-empty" cannot see 999 of 1000 images deleted.
+        # The delivered product has no cap -- EVERY delivered alert has its image.
         if not _missing:
-            for _adir, _apath in ((R / "stream" / "pairs", R / "stream" / "alerts.jsonl"),
-                                  (R / "stream_1k" / "pairs", R / "stream_1k" / "alerts.jsonl")):
+            for _adir, _apath, _cap in ((sd / "pairs", sd / "alerts.jsonl", _image_cap(sd)),
+                                        (R / "pairs", R / "alerts.jsonl", None)):
                 if _adir.is_dir() and _apath.exists():
-                    _nal = min(sum(1 for _ in open(_apath)), _image_cap(_adir.parent))
+                    _nal = sum(1 for _ in open(_apath))
+                    if _cap is not None:
+                        _nal = min(_nal, _cap)
                     if len(glob.glob(str(_adir / "alert_*.png"))) < _nal:
                         _missing.append(_adir)
                         break
-        # stream_1k is in the NEWER list but not the REQUIRED list: its absence is a legitimate
-        # state (run_night alone does not build it), but a 1k product rebuilt after the sentinel
-        # must force re-verification or the deliver stage below is bypassable by a stale sentinel.
-        _newer = [f for f in (R / "adcnn_dets_masked.csv", R / "dets_merged.csv",
-                              R / "stream" / "alerts.jsonl", R / "stream_1k" / "alerts.jsonl")
+        # The delivered product is in the NEWER list but not unconditionally REQUIRED: its absence
+        # is a legitimate state (run_night alone does not build it), but a product rebuilt after
+        # the sentinel must force re-verification or the deliver stage below is bypassable by a
+        # stale sentinel.
+        _newer = [f for f in (W / "adcnn_dets_masked.csv", W / "dets_merged.csv",
+                              sd / "alerts.jsonl", R / "alerts.jsonl")
                   if f.exists() and f.stat().st_mtime > _sent.stat().st_mtime]
         if _missing:
             # STDERR, not stdout. `--json` writes the report to STDOUT, and regen_campaign
@@ -148,8 +159,8 @@ def status(run_dir):
         return st
 
     # detect
-    masked = R / "adcnn_dets_masked.csv"
-    man = R / "manifest.csv"
+    masked = W / "adcnn_dets_masked.csv"
+    man = W / "manifest.csv"
     if not (masked.exists() and masked.stat().st_size > 0):
         st["first_missing"] = "detect"; st["detail"]["detect"] = "no masked dets"; return st
     if man.exists():
@@ -217,16 +228,15 @@ def status(run_dir):
     if not ok:
         st["first_missing"] = "summary"; st["detail"]["summary"] = "missing/mismatch"; return st
 
-    # deliver: the ~1k clean product, verified WHEN PRESENT. run_night alone does not build
-    # stream_1k (regen_campaign does), so absence is a legitimate state -- but a half-built one must
+    # deliver: the TOP-LEVEL ~1k clean product, verified WHEN PRESENT. run_night alone does not
+    # build it (regen_campaign does), so absence is a legitimate state -- but a half-built one must
     # never certify. Before this stage the campaign wrote .regen_complete off this module's verdict
     # while the 1k chain's rc was logged and IGNORED: a night whose 1k build died mid-way was marked
     # VERIFIED COMPLETE and skipped by every later re-entry.
-    kd = R / "stream_1k"
-    if kd.is_dir():
-        kap = kd / "alerts.jsonl"
+    kap = R / "alerts.jsonl"
+    if kap.exists() or (R / "pairs").is_dir():
         if not (kap.exists() and kap.stat().st_size > 0):
-            st["first_missing"] = "deliver"; st["detail"]["deliver"] = "stream_1k present but no alerts"
+            st["first_missing"] = "deliver"; st["detail"]["deliver"] = "pairs/ present but no alerts"
             return st
         try:
             kids = [json.loads(l)["alertId"] for l in open(kap)]
@@ -234,26 +244,35 @@ def status(run_dir):
             st["first_missing"] = "deliver"
             st["detail"]["deliver"] = f"unreadable ({type(e).__name__})"
             return st
-        kimgs = glob.glob(str(kd / "pairs" / "alert_*.png"))
+        kimgs = glob.glob(str(R / "pairs" / "alert_*.png"))
         kfids = {m.group(1) for m in (_IMG_RE.match(os.path.basename(p_)) for p_ in kimgs) if m}
         k_missing = set(kids) - kfids
         k_orphan = kfids - set(kids)
+        # alerts.csv is half of what the user reviews; a product whose CSV is absent or counts a
+        # different number of rows than the JSONL is half-built, not delivered.
+        kcsv = R / "alerts.csv"
+        try:
+            n_csv = sum(1 for _ in open(kcsv)) - 1          # header
+        except OSError:
+            n_csv = None
         k_sum = None
         try:
-            k_sum = json.load(open(kd / "stream_summary.json")).get("n_alerts")
+            k_sum = json.load(open(W / "stream_1k" / "stream_summary.json")).get("n_alerts")
         except Exception:
             pass
         st["detail"]["deliver"] = (f"{len(kids)} delivered, {len(kimgs)} pair files, "
                                    f"{len(k_missing)} missing, {len(k_orphan)} orphan, "
+                                   f"csv={'ok' if n_csv == len(kids) else n_csv}, "
                                    f"summary={'ok' if k_sum == len(kids) else k_sum}")
-        if k_missing or k_orphan or k_sum != len(kids):
+        if k_missing or k_orphan or n_csv != len(kids) or k_sum != len(kids):
             st["first_missing"] = "deliver"
             return st
         # THE PERMUTATION CLASS, on the product that is actually delivered. It was guarded on the
-        # QA stream and unguarded here: reversing stream_1k/alerts.jsonl reported COMPLETE while
-        # the identical reversal of stream/ correctly reported CACHE MISMATCH. Counts and ids
-        # cannot see a permutation; only the fingerprint can.
-        _chk, _ok = _cache_fingerprint_ok(kap, kd / "cutouts_meta.json")
+        # QA stream and unguarded here: reversing the delivered alerts.jsonl reported COMPLETE
+        # while the identical reversal of stream/ correctly reported CACHE MISMATCH. Counts and ids
+        # cannot see a permutation; only the fingerprint can. The delivered cutout cache and its
+        # meta live in work/stream_1k/ (machinery), the product they certify at the top.
+        _chk, _ok = _cache_fingerprint_ok(kap, W / "stream_1k" / "cutouts_meta.json")
         if _chk and not _ok:
             st["detail"]["deliver"] += "; CACHE MISMATCH -- delivered images show the WRONG alerts"
             st["first_missing"] = "deliver"

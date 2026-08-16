@@ -77,7 +77,7 @@ from scipy.spatial import cKDTree
 
 V = "outputs/runs/pa_validate"
 OP = "ADCNN/pipelines/heliolinc/op_2v_stream_1k.json"
-REFCAT = "outputs/runs/10k_cadence/run_night_20260706/bright_refcat.parquet"
+REFCAT = "outputs/runs/10k_cadence/run_night_20260706/work/bright_refcat.parquet"
 BUDGET = 1000
 PERP = 1.0
 PIX = 0.2

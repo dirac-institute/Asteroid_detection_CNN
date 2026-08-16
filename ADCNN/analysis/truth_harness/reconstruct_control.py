@@ -55,7 +55,7 @@ def endpoints(df, man, lcol, bcol):
     return ra0, dec0, ra1, dec1
 
 
-def main(src, dst, manifest="outputs/runs/10k_cadence/run_night_20260706/manifest.csv"):
+def main(src, dst, manifest="outputs/runs/10k_cadence/run_night_20260706/work/manifest.csv"):
     D = pd.read_csv(src)
     man = pd.read_csv(manifest)
     for c in ("length_seg", "beta_seg"):

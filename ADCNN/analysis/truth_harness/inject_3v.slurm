@@ -21,7 +21,7 @@ set -eo pipefail
 # ONE GPU: this is a single sequential process (unlike sn_detect's 10-way shard). ~30 A-panels/group
 # x (1 + 2 follow-up epochs x ~2 covering detectors) at ~4.6 s/panel => ~3 h for 30 groups.
 #
-#   INJ_RUN=outputs/runs/10k_cadence/run_night_20260706 INJ_TAG=tri_n20260706 \
+#   INJ_RUN=outputs/runs/10k_cadence/run_night_20260706/work INJ_TAG=tri_n20260706 \
 #     sbatch ADCNN/analysis/truth_harness/inject_3v.slurm
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 CFG="$HERE/../../pipelines/heliolinc/pipeline_config.sh"
@@ -38,7 +38,7 @@ export INJ_EPOCHS=3
 # two 1-GPU jobs pend on AssocGrpNodeLimit while one job with two sequential ~3 h passes fits the
 # 8 h wall. Tune night first so its truth lands earliest.
 for N in 20260706 20260713; do
-  export INJ_RUN="outputs/runs/10k_cadence/run_night_$N"
+  export INJ_RUN="outputs/runs/10k_cadence/run_night_$N/work"
   export INJ_TAG="tri_n$N"
   echo "[inj3v] ===== night $N ====="
   # 30 arc-stratified triples x 15 detectors x 25 movers/panel

@@ -29,7 +29,7 @@ from e2e_hist import delivered_oids                      # trail-aware segment m
 
 V = "outputs/runs/pa_validate"
 OP1K = "ADCNN/pipelines/heliolinc/op_2v_stream_1k.json"
-REFCAT = "outputs/runs/10k_cadence/run_night_20260706/bright_refcat.parquet"
+REFCAT = "outputs/runs/10k_cadence/run_night_20260706/work/bright_refcat.parquet"
 BUDGET = 1000
 SCORES = [0.50, 0.60, 0.70, 0.80]
 CHI2S = [3, 5, 8, 12, 18, 25, 30]

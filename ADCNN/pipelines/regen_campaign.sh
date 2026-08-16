@@ -51,12 +51,13 @@ NIGHTS=("$@")
 for N in "${NIGHTS[@]}"; do
   D="$OUT_ROOT/run_night_$N"
   LOG="$LOG_DIR/regen_$N.log"
+  W="$D/work"    # machinery; the night dir's TOP level is pairs/ + alerts.jsonl/.csv (the product)
   if [ -f "$D/.regen_complete" ]; then echo "[$N] already regenerated -- skip"; continue; fi
   COLL="$(collection_for "$N")"
   if [ -z "$COLL" ]; then echo "[$N] NO COLLECTION MAPPED -- skipping (add it to collection_for)"; continue; fi
-  if [ ! -s "$D/adcnn_dets_masked.csv" ]; then
-    echo "[$N] no adcnn_dets_masked.csv -- detection artifacts missing, skipping (this script does "\
-"NOT re-run detection; run ./adcnn night for that)"; continue
+  if [ ! -s "$W/adcnn_dets_masked.csv" ]; then
+    echo "[$N] no work/adcnn_dets_masked.csv -- detection artifacts missing, skipping (this script "\
+"does NOT re-run detection; run ./adcnn night for that)"; continue
   fi
   echo "=== [$N] regenerating -> $LOG ==="
   {
@@ -67,7 +68,7 @@ for N in "${NIGHTS[@]}"; do
     # the stack (~30-60 min/night of Butler IO) would buy nothing. The stream link, its renders and
     # the 1k product are what the shear fix changes (the 3+visit tier was rejecting dec-movers).
     rm -f  "$D/.complete" "$D/SHEETS_INVALID.txt"
-    rm -rf "$D/stream" "$D/stream_1k"
+    rm -rf "$W/stream" "$W/stream_1k" "$D/pairs" "$D/alerts.jsonl" "$D/alerts.csv"
     # --stream-workers 32: the wide stage now chunks by (visit, detector) rather than by visit, so
     # its parallelism is bounded by chunk count (hundreds) instead of visit count (tens) and the old
     # 4-worker RAM cap is gone. 32 of 128 cores leaves headroom for the linker's own pool.
@@ -81,37 +82,40 @@ for N in "${NIGHTS[@]}"; do
     RC=$?
     echo "### run_night rc=$RC"
     # ---- the ~1k clean deliverable, rebuilt from the corrected stream ----
-    if [ $RC -eq 0 ] && [ -s "$D/stream/alerts.jsonl" ]; then
-      K="$D/stream_1k"; mkdir -p "$K"
-      python -m ADCNN.qa.filter_op --alerts "$D/stream/alerts.jsonl" --dets "$D/dets_merged.csv" \
-          --op "$OP1K" --out "$K/surv.jsonl" --refcat "$D/bright_refcat.parquet" \
+    # The chain works in work/stream_1k (cache + summary stay there as machinery); the PRODUCT --
+    # alerts.jsonl, alerts.csv, pairs/ -- lands at the TOP of the night dir, which holds nothing else.
+    if [ $RC -eq 0 ] && [ -s "$W/stream/alerts.jsonl" ]; then
+      K="$W/stream_1k"; mkdir -p "$K"
+      python -m ADCNN.qa.filter_op --alerts "$W/stream/alerts.jsonl" --dets "$W/dets_merged.csv" \
+          --op "$OP1K" --out "$K/surv.jsonl" --refcat "$W/bright_refcat.parquet" \
         && head -n "$HEADROOM" "$K/surv.jsonl" > "$K/topk.jsonl" \
-        && python -m ADCNN.qa.alert_cutouts --alerts "$K/topk.jsonl" --dets "$D/dets_merged.csv" \
+        && python -m ADCNN.qa.alert_cutouts --alerts "$K/topk.jsonl" --dets "$W/dets_merged.csv" \
               --out "$K/_cut.npz" --stamp-px 96 --workers 32 \
         && python -m ADCNN.qa.alert_morphology --alerts "$K/topk.jsonl" --cutouts "$K/_cut.npz" \
               --out "$K/_morph.npz" \
         && python -m ADCNN.qa.select_clean --alerts "$K/topk.jsonl" --morph "$K/_morph.npz" \
               --cutouts "$K/_cut.npz" --n "$BUDGET" --mode rings \
-              --out-alerts "$K/alerts.jsonl" --out-cutouts "$K/cutouts.npz" \
-        && python -m ADCNN.qa.alert_pairs --alerts "$K/alerts.jsonl" --cutouts "$K/cutouts.npz" \
-              --out-dir "$K/pairs" --workers 12 \
-        && python -m ADCNN.qa.stream_summary --alerts "$K/alerts.jsonl" --out "$K/stream_summary.json"
+              --out-alerts "$D/alerts.jsonl" --out-cutouts "$K/cutouts.npz" \
+        && python -m ADCNN.qa.alert_pairs --alerts "$D/alerts.jsonl" --cutouts "$K/cutouts.npz" \
+              --out-dir "$D/pairs" --workers 12 \
+        && python -m ADCNN.qa.alerts_csv --alerts "$D/alerts.jsonl" \
+        && python -m ADCNN.qa.stream_summary --alerts "$D/alerts.jsonl" --out "$K/stream_summary.json"
       K_RC=$?
-      echo "### stream_1k rc=$K_RC"
-      rm -f "$K/_cut.npz" "$K/_morph.npz"
+      echo "### deliverable rc=$K_RC"
+      rm -f "$K/_cut.npz" "$K/_cut_meta.json" "$K/_morph.npz"
       # a failed 1k chain must BLOCK the sentinel: night_status's deliver stage catches artifact
       # inconsistency, but an rc!=0 with (by chance) consistent-looking leftovers should not certify
-      # either -- delete the half-product so deliver sees "stream_1k present but no alerts".
-      if [ "$K_RC" -ne 0 ]; then rm -f "$K/alerts.jsonl"; fi
+      # either -- delete the half-product so deliver sees "pairs/ present but no alerts".
+      if [ "$K_RC" -ne 0 ]; then rm -f "$D/alerts.jsonl" "$D/alerts.csv"; fi
     fi
     # ---- verify before declaring the night done ----
     # stdout -> the JSON report; stderr -> this night's log. Capturing BOTH into the file put
     # night_status diagnostics inside the JSON and the parse below died on them, so a COMPLETE
     # night was reported NOT verified and the next pass rebuilt it from scratch.
-    python -m ADCNN.pipelines.night_status --json "$D" > "$D/regen_status.json"
+    python -m ADCNN.pipelines.night_status --json "$D" > "$W/regen_status.json"
     # night_status --json emits a LIST of night records, not a dict
     # NB no 2>/dev/null: a parse failure here previously hid the cause of every non-verification.
-    if python -c "import json,sys; r=json.load(open('$D/regen_status.json')); r=r[0] if isinstance(r,list) else r; sys.exit(0 if r.get('complete') else 1)"; then
+    if python -c "import json,sys; r=json.load(open('$W/regen_status.json')); r=r[0] if isinstance(r,list) else r; sys.exit(0 if r.get('complete') else 1)"; then
       : > "$D/.regen_complete"; echo "### $N VERIFIED COMPLETE"
     else
       echo "### $N NOT verified -- see regen_status.json (re-run this script to retry)"

@@ -26,6 +26,13 @@ Speed contract: the linker's cheap prefilters (chord seeding + partial-chi2 pre-
 candidates; the final orbit-fit chi2 and physical_check gates stay exact -- final measurements and
 gates are reproducible, approximation is for pruning only.
 
+Output layout (2026-08-16): the night dir's TOP LEVEL is the reviewed product only --
+  run_night_<N>/pairs/        the ~1k per-alert pair images   (built by regen_campaign's 1k chain)
+  run_night_<N>/alerts.jsonl  the ~1k clean alert product     (ditto; record of truth)
+  run_night_<N>/alerts.csv    the same, flattened for spreadsheets
+  run_night_<N>/work/         EVERYTHING this module builds (manifest, dets, refcat, stream/, ...)
+plus the hidden .complete/.regen_complete sentinels. run_night itself only ever writes work/.
+
     # dry-run one night (prints the exact chain, runs the integrity preflight):
     ./adcnn night --butler-repo embargo --collection LSSTCam/runs/prompt/.../ApPipe/... \
         --night 20260628 --visits 2026062800001-2026062800400 --dry-run
@@ -228,7 +235,13 @@ def run(a):
     print(f"      stream op-point: {os.path.basename(stream_op)}"
           f"{' (explicit --stream-op-point)' if a.stream_op_point else ' (default: tractable on any cadence)'}")
 
-    out = Path(a.out) if a.out else OUTPUTS / "runs" / f"run_night_{a.night}"
+    # THE NIGHT DIR IS THE PRODUCT (user decision 2026-08-16): its top level holds ONLY what is
+    # reviewed -- pairs/ (the ~1k per-alert images), alerts.jsonl + alerts.csv (the ~1k product,
+    # built by regen_campaign's 1k chain) -- plus the hidden sentinels. EVERYTHING this module
+    # builds is machinery and lives under work/: `out` points there, so every artifact path below
+    # lands in work/ by construction and cannot drift back to the top.
+    root = Path(a.out) if a.out else OUTPUTS / "runs" / f"run_night_{a.night}"
+    out = root / "work"
     # --dry-run must not MATERIALISE anything: a dry-run against a fresh --out used to leave an
     # empty run_night_<N>/ behind, which downstream tooling (night_status --all, the campaign
     # driver's "detection artifacts missing" guard) then treated as a real-but-broken night.
@@ -242,7 +255,7 @@ def run(a):
     # and let each stage's own reuse guard skip the parts that are already good.
     from ADCNN.pipelines.night_status import status as _night_status, mark_complete as _mark_complete
     if not a.force:
-        _s = _night_status(str(out))
+        _s = _night_status(str(root))
         if _s["complete"]:
             print(f"[run_night] {a.night} already COMPLETE (all artifacts consistent); "
                   f"nothing to do. --force to rebuild."); return
@@ -252,7 +265,7 @@ def run(a):
 
     print(f"[run_night] pipeline={pipe.name} provenance={pipe.provenance}")
     print(f"  night={a.night} tracts={a.tracts} visits={a.visits} collection={a.collection}")
-    print(f"  out={out}")
+    print(f"  out={root}  (machinery -> {out})")
     print(f"  op-point={op_point} ({'DISCOVERY' if op_point == str(DISCOVERY_OP) else 'ALERT (default)'})")
 
     preflight(pipe, op_point, discovery=a.discovery)
@@ -697,16 +710,17 @@ def run(a):
     # and a half-finished night is never mistaken for done. If it does not verify, say what is
     # still missing rather than claiming success -- the campaign driver reads this to decide.
     if not a.dry_run and not a.no_stream:
-        fin = _night_status(str(out))
+        fin = _night_status(str(root))
         if fin["complete"]:
-            _mark_complete(str(out))
-            print(f"[run_night] {a.night} COMPLETE -> {out}/ (.complete written)")
+            _mark_complete(str(root))
+            print(f"[run_night] {a.night} COMPLETE -> {root}/ (.complete written)")
         else:
             print(f"[run_night] {a.night} finished stages but NOT complete: "
                   f"still needs '{fin['first_missing']}' ({fin['detail']}). "
                   f"Re-run to resume; not marking complete.")
     else:
-        print(f"[run_night] done -> {out}/ (tracks.csv + alerts.jsonl + runtime_report.json)")
+        print(f"[run_night] done -> {root}/ (machinery in work/: tracks.csv + alerts.jsonl + "
+              f"runtime_report.json)")
     return rep
 
 
