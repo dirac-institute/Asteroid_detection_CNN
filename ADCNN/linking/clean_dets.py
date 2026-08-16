@@ -37,7 +37,9 @@ def ring_mask(dets: pd.DataFrame, refcat_path=None, radius_arcsec=2.5, mag_max=2
     n = len(dets)
     dip = np.zeros(n, bool)
     if use_dipole and "is_dipole" in dets.columns:
-        dip = dets["is_dipole"].fillna(False).astype(bool).to_numpy()
+        # object-dtype tri-state (True/False/NaN from the merged CSV): `== True` keeps the exact
+        # semantics (only literal True flags) without the deprecated object-fillna warning.
+        dip = (dets["is_dipole"] == True).to_numpy(bool)  # noqa: E712
     elif use_dipole and verbose:
         print("[clean-dets] no is_dipole column (older catalogue) -- morphology cut skipped", flush=True)
     prox = np.zeros(n, bool)

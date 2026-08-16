@@ -292,3 +292,38 @@ def test_fit_residual_speed_is_unsheared():
     r, speed = fit_residual(pd.DataFrame(rows), [0, 1, 2])
     assert abs(speed - rate) < 0.05 * rate, f"speed {speed} vs true {rate}"
     assert r < 0.05
+
+
+def test_cluster_seeder_clusters_a_dec_mover_at_high_RA():
+    """The 3+visit CLUSTER seeder (link, npt=3) had the same per-point ra*cos(dec) shear as
+    physical_check: a dec-mover at RA 318 accrued ~0.6 deg of spurious x-separation against a
+    0.05 deg tolerance and could never cluster -- promotion masked it. RUN the seeder on exactly
+    that geometry: three epochs of one dec-heavy mover, with trails, must come back as ONE track."""
+    import numpy as np
+    import pandas as pd
+    from ADCNN.linking.link_2visit import link, SOLARDAY
+    rate, pa = 6.0, 95.0                    # nearly pure dec motion
+    vx = rate * np.cos(np.radians(pa)); vy = rate * np.sin(np.radians(pa))
+    dt = 30.0 / SOLARDAY
+    rows = []
+    for k, tm in enumerate((0.0, 20.0, 42.0)):          # minutes
+        t = tm / 1440.0
+        dec = -22.7 + vy * t
+        cd = np.cos(np.radians(dec))
+        ra = 318.0 + vx * t / cd
+        rows.append(dict(mjd=61228.3 + t, ra=ra, dec=dec, visit=700 + k,
+                         ra0=ra - vx * dt / 2 / cd, dec0=dec - vy * dt / 2,
+                         ra1=ra + vx * dt / 2 / cd, dec1=dec + vy * dt / 2,
+                         length=rate * 30.0 / 86400.0 * 3600.0 / 0.2))
+    # far-away noise so clustering is not vacuous
+    rng = np.random.default_rng(7)
+    for k in range(3):
+        for _ in range(5):
+            ra, dec = 310.0 + rng.uniform(0, 1), -25.0 + rng.uniform(0, 1)
+            rows.append(dict(mjd=61228.3 + (0.0, 20.0, 42.0)[k] / 1440.0, ra=ra, dec=dec,
+                             visit=700 + k, ra0=ra, dec0=dec, ra1=ra + 1e-4, dec1=dec + 1e-4,
+                             length=6.0))
+    d = pd.DataFrame(rows)
+    _, tracks = link(d, npt=3, pos_tol_deg=0.05, min_visits=3)
+    assert any(set(t) >= {0, 1, 2} for t in tracks), \
+        f"dec-mover did not cluster; tracks={tracks}"

@@ -144,9 +144,13 @@ def render_alert(alert, dets, store, out_path, *, statics=None, half_px=95, dpi=
             ax.add_patch(plt.Circle((r.x, r.y), 14, fill=False, color=col,
                                     lw=2.0 if is_me else 1.2, alpha=0.95 if is_me else 0.8))
             if is_me:
-                ax.annotate(f"S={r.score:.2f}  mfSNR={r.mf_snr:.1f}  L={r.length:.1f}px\n"
-                            f"forced capsule SNR = {f_det['snr']:+.1f}$\\sigma$ "
-                            f"({f_det['n_good']} px)",
+                # forced_at0 returns None when the position is off-panel / the cutout degenerate --
+                # that is its documented contract, and 8 of 9 campaign nights lost their ENTIRE
+                # report package to an unguarded subscript of it (best-effort catch upstream, so the
+                # first off-panel alert silently ended the report for the night).
+                _fd = (f"forced capsule SNR = {f_det['snr']:+.1f}$\\sigma$ ({f_det['n_good']} px)"
+                       if f_det else "forced capsule SNR unmeasurable (off panel)")
+                ax.annotate(f"S={r.score:.2f}  mfSNR={r.mf_snr:.1f}  L={r.length:.1f}px\n" + _fd,
                             (r.x, r.y), xytext=(18, 16), textcoords="offset points",
                             color=col, fontsize=9, fontweight="bold")
             else:
@@ -161,15 +165,17 @@ def render_alert(alert, dets, store, out_path, *, statics=None, half_px=95, dpi=
                 ax.plot(cxs, cys, color="#ffee58", lw=1.6, ls="--")
                 ax.add_patch(plt.Circle((ox, oy), 14, fill=False, color="#ffee58",
                                         lw=1.4, ls=":"))
-                ax.annotate("position @ other epoch\n"
-                            f"forced snr_at0 = {f_other['snr']:+.2f}$\\sigma$ "
-                            f"({f_other['n_good']} px clean, badfrac {f_other['badfrac']:.0%})",
+                _fo = (f"forced snr_at0 = {f_other['snr']:+.2f}$\\sigma$ "
+                       f"({f_other['n_good']} px clean, badfrac {f_other['badfrac']:.0%})"
+                       if f_other else "forced snr_at0 unmeasurable (off panel / degenerate)")
+                ax.annotate("position @ other epoch\n" + _fo,
                             (ox, oy), xytext=(-16, -56) if k == 0 else (-120, -56),
                             textcoords="offset points", color="#c8b900", fontsize=8.5)
             else:
+                _fo = (f"forced snr_at0 there = {f_other['snr']:+.2f}$\\sigma$"
+                       if f_other else "forced snr_at0 there unmeasurable")
                 ax.annotate(f"other epoch on this detector, "
-                            f"{np.hypot(ox - cx, oy - cy) * PXSCALE:.0f}\" away (off cutout)\n"
-                            f"forced snr_at0 there = {f_other['snr']:+.2f}$\\sigma$",
+                            f"{np.hypot(ox - cx, oy - cy) * PXSCALE:.0f}\" away (off cutout)\n" + _fo,
                             (0.03, 0.03), xycoords="axes fraction",
                             color="#c8b900", fontsize=8.5)
         else:
@@ -256,10 +262,22 @@ def main(argv=None):
                    a.static_radius_arcsec)
 
     store = PanelStore(max_panels=4)
+    n_fail = 0
     for rank, alert in enumerate(alerts):
         out = os.path.join(a.out_dir, f"overlay_rank{rank:02d}_{alert['alertId']}.png")
-        render_alert(alert, dets, store, out, statics=statics,
-                     half_px=a.half_px, dpi=a.dpi, rank=rank)
+        # PER-ALERT containment. The caller's try/except wraps the WHOLE report, so before this one
+        # failing alert ended the report for the night -- 8 of 9 campaign nights shipped a partial
+        # report because a single alert's other-epoch position fell off-panel. One bad alert now
+        # costs one overlay, and the failure is named instead of truncating silently.
+        try:
+            render_alert(alert, dets, store, out, statics=statics,
+                         half_px=a.half_px, dpi=a.dpi, rank=rank)
+        except Exception as e:  # noqa: BLE001 -- report is best-effort per alert, not per night
+            n_fail += 1
+            print(f"[trail-overlays] WARNING: rank{rank:02d} {alert.get('alertId')} failed "
+                  f"({type(e).__name__}: {e}) -- skipped, continuing", flush=True)
+    if n_fail:
+        print(f"[trail-overlays] {n_fail} of {len(alerts)} overlays failed and were skipped", flush=True)
         print(f"[trail-overlays] saved {out}", flush=True)
     print(f"[trail-overlays] {len(alerts)} alert figure(s) -> {a.out_dir}", flush=True)
 

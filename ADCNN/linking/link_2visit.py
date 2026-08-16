@@ -301,10 +301,19 @@ def link(dets, *, exptime_s=30.0, tref=None, pos_tol_deg=0.017, vel_frac=0.30, v
     mjd = dets.mjd.to_numpy()
     if tref is None:
         tref = 0.5 * (mjd.min() + mjd.max())
-    cosd = np.cos(np.radians(dets.dec.to_numpy()))
     vx, vy = trail_velocity(dets, exptime_s)
+    # ONE PROJECTION, ONE REFERENCE -- the same shear class fixed in physical_check/fit_residual.
+    # This used absolute `ra * cos(dec)` with a PER-POINT cos as the clustering x-coordinate, which
+    # gives two detections of the SAME dec-moving object a spurious x-separation of
+    # -ra*sin(dec)*ddec: at RA 318, dec -22, a 8 deg/day dec-mover accrues ~0.6 deg over the 52-min
+    # window against a 0.05 deg clustering tolerance, so the 3+visit CLUSTER seeder simply could not
+    # cluster dec-movers (extend_to_triplets promotion masked it). Differences from the night-median
+    # reference with a single cos keep co-clustered pairs undistorted; the residual cos(dec)/cos(ref)
+    # scale error across a wide night is a few percent of the (semantic) tolerance, not a shear.
+    _ra_ref = float(np.median(dets.ra.to_numpy()))
+    _cos_ref = float(np.cos(np.radians(np.median(dets.dec.to_numpy()))))
     # propagate each detection back to tref using its own trail velocity
-    x0 = dets.ra.to_numpy() * cosd - vx * (mjd - tref)
+    x0 = _dra(dets.ra.to_numpy(), _ra_ref) * _cos_ref - vx * (mjd - tref)
     y0 = dets.dec.to_numpy() - vy * (mjd - tref)
     visit = dets.visit.to_numpy()
 
@@ -559,7 +568,12 @@ def prefilter_2v_pairs(dets, pairs, chi2_max, exptime_s=30.0):
     mjd = d.mjd.to_numpy(); ra = d.ra.to_numpy(); dec = d.dec.to_numpy()
     dt_exp = exptime_s / SOLARDAY
     cosd = np.cos(np.radians(dec))
-    tvx = (d.ra1.to_numpy() - d.ra0.to_numpy()) * cosd / dt_exp
+    # _dra (vectorised, wrap-safe): a trail whose ENDPOINTS straddle RA=0 read as a ~360 deg step
+    # under plain subtraction, giving that detection a nonsense trail PA in the vectorised prefilter
+    # while the exact chi2 path (which has always wrapped) disagreed -- the prefilter then pruned
+    # pairs the full chi2 would accept. Same wrap class the module documents at _dra; this was the
+    # last unwrapped subtraction of trail endpoints in the file.
+    tvx = _dra(d.ra1.to_numpy(), d.ra0.to_numpy()) * cosd / dt_exp
     tvy = (d.dec1.to_numpy() - d.dec0.to_numpy()) / dt_exp
     tpa = np.degrees(np.arctan2(tvy, tvx)) % 180.0
     tsp = np.hypot(tvx, tvy)
@@ -1489,7 +1503,11 @@ def main():
     # with the rings still in -- a ring is a valid static/train counterpart, so the vetoes keep their power.
     if a.dipole_veto:
         if "is_dipole" in d.columns:
-            _nd0 = len(d); d = d[~d.is_dipole.fillna(False).astype(bool)]
+            # is_dipole arrives as OBJECT dtype from the merged CSV (True/False/NaN mix), and
+            # object-fillna is deprecated (41 FutureWarnings per campaign log). `== True` is the
+            # explicit, warning-free form of the same semantics: NaN and False both mean "not a
+            # detector-flagged ring", only literal True removes the row.
+            _nd0 = len(d); d = d[~(d.is_dipole == True)]  # noqa: E712 -- object-dtype tri-state
             print(f"[trail-link] dipole veto (pre-seed): {_nd0 - len(d)}/{_nd0} ring dets removed from "
                   f"the linkable set (kept as stationarity/train counterparts)", flush=True)
         else:
