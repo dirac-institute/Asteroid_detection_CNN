@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 
 from ADCNN.qa import alert_sheets
+from ADCNN.qa.cache_identity import FINGERPRINT_VERSION as FPV
 
 
 def _write(tmp_path, n, permute_from=None):
@@ -83,13 +84,10 @@ def test_run_night_ranks_before_it_cuts():
 
 
 def _fingerprint(alerts):
-    import hashlib
-    h = hashlib.sha256()
-    for a in alerts:
-        for e in (a.get("epochs") or []):
-            h.update(f"{e.get('visit',-1)}:{e.get('detector',-1)};".encode())
-        h.update(b"|")
-    return h.hexdigest()
+    """The SHARED identity, not a private copy. This test used to hand-roll the hash, so it kept
+    passing while the four production implementations drifted apart."""
+    from ADCNN.qa.cache_identity import epoch_digest
+    return epoch_digest(alerts)
 
 
 def _write_fp(tmp_path, n):
@@ -101,7 +99,7 @@ def _write_fp(tmp_path, n):
              stamps=np.zeros((n, 4, 4), np.float16), wide=np.zeros((n, 4, 4), np.float16),
              wide_alert=np.arange(n))
     (tmp_path / "c_meta.json").write_text(json.dumps(
-        {"n_alerts": n, "alerts_fingerprint": _fingerprint(alerts)}))
+        {"n_alerts": n, "fingerprint_version": FPV, "alerts_fingerprint": _fingerprint(alerts)}))
     return alerts, str(tmp_path / "c.npz")
 
 

@@ -454,13 +454,18 @@ def build(alerts_path, dets_path, out_npz, stamp_px=96, wide_px=220, workers=8, 
     # wrong alert: the cache is keyed by alert position and rerank_alerts rewrote alerts.jsonl in
     # place after the cut. Any consumer -- renderers, night_status -- can now decide in O(1) whether
     # the file in front of it is the one the pixels were cut from, without loading the npz.
-    _fp = hashlib.sha256()
-    for _a in alerts:
-        for _e in (_a.get("epochs") or []):
-            _fp.update(f"{_e.get('visit',-1)}:{_e.get('detector',-1)};".encode())
-        _fp.update(b"|")
+    # POSITION, not just (visit, detector). A detector-only signature makes two alerts on the SAME
+    # panel pair interchangeable -- MEASURED, 8.8-25.2% of DELIVERED alerts share an epoch signature
+    # with at least one other -- so a swap between them permutes the cache without changing the
+    # hash, which is precisely the failure this fingerprint exists to catch. Rounded to 1e-4 deg
+    # (~0.36") to keep float formatting out of the identity. night_status recomputes this EXACTLY;
+    # the two must be changed together or every cache reads as a mismatch.
+    # ONE implementation, in ADCNN.qa.cache_identity: this writer, select_clean's rewrite and both
+    # verifiers had four hand-copied loops that must agree exactly; they have diverged once already.
+    from ADCNN.qa.cache_identity import epoch_digest, FINGERPRINT_VERSION
     with open(os.path.splitext(out_npz)[0] + "_meta.json", "w") as f:
-        json.dump(dict(alerts_fingerprint=_fp.hexdigest(),
+        json.dump(dict(alerts_fingerprint=epoch_digest(alerts),
+                       fingerprint_version=FINGERPRINT_VERSION,
                        n_alerts=len(alerts), n_zoom=len(zres), n_wide=len(wres), stamp_px=K,
                        wide_px=KW, clip_sigma=CLIP_SIGMA, alerts=os.path.abspath(alerts_path),
                        dets=os.path.abspath(dets_path), n_panels=len(zoom_jobs),

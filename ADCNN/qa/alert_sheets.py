@@ -83,33 +83,18 @@ def _assert_cache_matches(alerts_path, cutouts_npz, n_alerts):
             f"alert position, so rendering would caption every image with the wrong alert. Rebuild:\n"
             f"  python -m ADCNN.qa.alert_cutouts --alerts {alerts_path} --dets <masked dets> "
             f"--out {cutouts_npz}")
-    # FINGERPRINT FIRST. Caches written since a1e751b carry a sha256 of the full (visit,detector)
-    # sequence, so a permutation ANYWHERE is caught in O(1) with no npz load. Older caches have no
-    # fingerprint and fall through to the row-by-row comparison below.
-    _fp = m.get("alerts_fingerprint")
-    if _fp:
-        import hashlib
-        # Hash the FIRST m_n lines, not the whole file: alert_cutouts records the fingerprint over
-        # `alerts[:limit]`, and run_night always passes --limit. Verifying over every line refused
-        # exactly the shape the count branch three lines above explicitly blesses
-        # (n_alerts <= m_n <= n_file) -- the two guards inside this one function contradicted each
-        # other, and every night whose stream exceeds stream_top_n was unrenderable.
-        h = hashlib.sha256()
-        _cap = m.get("n_alerts")
-        with open(alerts_path) as _f:
-            for _i, _line in enumerate(_f):
-                if isinstance(_cap, int) and _i >= _cap:
-                    break
-                _a = json.loads(_line)
-                for _e in (_a.get("epochs") or []):
-                    h.update(f"{_e.get('visit',-1)}:{_e.get('detector',-1)};".encode())
-                h.update(b"|")
-        if h.hexdigest() != _fp:
-            raise SystemExit(
-                f"cutout cache does NOT MATCH {alerts_path}: the alert sequence fingerprint differs "
-                f"from the one recorded when the pixels were cut, so alerts.jsonl has been "
-                f"re-ordered, filtered or re-linked since. The cache is indexed by alert position -- "
-                f"rendering would caption every image with the wrong alert. Rebuild the cache.")
+    # FINGERPRINT FIRST. Identity via ADCNN.qa.cache_identity -- one implementation shared with alert_cutouts (writer),
+    # select_clean (rewriter) and night_status (verifier). `checked=False` means UNCHECKABLE (no
+    # fingerprint, or one from an older FINGERPRINT_VERSION), which falls through to the row-by-row
+    # comparison below rather than refusing a good cache.
+    from ADCNN.qa.cache_identity import verify as _cache_verify
+    _chk, _ok = _cache_verify(alerts_path, m)
+    if _chk and not _ok:
+        raise SystemExit(
+            f"cutout cache does NOT MATCH {alerts_path}: the alert sequence fingerprint differs "
+            f"from the one recorded when the pixels were cut, so alerts.jsonl has been "
+            f"re-ordered, filtered or re-linked since. The cache is indexed by alert position -- "
+            f"rendering would caption every image with the wrong alert. Rebuild the cache.")
         return
     # IDENTITY. A count check cannot see a PERMUTATION, and run_night rewrites alerts.jsonl in place
     # (rerank_alerts) between the cut and the render -- counterfactually only 9 of 20,000 index

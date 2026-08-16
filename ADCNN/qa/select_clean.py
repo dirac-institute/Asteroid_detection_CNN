@@ -109,13 +109,9 @@ def select(alerts_path, morph_npz, cutouts_npz, n, out_alerts, out_cutouts, mode
                      alerts=os.path.abspath(out_alerts)))
     # The carried-over sidecar names the SOURCE sequence; this cache is the reindexed subset, so its
     # fingerprint must be recomputed or every renderer would refuse the product we just built.
-    import hashlib
-    _h = hashlib.sha256()
-    for _old in kept:
-        for _e in (json.loads(lines[_old]).get("epochs") or []):
-            _h.update(f"{_e.get('visit',-1)}:{_e.get('detector',-1)};".encode())
-        _h.update(b"|")
-    base["alerts_fingerprint"] = _h.hexdigest()
+    from ADCNN.qa.cache_identity import epoch_digest, FINGERPRINT_VERSION
+    base["alerts_fingerprint"] = epoch_digest([json.loads(lines[_o]) for _o in kept])
+    base["fingerprint_version"] = FINGERPRINT_VERSION
     json.dump(base, open(os.path.splitext(out_cutouts)[0] + "_meta.json", "w"), indent=2)
     drops = "  ".join(f"{k}:{v}" for k, v in sorted(dropped.items()))
     print(f"[select] mode={mode}: kept {len(kept)} of top {K} (scanned {scanned}; dropped {drops or 'none'}) "
