@@ -14,7 +14,8 @@ consistent, at which point a `.complete` sentinel is written so the common case 
 Stages, in order, with the consistency check each must pass:
   detect   adcnn_dets_masked.csv covers >= (1 - miss_tol) of the manifest panels
   link     stream/alerts.jsonl exists and is non-empty
-  images   one stream/pairs/*.png per alertId, no duplicate ids, no orphan files
+  images   one stream/pairs/*.png per alertId up to the RECORDED render cap (pairs_top_n.json;
+           0 = stream renders deliberately off, the default since 2026-08-16), no dup, no orphan
   summary  stream/stream_summary.json parses and its n_alerts matches alerts.jsonl
   deliver  stream_1k/ (the ~1k clean product), WHEN PRESENT: alerts.jsonl parses, one pairs image
            per alert, summary count matches. An absent stream_1k is NOT a failure --
@@ -104,7 +105,10 @@ def status(run_dir):
         # artifacts are required, or the deliver stage below is bypassable by a valid sentinel.
         _required = [R / "adcnn_dets_masked.csv", R / "stream" / "alerts.jsonl",
                      R / "stream" / "stream_summary.json"]
-        _required_dirs = [R / "stream" / "pairs"]
+        # stream/pairs is required only when a render was ASKED FOR (recorded cap > 0). Since
+        # 2026-08-16 the default stream renders nothing -- the delivered stream_1k/pairs is the
+        # image product, and ITS pairs dir stays unconditionally required below.
+        _required_dirs = [R / "stream" / "pairs"] if _image_cap(R / "stream") > 0 else []
         if (R / "stream_1k").is_dir():
             _required += [R / "stream_1k" / "alerts.jsonl", R / "stream_1k" / "stream_summary.json"]
             _required_dirs += [R / "stream_1k" / "pairs"]

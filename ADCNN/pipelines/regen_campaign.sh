@@ -74,8 +74,10 @@ for N in "${NIGHTS[@]}"; do
     # The stream op is NOT chosen here. run_night defaults to the tractable full-cadence op for
     # every night (see its rationale); duplicating the choice in a launcher is exactly how the wrong
     # one got passed when the previous launcher was deleted.
+    # No --keep-cutouts: since 2026-08-16 run_night renders no stream-level images by default, so
+    # there is no stream cutout pass to keep -- the 1k chain below builds (and prunes) its own.
     python -m ADCNN.pipelines.run_night --night "$N" --collection "$COLL" \
-        --visits auto --out "$D" --keep-cutouts --stream-workers 32
+        --visits auto --out "$D" --stream-workers 32
     RC=$?
     echo "### run_night rc=$RC"
     # ---- the ~1k clean deliverable, rebuilt from the corrected stream ----

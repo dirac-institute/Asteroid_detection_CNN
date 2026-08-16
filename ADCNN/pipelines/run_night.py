@@ -619,24 +619,30 @@ def run(a):
         # alert_sheets then has nothing left to catch.
         if not a.no_rerank:
             _bash(f"python -m ADCNN.qa.rerank_alerts --alerts {sd}/alerts.jsonl", a.dry_run)
-        if a.force or not (sd / "cutouts.npz").exists():
-            _bash(f"python -m ADCNN.qa.alert_cutouts --alerts {sd}/alerts.jsonl "
-                  f"--dets {_dets()} --out {sd}/cutouts.npz "
-                  f"--stamp-px {a.stream_stamp_px} --workers {a.stream_workers} "
-                  f"--limit {a.stream_top_n}", a.dry_run)
+        # STREAM-LEVEL RENDERS ARE OFF BY DEFAULT (user decision 2026-08-16, same mandate as the
+        # sheets). The reviewed images are the DELIVERED product's stream_1k/pairs, rendered by the
+        # 1k chain from its own cutout cache; rendering the full ~10k stream as well duplicated
+        # them at ~2.4 GB/night and pulled a GPU-free but S3-heavy cutout pass nothing consumed.
+        # --stream-pairs-top-n N (>0) turns the stream render back on, cutout pass included.
+        # CONTACT SHEETS ARE NOT PRODUCED either; ADCNN.qa.alert_sheets remains for manual use.
+        if a.stream_pairs_top_n > 0:
+            if a.force or not (sd / "cutouts.npz").exists():
+                _bash(f"python -m ADCNN.qa.alert_cutouts --alerts {sd}/alerts.jsonl "
+                      f"--dets {_dets()} --out {sd}/cutouts.npz "
+                      f"--stamp-px {a.stream_stamp_px} --workers {a.stream_workers} "
+                      f"--limit {a.stream_top_n}", a.dry_run)
+            else:
+                print(f"      (stream cutouts.npz exists -- reusing; --force to re-cut)")
+            _bash(f"python -m ADCNN.qa.alert_pairs --alerts {sd}/alerts.jsonl "
+                  f"--cutouts {sd}/cutouts.npz --out-dir {sd}/pairs "
+                  f"--top-n {a.stream_pairs_top_n}", a.dry_run)
         else:
-            print(f"      (stream cutouts.npz exists -- reusing; --force to re-cut)")
-        # CONTACT SHEETS ARE NOT PRODUCED (user decision 2026-08-16). The per-alert pair images
-        # below are the reviewed artifact; the sheets were a grid view of the same pixels costing
-        # 2.4 GB across nine nights. ADCNN.qa.alert_sheets still exists and can be run by hand
-        # against a rebuilt cutout cache if a bulk view is ever wanted.
-        _bash(f"python -m ADCNN.qa.alert_pairs --alerts {sd}/alerts.jsonl "
-              f"--cutouts {sd}/cutouts.npz --out-dir {sd}/pairs "
-              f"--top-n {a.stream_pairs_top_n}", a.dry_run)
-        # Record the ACTUAL render cap so night_status verifies against what was asked for, not a
-        # hardcoded copy of this flag's default -- a non-default --stream-pairs-top-n used to make
-        # the verifier demand images that were deliberately never rendered (or, worse, certify a
-        # partial render on a raised cap).
+            print("      (stream pair render OFF: stream_1k/pairs is the reviewed image product; "
+                  "--stream-pairs-top-n N to render the stream too)")
+        # Record the ACTUAL render cap (0 included) so night_status verifies against what was asked
+        # for, not a hardcoded copy of this flag's default -- a non-default --stream-pairs-top-n
+        # used to make the verifier demand images that were deliberately never rendered (or, worse,
+        # certify a partial render on a raised cap).
         if not a.dry_run:
             (sd / "pairs_top_n.json").write_text(json.dumps({"top_n": a.stream_pairs_top_n}))
         _bash(f"python -m ADCNN.qa.stream_summary --alerts {sd}/alerts.jsonl "
@@ -769,12 +775,11 @@ def main(argv=None):
     ap.add_argument("--stream-top-n", type=int, default=20000,
                     help="how many top-ranked stream alerts get cutouts + pair images (linking keeps ALL; "
                          "this only bounds the image render)")
-    ap.add_argument("--stream-per-sheet", type=int, default=48)
-    ap.add_argument("--stream-pairs-top-n", type=int, default=20000,
-                    help="alerts that get their OWN pair+wide-view image file (rank order). The "
-                         "default matches the nightly alert budget, i.e. one image per alert -- "
-                         "~2 GB/night at ~200 kB each. Lower it only to save disk: the contact "
-                         "sheets image every alert regardless, so nothing becomes unviewable")
+    ap.add_argument("--stream-pairs-top-n", type=int, default=0,
+                    help="top-ranked STREAM alerts to render as per-alert pair images (0 = none, "
+                         "the default: the delivered stream_1k/pairs is the reviewed image "
+                         "product, and rendering the ~10k stream duplicated it at ~2.4 GB/night). "
+                         ">0 also enables the stream cutout pass the render needs")
     ap.add_argument("--detect-miss-tol", type=float, default=0.05,
                     help="fraction of manifest panels allowed to be absent after detection before "
                          "failing. Some absence is normal when coverage is inferred from the dets "

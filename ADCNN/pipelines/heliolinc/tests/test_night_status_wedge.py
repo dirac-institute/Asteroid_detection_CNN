@@ -116,6 +116,30 @@ def test_stale_sentinel_cannot_bypass_the_deliver_stage(tmp_path):
     assert s["complete"] is False and s["first_missing"] == "deliver"
 
 
+def test_recorded_zero_cap_needs_no_stream_images(tmp_path):
+    """The 2026-08-16 default: run_night renders NO stream-level pairs (stream_1k/pairs is the
+    image product) and records {"top_n": 0}. A night in that state must verify -- both the full
+    status() walk and the sentinel fast path -- with no stream/pairs directory at all."""
+    import json, shutil
+    d = _complete_night(tmp_path, with_1k="ok")
+    shutil.rmtree(d / "stream" / "pairs")
+    (d / "stream" / "pairs_top_n.json").write_text(json.dumps({"top_n": 0}))
+    s = status(str(d))
+    assert s["complete"] is True, s["detail"]
+    (d / ".complete").write_text("")                  # sentinel path must agree
+    assert status(str(d))["complete"] is True
+
+
+def test_no_record_still_requires_stream_images(tmp_path):
+    """Pre-record nights (no pairs_top_n.json) keep the legacy contract: stream/pairs required.
+    Deleting the record must NOT quietly excuse missing images."""
+    import shutil
+    d = _complete_night(tmp_path)
+    shutil.rmtree(d / "stream" / "pairs")
+    s = status(str(d))
+    assert s["complete"] is False and s["first_missing"] == "images", s["detail"]
+
+
 # ---------------------------------------------------------------- audit pass 2 regressions
 
 def _fingerprint(alerts_path, cap=None):
