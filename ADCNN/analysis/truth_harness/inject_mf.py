@@ -120,7 +120,10 @@ def mf_refine(cat, img):
 
 def main():
     V = "outputs/runs/pa_validate"
-    RUN = os.environ.get("INJ_RUN", "outputs/runs/ringpipe_0706")
+    RUN = os.environ.get("INJ_RUN")
+    if not RUN:
+        raise SystemExit("set INJ_RUN=<run_night dir with manifest.csv + adcnn_dets_masked.csv>; "
+                         "the old ringpipe_0706 default was deleted with the stale run dirs")
     TAG = os.environ.get("INJ_TAG", "v2")
     print(f"[inj] run={RUN} tag={TAG}", flush=True)
     n_pairs = int(sys.argv[1]) if len(sys.argv) > 1 else 10

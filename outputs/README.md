@@ -1,56 +1,31 @@
-# outputs/ — the ONE runtime output location
+# outputs/
 
-Everything the pipeline writes at runtime lands here (gitignored except this file
-and `logs/.gitkeep`). Layout since 2026-07-14; override the root with `ADCNN_OUTPUTS`.
-Code must never write into the package tree — `ADCNN/config.py` exposes
-`OUTPUTS` / `outputs_dir()` for scripts.
+Only the CURRENT delivered products and the truth sets that validate them live here. Everything
+else is regenerable; the stale experiment tree (attic/, run_ring_ft, ringpipe_0706, ep6_gate,
+merge_0706, 1k_cadence, threshold_sweep, timed_0705, pa_precision) was deleted 2026-08-16.
 
-```
-outputs/
-├── runs/             night + campaign run directories (index below)
-│   └── _archive/     closed campaigns, kept for provenance (index below)
-├── logs/             slurm logs (#SBATCH -o outputs/logs/…; SUBMIT FROM THE REPO ROOT)
-├── training_runs/    model-training provenance (diffim_runs/v2_D ckpts; release weights live in git at models/v2_D/)
-├── query_snapshots/  Butler query snapshots (cadence*.csv, field_*.csv) — regenerable
-└── attic/            preserved-but-parked (nn_experimentation/ scaffold)
-```
+    runs/10k_cadence/run_night_<night>/        THE PRODUCT, nine embargo nights
+        stream_1k/alerts.jsonl                 delivered ~1k alerts (record of truth, rank-ordered)
+        stream_1k/alerts.csv                   the same, flat, one row per alert (ADCNN.qa.alerts_csv)
+        stream_1k/pairs/alert_NNNNN_*.png      one pair image per delivered alert, rank in the name
+        stream_1k/sheets/index.html            contact sheets for visual scanning
+        stream/alerts.jsonl                    the full low-threshold stream behind the 1k cut
+        alerts.jsonl + report/                 frozen science-alert product + QA overlays
+        adcnn_dets*.csv, dets_merged.csv       detection + merged catalogues (GPU/Butler cost to rebuild)
+        manifest.csv, known.csv, *.parquet     inputs of record
 
-The tracked *machinery* of mixed runs (slurm scripts, the 82 gzipped validation
-caches, frozen reductions) stays in the package tree at
-`ADCNN/pipelines/heliolinc/run_{lambda,blind,blind_v2eval_cal,dev,ft,freshnight,truth}/`;
-only the bulky regenerable data lives here.
+    runs/pa_validate/                          the truth sets the op point and gates rest on
+        truth_v2/v3 + inj_dets_*                2-epoch injections (merge + op-point basis)
+        truth_n20260713 + inj_dets_*            HELD-OUT night (never tunes anything)
+        truth_tri_n2026070[6|13] + inj_dets_*   3-epoch injections (the 3+visit gate campaign)
 
-## runs/ index (live)
+    logs/            per-night campaign logs (the audit trail)
+    deliverables/    exported reports
+    query_snapshots/ Butler query provenance
+    training_runs/   model training history (deployed models live in models/)
 
-New nights land as `runs/run_night_<night>/` (the `./adcnn night` default).
+REGENERABLE, so deleted and not kept: cutout caches (stream*/cutouts.npz, ~25 min/night),
+filter intermediates (surv/topk.jsonl), detection shards (_shard_*, redundant once
+adcnn_dets.csv exists), pixel_vet backups (alerts_prevet.jsonl).
 
-| dir | what it is | why it stays |
-|---|---|---|
-| `run_embargo_0625` … `run_embargo_0701` | the six delivered 2026-06 embargo science nights (+0701 stub) | delivered science; alert provenance |
-| `run_embargo_night`, `run_embargo_2v` | embargo end-to-end + 2v-linking working dirs | same campaign |
-| `run_night8731` | canonical DRP tract-night run | `link_2visit` CLI defaults point here |
-| `run_freshnight` | fresh full-night end-to-end benchmark (commit 59c8daa) | documented headline; tracked slurm writes here |
-| `run_lambda` | 82-field validation sweep bulk (caches promoted → package tree) | cache regeneration source |
-| `run_blind`, `run_blind_v2eval`, `run_blind_v2eval_cal` | blind-test protocol runs (v1 + v2_D eval/calibration) | blind set = eval-only forever |
-| `run_blind_v1_purged` | quarantined v1 blind field set | referenced by BLIND_TEST_REPORT.md |
-| `run_ft`, `run_ft_cnn` | v2_D stage-1/stage-2 fine-tune working dirs | training provenance |
-| `run_dev` | development/scratch run referenced across QA scripts | live defaults |
-| `run_band` | 14-tract × 10-night band campaign | `validate_candidate` default; FPP calib basis |
-| `run_2v_0706` | night-60862 2v run | FPP calibration basis (`link_fpp.json`) |
-| `run_test2` | multi-night test incl. `sorcha/baseline_v2.0_1yr.db` | `retime_cadence`/`recovery_metrics` defaults |
-| `run_realfp` | real-FP manifest runs | `build_realfp_manifests`/`count_realfp` defaults |
-| `alert_sweep` | 2v alert-op sweep grids | `summarize_alert_sweep` default |
-
-## runs/_archive/ index (closed campaigns — conclusions recorded, dirs unreferenced by code)
-
-| dir(s) | campaign | outcome |
-|---|---|---|
-| `run_camp1`…`run_camp5`, `run_p0`…`run_p3`, `run_pair`, `run_box` | 2026-05/06 same-night pilot + sweep campaigns | fed the λ-campaign op-point work |
-| `run_night` | first one-night pipeline run (2026-05-31) | superseded by `run_night8731` + `run_night_<night>` convention |
-| `run_lambda_pilot` | λ-campaign pilot | superseded by `run_lambda` |
-| `run_neo5658_0717`, `run_neo6328_0713`, `run_neoband_0717` | 2026-06-08 known-NEO recovery runs | recoveries documented (2014 HR161 etc.) |
-| `run_2v_clean`, `run_2v_test` | 2v confidence-veto development | veto shipped 2026-07-02 (schema 1.4/1.5) |
-| `run_h2h`, `run_h2h_sn`, `run_h2h_sn2` | ADCNN-vs-stack head-to-head | headline recorded; `h2h_metrics.py` takes explicit paths |
-| `run_real_main`, `run_valid_main`, `run_sweep_neo` | 2026-06-28/29 COSMOS + ecliptic discovery runs | 0 NEOs, chance-wall re-confirmed |
-
-Nothing in `_archive/` is deleted — move a dir back up if a campaign reopens.
+Verify a night before trusting it:  python -m ADCNN.pipelines.night_status outputs/runs/10k_cadence/run_night_<night>

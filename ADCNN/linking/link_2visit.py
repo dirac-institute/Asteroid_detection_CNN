@@ -136,7 +136,7 @@ def dspeed_sigma(mfsnr):
     return np.clip(DSPEED_SIG_A * m ** DSPEED_SIG_B, DSPEED_SIG_LO, DSPEED_SIG_HI)
 
 # TRAIL-PA MEASUREMENT PRECISION vs TRAIL LENGTH -- measured against INJECTED truth (2,181 recovered
-# injections over 30 real 20260706 panels, lengths 6-30 px; outputs/runs/pa_precision/measure_pa.py):
+# injections over 30 real 20260706 panels, lengths 6-30 px; ADCNN/analysis/pa_precision/measure_pa.py):
 #     L px :    6     8    10    13    17    22    30
 #     sigma: 17.06  8.99  8.17  5.82  3.42  2.93  2.28   (deg, robust 1.4826*MAD of measured-true PA)
 # The single fixed dpa_tm sigma above (4.869 deg) corresponds to L ~= 15 px and is therefore wrong in
