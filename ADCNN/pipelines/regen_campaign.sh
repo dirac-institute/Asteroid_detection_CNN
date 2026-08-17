@@ -40,13 +40,14 @@ collection_for() {   # the prompt-processing collection differs by night; wrong 
   case "$1" in
     20260629|20260630|20260705|20260706) echo "LSSTCam/runs/prompt/$1/ApPipe/pipelines-b856041-config-8f017ea" ;;
     20260708)                            echo "LSSTCam/runs/prompt/$1/ApPipe/pipelines-87bbc9a-config-8f017ea" ;;
-    20260710|20260711|20260712|20260713) echo "LSSTCam/runs/prompt/$1/ApPipe/pipelines-69e0100-config-8f017ea" ;;
+    # 20260709 recovered 2026-08-17: 810 visits / 8,304 diffims, missed by the original inventory
+    20260709|20260710|20260711|20260712|20260713) echo "LSSTCam/runs/prompt/$1/ApPipe/pipelines-69e0100-config-8f017ea" ;;
     *) echo "" ;;
   esac
 }
 
 NIGHTS=("$@")
-[ ${#NIGHTS[@]} -eq 0 ] && NIGHTS=(20260629 20260630 20260705 20260706 20260708 20260710 20260711 20260712 20260713)
+[ ${#NIGHTS[@]} -eq 0 ] && NIGHTS=(20260629 20260630 20260705 20260706 20260708 20260709 20260710 20260711 20260712 20260713)
 
 for N in "${NIGHTS[@]}"; do
   D="$OUT_ROOT/run_night_$N"
