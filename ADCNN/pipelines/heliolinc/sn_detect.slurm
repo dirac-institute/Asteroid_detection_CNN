@@ -11,10 +11,13 @@
 # 21.7 GPU-hours. Every ada node HAS TEN L40S, so asking for four left 60% of the node idle:
 #     4 GPUs -> 5.4 h/night      10 GPUs -> 2.2 h/night
 # The old header comment claiming "~11 h on 4 GPUs" predates the inference optimisation.
-#SBATCH --gres=gpu:l40s:10
-#SBATCH -c 72
-#SBATCH --mem=600G
-#SBATCH -t 6:00:00   # real cost is ~2.2 h on 10 GPUs; a 24 h ask blocked backfill for nothing
+#SBATCH --gres=gpu:l40s:5
+#SBATCH -c 36
+#SBATCH --mem=350G
+#SBATCH -t 6:00:00   # ~2.2 h/night on 10 GPUs; the kipac:kipac@ada quota was CUT to
+                      # cpu=36/gpu=5/mem=351G (measured 2026-08-18: a 72c/10-GPU/600G ask
+                      # pends FOREVER on AssocGrpCpuLimit with zero group usage), so this
+                      # now asks half the node: ~4.4 h for a full night, still inside 6 h
                       # 8 h wall killed 20260629 at ~70%% (per-shard .done makes a resubmit
                       # resume, but the wall should not be the thing that ends the job)
 #SBATCH -J sn_detect
@@ -38,6 +41,6 @@ source "$HERE/pipeline_config.sh"
 : "${RUN:?set RUN=<dir with manifest.csv>}"
 adcnn_activate || exit 1
 cd "$ADCNN_REPO"
-python ADCNN/inference/detect_night.py --n-gpus "${DETECT_N_GPUS:-10}" \
+python ADCNN/inference/detect_night.py --n-gpus "${DETECT_N_GPUS:-5}" \
   --manifest "$RUN/manifest.csv" --out "$RUN/adcnn_dets.csv"
 echo "SN_DETECT DONE"
