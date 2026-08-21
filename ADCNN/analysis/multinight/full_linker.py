@@ -40,11 +40,15 @@ OUT = REPO / "outputs/runs/multinight/full"
 PROBE_BUDGET_S = 2400            # 40 min on the densest night; full run ~ sum over nights
 DENSEST = "20260708"
 MJD_MID = "61228.28"
+CULL_CAP = 250_000        # per heliolinc pass, ranked by cluster metric
 
 ARMS = {
-    #        minvel maxvel  floors to try (descending; stack always in)
-    "slow": (0.05,  1.2,   [0.50]),
-    "fast": (0.80, 10.0,   [0.80, 0.70, 0.60, 0.50]),
+    # USER DECISION 2026-08-19: the ADCNN floor is the NIGHTLY OPERATING POINT, 0.70, in both
+    # arms -- no per-campaign floor ladder. Stack rows remain exempt (their own reliability
+    # gate >= 0.5 applied at ingest), matching the single-night per-source convention.
+    #        minvel maxvel  floor
+    "slow": (0.05,  1.2,   [0.70]),
+    "fast": (0.80,  8.0,   [0.70]),   # 8.0 = the op's own rate_hi ceiling
 }
 GRIDS = {"neo": AUX / "hypotheses/NEO/hihyp00ab_neo.txt",
          "mb":  AUX / "hypotheses/main_belt/hihyp02a_mb.txt"}
@@ -78,6 +82,10 @@ def filter_arm(arm, floor, night=None):
 
 def make_trk(dets, tag, minvel, maxvel, timeout=None):
     t0 = time.time()
+    if (W / f"trk_{tag}.csv").exists() and tag.startswith(("slow", "fast")):
+        ntrk = sum(1 for _ in open(W / f"trk_{tag}.csv")) - 1
+        print(f"[full] make_tracklets {tag}: reuse ({ntrk:,} tracklets)", flush=True)
+        return ntrk, 0.0
     cmd = [str(HLX / "make_tracklets"), "-dets", str(dets),
            "-colformat", str(W / "colformat.txt"),
            "-earth", str(AUX / "Earth1day2020s_02a.csv"), "-obscode", str(AUX / "ObsCodesNew.txt"),
@@ -139,9 +147,19 @@ def run():
         for gtag, grid in GRIDS.items():
             if arm == "fast" and gtag == "mb":
                 continue                      # >0.8 deg/day cannot be main-belt
-            for nights_min in (2, 3):
+            # ONE heliolinc pass per grid at minobsnights 2: a 3-night linkage IS a 2-night
+            # linkage, so the n3 pass re-found a subset at full cost -- link_purify's own
+            # minobsnights + the scorer's night count select tiers downstream. And the OMP
+            # binary: the serial one spent 2h15m on the slow arm's first pass alone.
+            for nights_min in (2,):
                 otag = f"{arm}_{gtag}_n{nights_min}"
-                args = [HLX / "heliolinc", "-imgs", W / f"img_{arm}.csv",
+                if (W / f"hl_{otag}_sum.csv").exists():
+                    nl = sum(1 for _ in open(W / f"hl_{otag}_sum.csv")) - 1
+                    print(f"[full] heliolinc {otag}: reuse ({nl:,} raw linkages)", flush=True)
+                    if nl > 0:
+                        lf.append(f"{W}/hl_{otag}_sum.csv {W}/hl_{otag}_c2d.csv")
+                    continue
+                args = [HLX / "heliolinc_omp", "-imgs", W / f"img_{arm}.csv",
                         "-pairdets", W / f"pd_{arm}.csv", "-tracklets", W / f"trk_{arm}.csv",
                         "-trk2det", W / f"t2d_{arm}.csv", "-mjd", MJD_MID,
                         "-obspos", AUX / "Earth1day2020s_02a.csv", "-heliodist", grid,
@@ -159,7 +177,47 @@ def run():
         if not lf:
             results[arm] = 0
             continue
-        (W / f"lflist_{arm}.txt").write_text("\n".join(lf) + "\n")
+        # PRE-CULL before link_purify. heliolinc at full-catalogue density emits MILLIONS of raw
+        # clusters (slow/NEO alone: 8.7M) and purify Herget-fits every one -- days of fitting and
+        # a RAM blowup. Cull to what could possibly matter: a quality floor (>=5 unique points,
+        # >=2 nights, finite posRMS) then the top CULL_CAP by heliolinc's own cluster metric.
+        # Anything dropped by the CAP is logged loudly, never silently vanished.
+        import pandas as _pd
+        culled = []
+        for pair in lf:
+            sumf, c2df = pair.split()
+            s = _pd.read_csv(sumf)
+            s.columns = [c.lstrip("#") for c in s.columns]
+            # heliolinc_omp WRITER BUG (measured by A/B against the serial binary's output): its
+            # summary rows omit `orbit_incl`, one column short of what read_clustersum_file
+            # demands -- verbatim OMP output fails purify's reader. Every orbit_* field is a zero
+            # placeholder at this stage (heliolinc does not fit orbits), so inserting the missing
+            # zero column at the serial position is an exact repair, not a guess.
+            if "orbit_incl" not in s.columns:
+                s.insert(list(s.columns).index("orbit_e") + 1, "orbit_incl", 0.0)
+            n0 = len(s)
+            s = s[(s.uniquepoints >= 5) & (s.obsnights >= 2) & (s.posRMS > 0)]
+            s = s.nlargest(min(len(s), CULL_CAP), "metric")
+            # link_purify's reader requires SEQUENTIAL clusternum (it indexes a vector by the
+            # value) and the '#'-prefixed header -- a metric-ordered, gappy numbering made it
+            # abort with "Last point was 0". Renumber 0..N-1 and remap clust2det.
+            s = s.reset_index(drop=True)
+            remap = {int(old): new for new, old in enumerate(s.clusternum.astype(int))}
+            s["clusternum"] = range(len(s))
+            c = _pd.read_csv(c2df)
+            c.columns = [cc.lstrip("#") for cc in c.columns]
+            c = c[c.clusternum.astype(int).isin(remap)]
+            c["clusternum"] = c.clusternum.astype(int).map(remap)
+            c = c.sort_values(["clusternum", "detnum"])
+            cs, cc2 = sumf.replace("_sum", "_cullsum"), c2df.replace("_c2d", "_cullc2d")
+            for df, path in ((s, cs), (c, cc2)):
+                cols = list(df.columns)
+                cols[0] = "#" + cols[0]
+                df.to_csv(path, index=False, header=cols)
+            print(f"[full] cull {Path(sumf).name}: {n0:,} -> {len(s):,} clusters "
+                  f"({'CAP HIT' if len(s) == CULL_CAP else 'quality floor only'})", flush=True)
+            culled.append(f"{cs} {cc2}")
+        (W / f"lflist_{arm}.txt").write_text("\n".join(culled) + "\n")
         sh([HLX / "link_purify", "-imgs", W / f"img_{arm}.csv", "-pairdet", W / f"pd_{arm}.csv",
             "-lflist", W / f"lflist_{arm}.txt", "-minobsnights", "2", "-minpointnum", "5",
             "-maxrms", "200000", "-max_astrom_rms", "1.0", "-rejfrac", "0.2", "-rejnum", "2",
