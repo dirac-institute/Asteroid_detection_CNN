@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+outputs/
+models/v2_D2/
