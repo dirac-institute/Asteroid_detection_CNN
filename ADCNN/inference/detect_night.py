@@ -11,7 +11,7 @@ trail (ADCNN.pipelines.usdf_night.mask_planes). Detections and a .done log are a
 a per-GPU shard, so a killed job resumes where it stopped.
 
 The merge writes adcnn_dets.csv [detid,mjd,ra,dec,mag,band,obscode,visit,detector,x,y,score,length,
-len_db,mf_snr,length_raw,ra0,dec0,ra1,dec1,beta,beta_nn,nn_pmax,m_elong,m_dipole,m_neg_ratio,
+len_db,mf_snr,length_raw,ra0,dec0,ra1,dec1,beta,nn_pmax,m_elong,m_dipole,m_neg_ratio,
 m_neg_blob,is_dipole,m_<PLANE>...,art_frac] only when every manifest panel is in a .done log; otherwise
 it keeps the shards and exits 3. A panel whose FITS cannot be read is not marked done; it is logged to
 <out>.unreadable (visit,detector,error) and retried by the next run. --allow-partial runs no detection
@@ -48,8 +48,8 @@ from ADCNN.pipelines.usdf_night.mask_planes import COLUMNS as MASK_COLUMNS, frac
 
 OBSCODE = "X05"  # Rubin Observatory (join writes the same code into hl_dets.csv)
 DET_COLUMNS = ["mjd", "ra", "dec", "mag", "band", "obscode", "visit", "detector", "x", "y", "score",
-               "length", "len_db", "mf_snr", "length_raw", "ra0", "dec0", "ra1", "dec1", "beta", "beta_nn",
-               "nn_pmax", "m_elong", "m_dipole", "m_neg_ratio", "m_neg_blob", "is_dipole"] + MASK_COLUMNS
+               "length", "len_db", "mf_snr", "length_raw", "ra0", "dec0", "ra1", "dec1", "beta", "nn_pmax",
+               "m_elong", "m_dipole", "m_neg_ratio", "m_neg_blob", "is_dipole"] + MASK_COLUMNS
 
 
 def _wcs_any(hdr):
@@ -186,7 +186,6 @@ def run_shard(gpu_id, rows, seg_ckpt, cnn_model, thr, prefetch, out_csv, unreada
                 length_raw=cand["length_raw"].to_numpy(),   # RAW footprint length
                 ra0=sky0[:, 0], dec0=sky0[:, 1], ra1=sky1[:, 0], dec1=sky1[:, 1],
                 beta=beta,
-                beta_nn=np.nan,                             # no producer: always empty
                 nn_pmax=cand["nn_pmax"].to_numpy(),
                 # DETECTION-TIME dipole/RING morphology (catalog._attach_dipole_morphology).
                 m_elong=cand["m_elong"].to_numpy(), m_dipole=cand["m_dipole"].to_numpy(),
