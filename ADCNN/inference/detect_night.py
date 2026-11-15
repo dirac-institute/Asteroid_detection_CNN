@@ -20,7 +20,6 @@ and merges the panels that are done (used after the last attempt).
 from __future__ import annotations
 import argparse
 import csv
-import json
 import multiprocessing as mp
 import os
 import sys
@@ -246,17 +245,6 @@ def n_devices(requested, cuda_ok, count, allow_cpu):
     return requested or count
 
 
-def resolve_threshold(cnn_thr, cnn_path, floor):
-    """(threshold, source): --cnn-thr if given, else the sidecar's calibrated 'threshold', else the
-    pipeline floor."""
-    if cnn_thr is not None:
-        return float(cnn_thr), "--cnn-thr"
-    side = json.loads(Path(cnn_path).with_suffix(".json").read_text())
-    if "threshold" in side:
-        return float(side["threshold"]), "sidecar"
-    return float(floor), "pipeline floor"
-
-
 def _done_panels(tmp, tag):
     """(visit, detector) pairs listed in any shard .done log of output `tag` in directory `tmp`."""
     done = set()
@@ -326,29 +314,28 @@ def main(argv=None):
     from ADCNN.config import ACTIVE as _PIPE  # active pipeline (ADCNN_PIPELINE selects; default=v2_D2)
     ap.add_argument("--manifest", required=True)
     ap.add_argument("--cnn-thr", type=float, default=None,
-                    help="CNN retention floor. detect.sbatch always passes the night's FLOOR (status.py "
-                         "DEFAULT_FLOOR); without it, the cnn_postproc.json 'threshold' (v2_D2 has none), "
-                         "else the pipeline.json cnn_thr_floor")
+                    help="CNN retention floor, required unless --allow-partial (detect.sbatch passes the "
+                         "night's FLOOR)")
     ap.add_argument("--prefetch", type=int, default=6, help="FITS reads in flight per GPU (bounds memory)")
     ap.add_argument("--n-gpus", type=int, default=0, help="0 = all visible")
     ap.add_argument("--out", required=True)
     ap.add_argument("--allow-partial", action="store_true",
                     help="no detection: merge the panels already done even if coverage is incomplete")
     a = ap.parse_args(argv)
+    if a.cnn_thr is None and not a.allow_partial:
+        ap.error("--cnn-thr is required unless --allow-partial")
     man = pd.read_csv(a.manifest)
     if not a.allow_partial:
-        # Fail fast: validate the pipeline config, model files + the op-point sidecar exist BEFORE allocating
-        # GPUs (else the worker crashes seconds in with an opaque torch error).
+        # Fail fast: validate the pipeline config and model files exist BEFORE allocating GPUs (else the
+        # worker crashes seconds in with an opaque torch error).
         if _PIPE is None:
             raise SystemExit("[discover] ERROR: no ADCNN pipeline config (set $ADCNN_PIPELINE)")
         seg_model, cnn = str(_PIPE.seg_model), str(_PIPE.cnn_model)
         for _m, _label in ((seg_model, "segmentation model"), (cnn, "focal-cutout CNN")):
             if not os.path.exists(_m):
                 raise SystemExit(f"[discover] ERROR: {_label} not found: {_m} (check $ADCNN_PIPELINE)")
-        if a.cnn_thr is None and not os.path.exists(str(Path(cnn).with_suffix(".json"))):
-            raise SystemExit(f"[discover] ERROR: op-point sidecar {Path(cnn).with_suffix('.json')} missing; pass --cnn-thr explicitly")
-        thr, src = resolve_threshold(a.cnn_thr, cnn, _PIPE.cnn_thr_floor)
-        print(f"[discover] stage-2 filter = focal-cutout CNN ({Path(cnn).name}) @ thr {thr} (from {src})", flush=True)
+        thr = a.cnn_thr
+        print(f"[discover] stage-2 filter = focal-cutout CNN ({Path(cnn).name}) @ thr {thr}", flush=True)
         import torch
         n_gpus = n_devices(a.n_gpus, torch.cuda.is_available(), torch.cuda.device_count(),
                            os.environ.get("ADCNN_ALLOW_CPU") == "1")

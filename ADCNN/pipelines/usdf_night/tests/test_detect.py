@@ -186,24 +186,25 @@ def test_n_devices():
     assert dn.n_devices(0, False, 0, True) == 1
 
 
-def test_resolve_threshold_sources(tmp_path):
-    cnn = tmp_path / "cnn_postproc.pt"
-    cnn.with_suffix(".json").write_text('{"width": 40}')
-    assert dn.resolve_threshold(0.43, str(cnn), 0.5) == (0.43, "--cnn-thr")
-    assert dn.resolve_threshold(None, str(cnn), 0.5) == (0.5, "pipeline floor")
-    cnn.with_suffix(".json").write_text('{"threshold": 0.61}')
-    assert dn.resolve_threshold(None, str(cnn), 0.5) == (0.61, "sidecar")
-
-
 def test_run_children_exit_codes():
     assert dn.run_children(sys.exit, [(0,), (3,)]) == [0, 3]
 
 
-def test_main_requires_manifest_and_out():
-    for argv in ([], ["--manifest", "m.csv"], ["--out", "o.csv"]):
+def test_main_requires_manifest_out_and_threshold():
+    for argv in ([], ["--manifest", "m.csv"], ["--out", "o.csv"], ["--manifest", "m.csv", "--out", "o.csv"]):
         with pytest.raises(SystemExit) as e:
             dn.main(argv)
         assert e.value.code == 2, argv
+
+
+def test_main_allow_partial_needs_no_threshold(tmp_path, monkeypatch):
+    man = tmp_path / "manifest.csv"
+    man.write_text(f"visit,detector\n{V1},1\n")
+    seen = []
+    monkeypatch.setattr(dn, "merge", lambda m, out, partial: seen.append((len(m), out, partial)) or 0)
+    with pytest.raises(SystemExit) as e:
+        dn.main(["--manifest", str(man), "--out", str(tmp_path / "o.csv"), "--allow-partial"])
+    assert e.value.code == 0 and seen == [(1, str(tmp_path / "o.csv"), True)]
 
 
 # ---------------------------------------------------------------- run_shard (model and CNN workers stubbed)
